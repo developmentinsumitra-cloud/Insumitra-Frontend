@@ -3030,13 +3030,20 @@ export default function Claims({ contactId, contact, embedded = false }: ClaimsP
 
   const [editTarget, setEditTarget] = useState<Claim | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<Claim | null>(null);
+  const openedRouteClaimIdRef = useRef<string | null>(null);
 
   useEffect(() => {
     if (searchParams.get('action') === 'add') {
       setModalOpen(true);
     }
-    const cid = searchParams.get('claimId') || (location.state as any)?.claimId;
-    if (cid && !editTarget) {
+    const isDetailView = searchParams.get('view') === 'detail' || !!searchParams.get('openClaimId');
+    const cid = !isDetailView ? (searchParams.get('claimId') || (location.state as any)?.claimId) : null;
+    if (!cid) {
+      openedRouteClaimIdRef.current = null;
+      return;
+    }
+    if (cid !== openedRouteClaimIdRef.current && !editTarget) {
+      openedRouteClaimIdRef.current = cid;
       claimsService.get(cid)
         .then((res: any) => {
           const claim = res?.data?.data || res?.data || res;
@@ -3048,7 +3055,10 @@ export default function Claims({ contactId, contact, embedded = false }: ClaimsP
             setEditTarget(claim);
           }
         })
-        .catch((err: any) => console.error('Failed to preload claim from URL/state', err));
+        .catch((err: any) => {
+          if (openedRouteClaimIdRef.current === cid) openedRouteClaimIdRef.current = null;
+          console.error('Failed to preload claim from URL/state', err);
+        });
     }
   }, [searchParams, location.state, editTarget]);
   
@@ -3481,6 +3491,66 @@ export default function Claims({ contactId, contact, embedded = false }: ClaimsP
     () => sortedClaims.slice((page - 1) * 20, page * 20),
     [sortedClaims, page],
   );
+
+  // Handle open-claim-modal custom event from Header search or other components
+  useEffect(() => {
+    const handleOpenClaimModal = (e: any) => {
+      const claimId = e.detail?.claimId;
+      if (!claimId) return;
+      const existing = (claimsRes?.data || []).find((c: any) => c.id === claimId || (c as any)._id === claimId)
+        || sortedClaims?.find((c: any) => c.id === claimId || (c as any)._id === claimId);
+      if (existing) {
+        setSelectedClaim(existing);
+        setDetailOpen(true);
+        return;
+      }
+      claimsService.get(claimId).then((res: any) => {
+        const claim = res?.data?.data || res?.data || res;
+        if (claim?.id || (claim as any)?._id) {
+          setSelectedClaim(claim);
+          setDetailOpen(true);
+        }
+      }).catch(err => {
+        console.error('Failed to open claim modal from event:', err);
+      });
+    };
+    window.addEventListener('open-claim-modal', handleOpenClaimModal);
+    return () => window.removeEventListener('open-claim-modal', handleOpenClaimModal);
+  }, [claimsRes, sortedClaims]);
+
+  // Handle URL query parameters to open Claim Detail Modal directly
+  const openedDirectClaimRef = useRef<string | null>(null);
+  useEffect(() => {
+    const directClaimId = searchParams.get('openClaimId') || (searchParams.get('view') === 'detail' ? searchParams.get('claimId') : null);
+    if (!directClaimId) {
+      openedDirectClaimRef.current = null;
+      return;
+    }
+
+    const requestKey = `claim:${directClaimId}`;
+    if (openedDirectClaimRef.current === requestKey) return;
+    openedDirectClaimRef.current = requestKey;
+
+    const existing = (claimsRes?.data || []).find((c: any) => c.id === directClaimId || (c as any)._id === directClaimId)
+      || sortedClaims?.find((c: any) => c.id === directClaimId || (c as any)._id === directClaimId);
+    if (existing) {
+      setSelectedClaim(existing);
+      setDetailOpen(true);
+      openedDirectClaimRef.current = null;
+    } else {
+      claimsService.get(directClaimId).then((res: any) => {
+        const claim = res?.data?.data || res?.data || res;
+        if (claim?.id || (claim as any)?._id) {
+          setSelectedClaim(claim);
+          setDetailOpen(true);
+        }
+        openedDirectClaimRef.current = null;
+      }).catch(err => {
+        openedDirectClaimRef.current = null;
+        console.error('Failed to load direct claim:', err);
+      });
+    }
+  }, [searchParams, claimsRes, sortedClaims]);
 
   const exportClaimsToExcel = () => {
     const headers = ['Claim Number', 'Client Name', 'Policy Number', 'Company', 'Claim Type', 'Hospital', 'Amount', 'Intimated At', 'Status'];
@@ -4222,7 +4292,7 @@ export default function Claims({ contactId, contact, embedded = false }: ClaimsP
     {
       key: 'claimNumber',
       label: 'Claim ID',
-      render: r => <span className="font-bold text-gray-900">{r.claimNumber}</span>
+      render: r => <span className="font-extrabold text-slate-900 text-sm">{r.claimNumber}</span>
     },
     {
       key: 'contact',
@@ -4236,10 +4306,10 @@ export default function Claims({ contactId, contact, embedded = false }: ClaimsP
             : (notes.deathSumInsured || null));
         return (
           <div className="flex flex-col">
-            <span className="font-bold text-gray-900">{r.contact ? `${r.contact.firstName} ${r.contact.lastName}` : '—'}</span>
-            <span className="text-xs text-gray-500">Policy: {r.policy?.policyNumber ? `${r.policy.policyNumber}${getPolicyYearString(r.policy) ? ` (${getPolicyYearString(r.policy)})` : ''}` : '—'}</span>
+            <span className="font-extrabold text-slate-900 text-sm">{r.contact ? `${r.contact.firstName} ${r.contact.lastName}` : '—'}</span>
+            <span className="text-xs text-slate-500 font-medium">Policy: {r.policy?.policyNumber ? `${r.policy.policyNumber}${getPolicyYearString(r.policy) ? ` (${getPolicyYearString(r.policy)})` : ''}` : '—'}</span>
             {sa != null && sa !== '' && !isNaN(Number(sa)) && Number(sa) > 0 && (
-              <span className="text-[11px] font-semibold text-emerald-700">
+              <span className="text-xs font-semibold text-emerald-700">
                 Sum Assured: ₹{Number(sa).toLocaleString('en-IN')}
               </span>
             )}
@@ -4250,17 +4320,26 @@ export default function Claims({ contactId, contact, embedded = false }: ClaimsP
     {
       key: 'claimAmount',
       label: 'Claimed Amt',
-      render: r => <span className="font-semibold text-gray-900">₹{Number(r.claimAmount).toLocaleString('en-IN')}</span>
+      render: r => <span className="font-bold text-slate-900 text-sm">₹{Number(r.claimAmount).toLocaleString('en-IN')}</span>
     },
     {
       key: 'approvedAmount',
       label: 'Settled Amt',
-      render: r => r.approvedAmount ? <span className="font-semibold text-emerald-600">₹{Number(r.approvedAmount).toLocaleString('en-IN')}</span> : <span className="text-gray-400">—</span>
+      render: r => {
+        const settledAmount = r.approvedAmount && r.approvedAmount > 0
+          ? r.approvedAmount
+          : getClaimUiStatus(r) === 'Settled' && r.claimAmount > 0
+            ? r.claimAmount
+            : undefined;
+        return settledAmount !== undefined
+          ? <span className="font-bold text-emerald-600 text-sm">₹{Number(settledAmount).toLocaleString('en-IN')}</span>
+          : <span className="text-slate-400 text-sm font-medium">—</span>;
+      }
     },
     {
       key: 'intimatedAt',
       label: 'Date Filed',
-      render: r => r.intimatedAt ? format(new Date(r.intimatedAt), 'dd/MMM/yyyy') : '—'
+      render: r => <span className="text-slate-700 text-sm font-medium">{r.intimatedAt ? format(new Date(r.intimatedAt), 'dd/MMM/yyyy') : '—'}</span>
     },
     {
       key: 'status',
@@ -4328,13 +4407,13 @@ export default function Claims({ contactId, contact, embedded = false }: ClaimsP
         cols.push({
           key: 'contact' as any,
           label: 'Client Name',
-          render: r => <span className="font-bold text-gray-900">{r.contact ? `${r.contact.firstName} ${r.contact.lastName || ''}`.trim() : '—'}</span>
+          render: r => <span className="font-extrabold text-slate-900 text-sm">{r.contact ? `${r.contact.firstName} ${r.contact.lastName || ''}`.trim() : '—'}</span>
         });
       } else if (n === 'policyno' || n === 'policynumber') {
         cols.push({
           key: 'policy' as any,
           label: 'Policy No',
-          render: r => <span className="text-xs font-semibold text-gray-700">{r.policy?.policyNumber || '—'}</span>
+          render: r => <span className="font-bold text-slate-800 text-sm">{r.policy?.policyNumber || '—'}</span>
         });
       } else if (n === 'hospital') {
         cols.push({
@@ -4342,20 +4421,26 @@ export default function Claims({ contactId, contact, embedded = false }: ClaimsP
           label: 'Hospital',
           render: r => {
             const notes = getClaimNotesData(r.notes);
-            return <span className="text-xs text-gray-700">{notes.hospital || (r as any).hospital || '—'}</span>;
+            return <span className="font-bold text-slate-800 text-sm">{notes.hospital || (r as any).hospital || '—'}</span>;
           }
         });
       } else if (n === 'claimno') {
         cols.push({
           key: 'claimNumber',
           label: 'Claim No',
-          render: r => <span className="font-bold text-gray-900">{r.claimNumber || '—'}</span>
+          render: r => <span className="font-extrabold text-slate-900 text-sm">{r.claimNumber || '—'}</span>
         });
       } else if (n === 'amount') {
         cols.push({
           key: 'claimAmount',
           label: 'Amount',
-          render: r => <span className="font-semibold text-gray-900">₹{Number(r.claimAmount || 0).toLocaleString('en-IN')}</span>
+          render: r => <span className="font-bold text-slate-900 text-sm">₹{Number(r.claimAmount || 0).toLocaleString('en-IN')}</span>
+        });
+      } else if (n === 'intimatedat') {
+        cols.push({
+          key: 'intimatedAt',
+          label: 'Intimated At',
+          render: r => <span className="text-slate-700 text-sm font-medium">{r.intimatedAt ? format(new Date(r.intimatedAt), 'dd/MMM/yyyy') : '—'}</span>
         });
       } else {
         cols.push({
@@ -4364,7 +4449,7 @@ export default function Claims({ contactId, contact, embedded = false }: ClaimsP
           render: r => {
             const notes = getClaimNotesData(r.notes);
             const val = (r as any)[colName] ?? (notes as any)[colName] ?? (r as any).customFields?.[colName] ?? '—';
-            return <span className="text-xs font-medium text-gray-700">{typeof val === 'object' ? JSON.stringify(val) : String(val)}</span>;
+            return <span className="text-slate-700 text-sm font-medium">{typeof val === 'object' ? JSON.stringify(val) : String(val)}</span>;
           }
         });
       }
@@ -6956,7 +7041,7 @@ export default function Claims({ contactId, contact, embedded = false }: ClaimsP
           onCancel={() => {
             setEditTarget(null);
             if (searchParams.has('claimId') || searchParams.has('tab')) {
-              navigate('/claims', { replace: true });
+              navigate('/claims', { replace: true, state: null });
             }
           }}
           employees={employees}
@@ -6990,7 +7075,26 @@ export default function Claims({ contactId, contact, embedded = false }: ClaimsP
       </Modal>
 
       {/* Claim Detail Sheet */}
-      <Modal open={detailOpen} onClose={() => setDetailOpen(false)} closeOnEscapeAndBackdrop={false} title="Claim Details" size="2xl" zIndexClass={embedded ? "z-[70]" : undefined}>
+      <Modal 
+        open={detailOpen} 
+        onClose={() => {
+          setDetailOpen(false);
+          if (searchParams.get('openClaimId') || searchParams.get('view') === 'detail') {
+            const sp = new URLSearchParams(searchParams);
+            sp.delete('openClaimId');
+            sp.delete('view');
+            if (sp.get('claimId') && searchParams.get('view') === 'detail') {
+              sp.delete('claimId');
+            }
+            const qs = sp.toString();
+            navigate(qs ? `/claims?${qs}` : '/claims', { replace: true });
+          }
+        }} 
+        closeOnEscapeAndBackdrop={false} 
+        title="Claim Details" 
+        size="2xl" 
+        zIndexClass={embedded ? "z-[70]" : undefined}
+      >
         {selectedClaim ? (
           <ClaimDetailView claim={selectedClaim} onEdit={() => { setDetailOpen(false); setEditTarget(selectedClaim); }} />
         ) : null}

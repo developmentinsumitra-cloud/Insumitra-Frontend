@@ -20,7 +20,7 @@ export default function Login() {
   const navigate = useNavigate();
   const [loading, setLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
-  const { register, handleSubmit, setValue, formState: { errors } } = useForm<Form>({ resolver: zodResolver(schema) });
+  const { register, handleSubmit, setValue, reset, formState: { errors } } = useForm<Form>({ resolver: zodResolver(schema) });
 
   const onSubmit = async (data: Form) => {
     setLoading(true);
@@ -41,7 +41,6 @@ export default function Login() {
   const handleQuickFill = (roleEmail: string) => {
     let pwd = 'Password@123!';
     if (roleEmail.includes('owner')) pwd = 'Owner@1234!';
-    else if (roleEmail.includes('employee')) pwd = 'Employee@1234!';
     else if (roleEmail.includes('contact') || roleEmail.includes('client')) pwd = 'Client@1234!';
     setValue('email', roleEmail, { shouldValidate: true });
     setValue('password', pwd, { shouldValidate: true });
@@ -66,9 +65,6 @@ export default function Login() {
           <span className="px-3.5 py-1.5 rounded-full bg-gradient-to-r from-teal-600 to-emerald-600 text-white shadow-sm">
             Unified Portal Login
           </span>
-          <a href="/superadmin/login" className="px-3 py-1.5 rounded-full text-slate-600 hover:text-slate-900 transition-colors">
-            Admin Portal
-          </a>
         </div>
 
         {/* Centered Glassmorphic Login Form Card */}
@@ -80,7 +76,7 @@ export default function Login() {
 
             <div>
               <h1 className="text-xl font-black text-slate-800 tracking-tight">Welcome Back</h1>
-              <p className="text-[11px] text-slate-500 font-medium">Sign in to access your agency workspace or client portal</p>
+              <p className="text-[11px] text-slate-500 font-medium">Sign in to access your agency workspace</p>
             </div>
           </div>
 
@@ -96,17 +92,10 @@ export default function Login() {
               </button>
               <button
                 type="button"
-                onClick={() => handleQuickFill('employee@demo-agency.com')}
+                onClick={() => reset({ email: '', password: '' })}
                 className="px-3 py-1 rounded-xl bg-indigo-50 hover:bg-indigo-100 border border-indigo-200/80 text-indigo-800 text-[11px] font-semibold transition-all flex flex-wrap items-center gap-1 cursor-pointer shadow-2xs"
               >
                 <Layers className="w-3 h-3 text-indigo-600" /> Employee
-              </button>
-              <button
-                type="button"
-                onClick={() => handleQuickFill('contact@demo-agency.com')}
-                className="px-3 py-1 rounded-xl bg-amber-50 hover:bg-amber-100 border border-amber-200/80 text-amber-800 text-[11px] font-semibold transition-all flex flex-wrap items-center gap-1 cursor-pointer shadow-2xs"
-              >
-                <User className="w-3 h-3 text-amber-600" /> Client / Contact
               </button>
             </div>
           </div>

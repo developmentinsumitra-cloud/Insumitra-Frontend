@@ -1,14 +1,16 @@
-import { useState, useMemo, useEffect, useCallback } from 'react';
+import { useState, useMemo, useEffect, useCallback, useRef } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import Modal from '@comps/common/Modal';
 import CustomSelect from '@comps/common/CustomSelect';
+import DocumentUploadModal, { DocumentUploadMeta } from '@comps/common/DocumentUploadModal';
+import DocumentsTable from '@comps/common/DocumentsTable';
 import { getActiveDropdownOptions, getModuleCustomDropdowns, isCategoryMatch } from '../../utils/masterDropdowns';
 import { useMasterDropdowns } from '../../hooks/useMasterDropdowns';
 import { isFieldRequired as isFieldRequiredHelper, COMPULSORY_RULES_UPDATED_EVENT } from '../../utils/compulsoryFieldRules';
 import { DatePicker } from '@comps/common/DatePicker';
 import { insuranceService, policiesService, documentsService, contactsService } from '@api/index';
 import toast from 'react-hot-toast';
-import { Shield, CreditCard, Users, Activity, FileText, Plus, Trash2, ChevronDown, UserCircle2, Pencil, RotateCw, History, CheckCircle2, AlertTriangle, Info, CalendarDays, Eye, Download, MessageCircle, Search, User, FileCheck2 } from 'lucide-react';
+import { Shield, CreditCard, Users, Activity, FileText, Plus, Trash2, ChevronDown, UserCircle2, Pencil, RotateCw, History, CheckCircle2, AlertTriangle, Info, CalendarDays, Eye, Download, MessageCircle, Search, User, FileCheck2, Upload } from 'lucide-react';
 import { format } from 'date-fns';
 import clsx from 'clsx';
 import { useLookupStore } from '@store/lookup.store';
@@ -155,6 +157,13 @@ export default function CreatePolicyModal({
     queryFn: () => policiesService.get(targetFetchId!),
     enabled: open && !!targetFetchId && (!directPolicyToEdit || !directPolicyToEdit.members || directPolicyToEdit.members.length === 0),
   });
+  const { data: policyDocumentsRes, isLoading: isPolicyDocumentsLoading, refetch: refetchPolicyDocuments } = useQuery({
+    queryKey: ['policy-documents', targetFetchId],
+    queryFn: () => documentsService.list({ policyId: targetFetchId! }),
+    enabled: open && !!targetFetchId,
+  });
+  const policyDocumentsRaw = policyDocumentsRes?.data?.data ?? policyDocumentsRes?.data ?? policyDocumentsRes ?? [];
+  const policyDocuments: any[] = Array.isArray(policyDocumentsRaw) ? policyDocumentsRaw : [];
   const policyToEdit = (fetchedPolicyRes?.data || fetchedPolicyRes) || directPolicyToEdit;
   const user = useAuthStore(s => s.user);
   const { employees, loadEmployees } = useLookupStore();
@@ -1342,9 +1351,11 @@ export default function CreatePolicyModal({
   const [extraPolicyNotes, setExtraPolicyNotes] = useState<Record<string, string>>({});
 
   // Tab 5: Documents
-  const [pendingDocs, setPendingDocs] = useState<{ file: File; tag: string; title: string }[]>([]);
+  const [pendingDocs, setPendingDocs] = useState<{ file: File; tag: string; title: string; uploaded?: boolean }[]>([]);
   const [docTag, setDocTag] = useState('POLICY_DOCUMENT');
   const [docTitle, setDocTitle] = useState('');
+  const policyDocInputRef = useRef<HTMLInputElement>(null);
+  const [policyDocUploadOpen, setPolicyDocUploadOpen] = useState(false);
 
   const [submitting, setSubmitting] = useState(false);
 
@@ -1556,6 +1567,21 @@ export default function CreatePolicyModal({
     const defaultTagLabel = POLICY_DOCUMENT_TYPE_OPTIONS.find(o => o.value === docTag)?.label;
     setPendingDocs(prev => [...prev, { file, tag: docTag, title: docTitle.trim() || defaultTagLabel || file.name }]);
     setDocTitle(defaultTagLabel || '');
+  };
+
+  const uploadPolicyDocument = async (file: File, meta: DocumentUploadMeta) => {
+    if (!policyToEdit?.id) return false;
+    try {
+      await documentsService.upload(file, { policyId: policyToEdit.id, ...meta });
+      await refetchPolicyDocuments();
+      toast.success('Document uploaded successfully');
+      setPolicyDocUploadOpen(false);
+      return true;
+    } catch (error: any) {
+      const message = error?.response?.data?.message;
+      toast.error(Array.isArray(message) ? message.join(', ') : message || 'Failed to upload document.');
+      return false;
+    }
   };
 
   const handleRemoveDoc = (idx: number) => {
@@ -1958,14 +1984,16 @@ export default function CreatePolicyModal({
       const savedPolicy = res?.data ?? res;
 
       // Upload pending documents
-      if (savedPolicy?.id && pendingDocs.length > 0) {
-        for (const doc of pendingDocs) {
+      const docsToUpload = pendingDocs.filter(doc => !doc.uploaded);
+      if (savedPolicy?.id && docsToUpload.length > 0) {
+        for (const doc of docsToUpload) {
           try {
             await documentsService.upload(doc.file, {
               policyId: savedPolicy.id,
               type: doc.tag,
               title: doc.title,
             });
+            setPendingDocs(prev => prev.map(item => item === doc ? { ...item, uploaded: true } : item));
           } catch (uploadErr) {
             console.error('Document upload error:', uploadErr);
           }
@@ -2068,7 +2096,7 @@ export default function CreatePolicyModal({
               onClick={(e) => handleFormSubmit(e as any)}
               className="px-3 sm:px-5 py-1.5 sm:py-2 text-[10px] sm:text-xs font-extrabold bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white rounded-xl cursor-pointer shadow-md shadow-blue-500/20 transition-all hover:scale-105 disabled:opacity-50"
             >
-              {submitting ? (policyToEdit ? 'Updating Policy…' : 'Saving Policy…') : (policyToEdit ? 'Update Policy' : 'Save Policy')}
+              {submitting ? (policyToEdit ? 'Updating Policy…' : 'Saving Policy…') : policyToEdit ? 'Update Policy' : 'Save Policy'}
             </button>
           )}
         </div>
@@ -2151,7 +2179,7 @@ export default function CreatePolicyModal({
             )}
           >
             <FileText size={14} />
-            Policy Documents ({pendingDocs.length})
+            Policy Documents ({policyDocuments.length + pendingDocs.length})
           </button>
           {policyToEdit && (
             <button
@@ -2172,7 +2200,7 @@ export default function CreatePolicyModal({
 
         {/* ── Form Content Container ───────────────────────────────────────── */}
         <div className="space-y-4">
-          <fieldset disabled={isViewOnly} className="contents">
+          <fieldset disabled={isViewOnly && activeTab !== 'policyDocs'} className="contents">
 
           {/* ════════ TAB 1: Policy & Plan Details ════════ */}
           {activeTab === 'policyPlan' && (
@@ -4407,9 +4435,93 @@ export default function CreatePolicyModal({
           {activeTab === 'policyDocs' && (
             <div className="space-y-4 animate-fadeIn">
               <div className="p-4 border border-slate-200/90 rounded-2xl bg-white shadow-2xs space-y-3.5">
+                {policyToEdit?.id ? (
+                  <>
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="flex items-center gap-2">
+                        <div className="flex h-6 w-6 items-center justify-center rounded-lg bg-indigo-100 text-indigo-600">
+                          <FileText size={13} />
+                        </div>
+                        <h4 className="text-xs font-black uppercase tracking-wider text-slate-700">
+                          Policy Documents & Files ({policyDocuments.length})
+                        </h4>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setPolicyDocUploadOpen(true)}
+                        className="flex items-center gap-2 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 px-3.5 py-1.5 text-xs font-bold text-white shadow-md shadow-blue-500/20 transition-all hover:scale-[1.02] hover:from-blue-700 hover:to-indigo-700"
+                      >
+                        <Upload size={13} />
+                        <span>Upload Document</span>
+                      </button>
+                    </div>
+
+                    <DocumentUploadModal
+                      open={policyDocUploadOpen}
+                      onClose={() => setPolicyDocUploadOpen(false)}
+                      onUpload={uploadPolicyDocument}
+                      title="Upload Policy Document"
+                      subtitle="Attach a document to this policy."
+                      defaultType="POLICY_DOCUMENT"
+                      types={POLICY_DOCUMENT_TYPE_OPTIONS}
+                      zIndexClass="z-[70]"
+                    />
+
+                    {isPolicyDocumentsLoading ? (
+                      <p className="rounded-xl border border-slate-200 bg-slate-50/60 px-4 py-8 text-center text-sm text-slate-400">
+                        Loading saved documents…
+                      </p>
+                    ) : (
+                      <DocumentsTable
+                        documents={policyDocuments}
+                        onView={async doc => {
+                          try {
+                            const response = await documentsService.url(doc.id);
+                            const url = response?.url || response?.data?.url || doc.url || doc.fileUrl;
+                            if (!url) throw new Error('Unable to fetch preview link.');
+                            window.open(url, '_blank', 'noopener,noreferrer');
+                          } catch {
+                            toast.error('Failed to preview document.');
+                          }
+                        }}
+                        onDelete={async doc => {
+                          if (user?.role !== 'OWNER') {
+                            toast.error('Only owners can delete policy documents.');
+                            return;
+                          }
+                          if (!confirm('Are you sure you want to delete this document?')) return;
+                          try {
+                            await documentsService.remove(doc.id);
+                            await refetchPolicyDocuments();
+                            toast.success('Document deleted');
+                          } catch {
+                            toast.error('Failed to delete document');
+                          }
+                        }}
+                        onShare={async doc => {
+                          try {
+                            const response = await documentsService.url(doc.id);
+                            const url = response?.url || response?.data?.url || doc.url || doc.fileUrl || '';
+                            if (!url) throw new Error('Unable to fetch document link.');
+                            const title = doc.name || doc.title || doc.originalName || 'Document';
+                            const message = `Hi, here is the document: *${title}*\n${url}`;
+                            const phone = String(policyToEdit?.contact?.phone || selectedContact?.phone || '').replace(/\D/g, '');
+                            const shareUrl = phone
+                              ? `https://api.whatsapp.com/send?phone=91${phone.slice(-10)}&text=${encodeURIComponent(message)}`
+                              : `https://api.whatsapp.com/send?text=${encodeURIComponent(message)}`;
+                            window.open(shareUrl, '_blank', 'noopener,noreferrer');
+                          } catch {
+                            toast.error('Failed to prepare WhatsApp share link.');
+                          }
+                        }}
+                      />
+                    )}
+                  </>
+                ) : (
+                  <>
                 <h4 className="text-xs font-extrabold text-slate-800 uppercase tracking-wider flex items-center gap-2">
                   <span className="w-5 h-5 rounded-full bg-blue-600 text-white text-[10px] font-black flex items-center justify-center">5</span>
-                  Policy Documents & Attachments
+                  Policy Documents & Attachments ({pendingDocs.length})
                 </h4>
 
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
@@ -4439,22 +4551,69 @@ export default function CreatePolicyModal({
                   <div>
                     <label className="label text-[10px] font-bold text-slate-500">Select File</label>
                     <input
+                      ref={policyDocInputRef}
                       type="file"
-                      className="input text-xs w-full mt-1 p-1 bg-white"
+                      className="sr-only"
                       onChange={(e) => {
-                        const file = e.target.files?.[0];
+                        const input = e.currentTarget;
+                        const file = input.files?.[0];
                         if (file) handleAddDoc(file);
+                        input.value = '';
                       }}
                     />
+                    <button
+                      type="button"
+                      onClick={() => policyDocInputRef.current?.click()}
+                      className="input text-xs w-full mt-1 p-2 bg-white text-left cursor-pointer"
+                    >
+                      Choose File
+                    </button>
                   </div>
                 </div>
 
+                {isPolicyDocumentsLoading ? (
+                  <p className="rounded-xl border border-slate-200 bg-slate-50/60 px-4 py-6 text-center text-xs text-slate-400">
+                    Loading saved documents…
+                  </p>
+                ) : policyDocuments.length > 0 ? (
+                  <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white">
+                    <table className="w-full border-collapse text-left">
+                      <thead>
+                        <tr className="border-b border-slate-200 bg-slate-50 text-[10px] font-extrabold uppercase tracking-wider text-slate-500">
+                          <th className="px-3 py-2.5">Uploaded Date</th>
+                          <th className="px-3 py-2.5">Document Name</th>
+                          <th className="px-3 py-2.5">Type</th>
+                          <th className="px-3 py-2.5 text-right">Size</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100 text-xs">
+                        {policyDocuments.map((doc: any) => (
+                          <tr key={doc.id} className="transition-colors hover:bg-slate-50/80">
+                            <td className="whitespace-nowrap px-3 py-2.5 font-semibold text-slate-600">
+                              {doc.createdAt && !Number.isNaN(new Date(doc.createdAt).getTime())
+                                ? format(new Date(doc.createdAt), 'dd MMM yyyy')
+                                : '—'}
+                            </td>
+                            <td className="px-3 py-2.5 font-extrabold text-slate-800">
+                              {doc.originalName || doc.name || doc.title || 'Document'}
+                            </td>
+                            <td className="px-3 py-2.5 font-semibold text-slate-600">{doc.type || '—'}</td>
+                            <td className="whitespace-nowrap px-3 py-2.5 text-right font-semibold text-slate-600">
+                              {formatBytes(doc.sizeBytes) || '—'}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                ) : (
+                  <p className="rounded-xl border border-dashed border-slate-200 bg-slate-50/60 px-4 py-6 text-center text-xs text-slate-400">
+                    No saved documents attached yet.
+                  </p>
+                )}
+
+                {pendingDocs.length > 0 && (
                 <div className="space-y-2 pt-2">
-                  {pendingDocs.length === 0 ? (
-                    <p className="rounded-xl border border-dashed border-slate-200 bg-slate-50/60 px-4 py-6 text-center text-xs text-slate-400">
-                      No documents attached yet. Click "Choose File" above to attach documents.
-                    </p>
-                  ) : (
                     <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white">
                       <table className="w-full border-collapse text-left">
                         <thead>
@@ -4566,8 +4725,10 @@ export default function CreatePolicyModal({
                         </tbody>
                       </table>
                     </div>
-                  )}
                 </div>
+                )}
+                  </>
+                )}
               </div>
             </div>
           )}

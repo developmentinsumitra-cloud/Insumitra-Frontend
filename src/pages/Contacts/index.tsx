@@ -603,6 +603,8 @@ export default function Contacts() {
   const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
   const [importFormatOpen, setImportFormatOpen] = useState(false);
+  const [isEmployeePickerOpen, setIsEmployeePickerOpen] = useState(false);
+  const [employeePickerSearch, setEmployeePickerSearch] = useState('');
 
   const { data: compulsoryRulesRes } = useQuery({
     queryKey: ['compulsory-rules'],
@@ -948,6 +950,7 @@ export default function Contacts() {
     surgeryDetails: '',
     prescriptionDetails: '',
     assignedEmployeeId: '',
+    assignedEmployeeIds: [] as string[],
   });
 
   const [leadInfoFields, setLeadInfoFields] = useState({
@@ -1613,6 +1616,13 @@ export default function Contacts() {
     const raw = (employees as any)?.data || employees;
     return Array.isArray(raw) ? raw : [];
   }, [employees]);
+  const normalizeEmployeeUserId = (id?: string) => {
+    if (!id) return '';
+    const employee = employeesList.find((item: any) =>
+      item.id === id || item.userId === id || item.user?.id === id
+    );
+    return employee?.userId || employee?.user?.id || id;
+  };
 
   const { data: contactsRes, isLoading: contactsLoading, refetch: refetchContacts } = useContacts({
     limit: 2000,
@@ -1862,13 +1872,18 @@ export default function Contacts() {
       bankIfsc: '',
       bankBranch: '',
       assignedEmployeeId: '',
+      assignedEmployeeIds: [],
     });
 
     const currentUser = useAuthStore.getState().user;
     const curEmp = employees.find(e => e.userId === currentUser?.id || e.id === currentUser?.id);
     const defaultEmpId = currentUser?.role === 'EMPLOYEE' ? (curEmp?.userId || currentUser?.id || '') : '';
 
-    setPersonalFields(prev => ({ ...prev, assignedEmployeeId: defaultEmpId }));
+    setPersonalFields(prev => ({
+      ...prev,
+      assignedEmployeeId: defaultEmpId,
+      assignedEmployeeIds: defaultEmpId ? [defaultEmpId] : [],
+    }));
     setLeadInfoFields({
       profileType: 'Client Profile',
       leadStatus: 'OPEN',
@@ -1980,6 +1995,10 @@ export default function Contacts() {
       bankAccountNumber: fallbackContact.bankAccountNumber || fallbackContact.contact?.bankAccountNumber || '',
       bankIfsc: fallbackContact.bankIfsc || fallbackContact.contact?.bankIfsc || '',
       bankBranch: fallbackContact.bankBranch || fallbackContact.contact?.bankBranch || '',
+      assignedEmployeeId: normalizeEmployeeUserId(fallbackContact.assignedEmployeeIds?.[0] || fallbackContact.assignedEmployeeId || ''),
+      assignedEmployeeIds: fallbackContact.assignedEmployeeIds?.length
+        ? fallbackContact.assignedEmployeeIds.map(normalizeEmployeeUserId)
+        : [fallbackContact.assignedEmployeeId].filter(Boolean).map(normalizeEmployeeUserId),
     });
 
     setPersonalCollapsed(INITIAL_PERSONAL_COLLAPSED);
@@ -2002,7 +2021,11 @@ export default function Contacts() {
         const updatedNames = extractNameFields(contact, fallbackContact);
 
         const lead = contact.productInterests?.[0] || (leadOrContact.contactId ? leadOrContact : null);
-        const contactAssigneeId = contact.assignedEmployeeId || contact.assignedEmployee?.id || lead?.assignedEmployeeId || '';
+        const contactAssigneeIds = contact.assignedEmployeeIds?.length
+          ? contact.assignedEmployeeIds
+          : [contact.assignedEmployeeId || contact.assignedEmployee?.id || lead?.assignedEmployeeId].filter(Boolean);
+        const normalizedAssigneeIds = contactAssigneeIds.map(normalizeEmployeeUserId);
+        const contactAssigneeId = normalizedAssigneeIds[0] || '';
 
         setPersonalFields({
           role: contact.role || fallbackContact.role || fallbackContact.contact?.role || fallbackContact.user?.role || 'Contact',
@@ -2058,6 +2081,7 @@ export default function Contacts() {
           bankIfsc: contact.bankIfsc || fallbackContact.bankIfsc || '',
           bankBranch: contact.bankBranch || fallbackContact.bankBranch || '',
           assignedEmployeeId: contactAssigneeId,
+          assignedEmployeeIds: normalizedAssigneeIds,
         });
 
         setLeadInfoFields({
@@ -2484,7 +2508,14 @@ export default function Contacts() {
 
         await openLeadEdit(contact, { isView: shouldBeView });
         setIsViewMode(shouldBeView);
-        navigate('/contacts', { replace: true });
+        openedDirectContactRef.current = null;
+        const sp = new URLSearchParams(searchParams);
+        sp.delete('openContactId');
+        sp.delete('viewMode');
+        sp.delete('parentContactId');
+        sp.delete('returnTab');
+        const qs = sp.toString();
+        navigate(qs ? ('/contacts?' + qs) : '/contacts', { replace: true });
       } catch (error: any) {
         openedDirectContactRef.current = null;
         toast.error(error.response?.data?.message || error.message || 'Failed to open contact');
@@ -2493,6 +2524,26 @@ export default function Contacts() {
 
     void loadDirectContact();
   }, [navigate, searchParams]);
+
+  // Handle open-contact-modal custom event from Header search or other components
+  useEffect(() => {
+    const handleOpenContactModal = (e: any) => {
+      const contactId = e.detail?.contactId;
+      const isView = e.detail?.isView !== false;
+      if (!contactId) return;
+      contactsService.get(contactId).then(res => {
+        const contact = res?.data?.data || res?.data || res;
+        if (contact?.id) {
+          openLeadEdit(contact, { isView });
+          setIsViewMode(isView);
+        }
+      }).catch(err => {
+        console.error('Failed to open contact modal from event:', err);
+      });
+    };
+    window.addEventListener('open-contact-modal', handleOpenContactModal);
+    return () => window.removeEventListener('open-contact-modal', handleOpenContactModal);
+  }, []);
 
   // Ctrl + Enter shortcut: open Policy or Family Member modal in new tab
   useEffect(() => {
@@ -2622,6 +2673,7 @@ export default function Contacts() {
     if (docPreviewModal.open || contactDocUploadOpen || createPolicyModalOpen || familyMemberModalOpen) {
       return;
     }
+    openedDirectContactRef.current = null;
     setContactNavHistory([]);
     setParentNavInfo(null);
     parentNavInfoRef.current = null;
@@ -2939,9 +2991,17 @@ export default function Contacts() {
       const cleanAltPhone = rawAltDigits.length > 10 ? rawAltDigits.slice(-10) : rawAltDigits;
 
       let contactId = editContactId;
-      const validEmpId = (id?: string) => (id && /^[0-9a-fA-F]{24}$/.test(id.trim())) ? id.trim() : undefined;
+      const validEmpId = (id?: string) => (id && typeof id === 'string' && id.trim()) ? id.trim() : undefined;
       const interestEmpId = productInterests.find(c => validEmpId(c.assignedEmployeeId))?.assignedEmployeeId;
-      const chosenEmpId = validEmpId(personalFields.assignedEmployeeId) || validEmpId(interestEmpId) || validEmpId(leadInfoFields.assignedEmployeeId);
+      const selectedEmpIds = Array.isArray(personalFields.assignedEmployeeIds)
+        ? personalFields.assignedEmployeeIds.map(validEmpId).filter((id): id is string => Boolean(id))
+        : [validEmpId(personalFields.assignedEmployeeId)].filter((id): id is string => Boolean(id));
+      const chosenEmpIds = selectedEmpIds.length > 0
+        ? Array.from(new Set(selectedEmpIds))
+        : (personalFields.assignedEmployeeIds !== undefined
+            ? []
+            : [validEmpId(interestEmpId) || validEmpId(leadInfoFields.assignedEmployeeId)].filter((id): id is string => Boolean(id)));
+      const chosenEmpId = chosenEmpIds[0];
 
       if (editContactId) {
         const isPlaceholderPhone = (p?: string | null) => {
@@ -2959,6 +3019,7 @@ export default function Contacts() {
           role: personalFields.role || 'Contact',
           isActive: personalFields.contactStatus ? personalFields.contactStatus === 'Active' : (personalFields.isActive !== false),
           assignedEmployeeId: chosenEmpId || null,
+          assignedEmployeeIds: chosenEmpIds,
         };
         if (!isPlaceholderPhone(cleanPhone)) {
           updateBody.phone = cleanPhone;
@@ -3101,7 +3162,10 @@ export default function Contacts() {
         if (personalFields.bankAccountNumber?.trim()) contactBody.bankAccountNumber = personalFields.bankAccountNumber.trim();
         if (personalFields.bankIfsc?.trim()) contactBody.bankIfsc = personalFields.bankIfsc.trim().toUpperCase();
         if (personalFields.bankBranch?.trim()) contactBody.bankBranch = personalFields.bankBranch.trim();
-        if (chosenEmpId) contactBody.assignedEmployeeId = chosenEmpId;
+        if (chosenEmpIds.length > 0) {
+          contactBody.assignedEmployeeId = chosenEmpId;
+          contactBody.assignedEmployeeIds = chosenEmpIds;
+        }
 
         const contactRes = await contactsService.createFull({
           contact: contactBody,
@@ -3373,6 +3437,25 @@ export default function Contacts() {
           : (shouldClose ? `${targetLabel} created successfully!` : 'Draft saved successfully!'),
         { id: toastId }
       );
+      if (editContactId) {
+        qc.setQueriesData({ queryKey: ['contacts'] }, (old: any) => {
+          if (!old) return old;
+          const updateList = (list: any[]) =>
+            list.map(item =>
+              item.id === editContactId || item._id === editContactId || item.contactId === editContactId
+                ? {
+                    ...item,
+                    assignedEmployeeId: chosenEmpId || null,
+                    assignedEmployeeIds: chosenEmpIds,
+                  }
+                : item
+            );
+          if (Array.isArray(old)) return updateList(old);
+          if (Array.isArray(old.data)) return { ...old, data: updateList(old.data) };
+          if (Array.isArray(old.data?.data)) return { ...old, data: { ...old.data, data: updateList(old.data.data) } };
+          return old;
+        });
+      }
       qc.invalidateQueries({ queryKey: ['contacts'] });
       qc.refetchQueries({ queryKey: ['contacts'] });
       setPage(1);
@@ -3478,23 +3561,38 @@ export default function Contacts() {
     };
 
     // 1. Direct assigned employee of contact (Primary)
-    const directEmployee = formatEmployee(assignedEmpObj || contactItem?.assignedEmployee, id || contactItem?.assignedEmployeeId);
+    const directEmployee = formatEmployee(
+      assignedEmpObj || (id === contactItem?.assignedEmployeeId ? contactItem?.assignedEmployee : undefined),
+      id || contactItem?.assignedEmployeeId,
+    );
     if (directEmployee) return directEmployee;
 
-    // 2. Product interest assignee fallback
-    const productInterest = contactItem?.productInterests?.find((item: any) =>
-      item.assignedEmployee || item.assignedEmployeeId
-    );
-    const productInterestEmployee = formatEmployee(
-      productInterest?.assignedEmployee,
-      productInterest?.assignedEmployeeId,
-    );
-    if (productInterestEmployee) return productInterestEmployee;
+    if (!id) {
+      // 2. Product interest assignee fallback
+      const productInterest = contactItem?.productInterests?.find((item: any) =>
+        item.assignedEmployee || item.assignedEmployeeId
+      );
+      const productInterestEmployee = formatEmployee(
+        productInterest?.assignedEmployee,
+        productInterest?.assignedEmployeeId,
+      );
+      if (productInterestEmployee) return productInterestEmployee;
 
-    // 3. Policy assignee fallback
-    const policy = contactItem?.policies?.find((item: any) => item.assignedEmployee || item.assignedEmployeeId);
-    const policyEmployee = formatEmployee(policy?.assignedEmployee, policy?.assignedEmployeeId);
-    return policyEmployee || 'Unassigned';
+      // 3. Policy assignee fallback
+      const policy = contactItem?.policies?.find((item: any) => item.assignedEmployee || item.assignedEmployeeId);
+      const policyEmployee = formatEmployee(policy?.assignedEmployee, policy?.assignedEmployeeId);
+      if (policyEmployee) return policyEmployee;
+    }
+
+    return 'Unassigned';
+  };
+
+  const getAssignedEmployeeIds = (contactItem: any): string[] => {
+    const list = [
+      ...(Array.isArray(contactItem?.assignedEmployeeIds) ? contactItem.assignedEmployeeIds : []),
+      ...(contactItem?.assignedEmployeeId ? [contactItem.assignedEmployeeId] : []),
+    ].filter(Boolean);
+    return Array.from(new Set(list));
   };
 
   const handlePickContact = async (contact: any) => {
@@ -3550,13 +3648,18 @@ export default function Contacts() {
       bankIfsc: '',
       bankBranch: '',
       assignedEmployeeId: '',
+      assignedEmployeeIds: [],
     });
 
     const currentUser = useAuthStore.getState().user;
     const curEmp = employees.find(e => e.userId === currentUser?.id || e.id === currentUser?.id);
     const defaultEmpId = currentUser?.role === 'EMPLOYEE' ? (curEmp?.userId || currentUser?.id || '') : '';
 
-    setPersonalFields(prev => ({ ...prev, assignedEmployeeId: defaultEmpId }));
+    setPersonalFields(prev => ({
+      ...prev,
+      assignedEmployeeId: defaultEmpId,
+      assignedEmployeeIds: defaultEmpId ? [defaultEmpId] : [],
+    }));
     setLeadInfoFields({
       profileType: 'Contact Profile',
       leadStatus: 'OPEN',
@@ -3612,24 +3715,36 @@ export default function Contacts() {
       : contactsListArray;
 
     return list.filter((item: any) => {
-      // Employee role data isolation safeguard: only see self-assigned, unassigned, or contacts with self-assigned sub-resources
+      // Employee role data isolation safeguard: only show contacts assigned to this employee.
       if (user?.role === 'EMPLOYEE') {
         const currentUserId = user.id;
-        const assignedEmpId = item.assignedEmployeeId || item.assignedEmployee?.id || item.assignedEmployee?.userId;
         const myEmp = employeesList.find((e: any) => e.userId === currentUserId || e.user?.id === currentUserId || e.id === currentUserId);
         const validMyIds = [currentUserId];
         if (myEmp?.id) validMyIds.push(myEmp.id);
         if (myEmp?.userId) validMyIds.push(myEmp.userId);
         if (myEmp?.user?.id) validMyIds.push(myEmp.user.id);
 
-        const hasMySubResource =
-          (item.policies && item.policies.some((p: any) => p.assignedEmployeeId && validMyIds.includes(p.assignedEmployeeId))) ||
-          (item.productInterests && item.productInterests.some((pi: any) => pi.assignedEmployeeId && validMyIds.includes(pi.assignedEmployeeId))) ||
-          (item.claims && item.claims.some((c: any) => c.assignedEmployeeId && validMyIds.includes(c.assignedEmployeeId)));
+        const assignedEmployeeIds = getAssignedEmployeeIds(item);
+        const directEmpIds = [
+          ...assignedEmployeeIds,
+          item.assignedEmployeeId,
+          item.assignedEmployee?.id,
+          item.assignedEmployee?.userId,
+          ...(item.productInterests || []).map((pi: any) => pi.assignedEmployeeId || pi.assignedEmployee?.id).filter(Boolean),
+          ...(item.policies || []).map((pol: any) => pol.assignedEmployeeId || pol.assignedEmployee?.id).filter(Boolean),
+        ].filter(Boolean);
 
-        if (assignedEmpId && !validMyIds.includes(assignedEmpId) && !hasMySubResource) {
+        const isAssignedToMe = directEmpIds.some((empId: string) => {
+          if (validMyIds.includes(empId)) return true;
+          const matchedEmp = employeesList.find((e: any) => e.id === empId || e.userId === empId || e.user?.id === empId);
+          if (matchedEmp) {
+            const empUserOrProfileIds = [matchedEmp.id, matchedEmp.userId, matchedEmp.user?.id].filter(Boolean);
+            return empUserOrProfileIds.some((id: string) => validMyIds.includes(id));
+          }
           return false;
-        }
+        });
+
+        if (!isAssignedToMe) return false;
       }
 
       // Contact Active Status Resolution
@@ -4119,9 +4234,10 @@ export default function Contacts() {
       // 16. Assigned Agent Filter
       if (filterAssignedAgent && filterAssignedAgent !== 'ALL') {
         const empName = getEmployeeName(item.assignedEmployeeId, item.assignedEmployee, item);
+        const assignedEmployeeIds = getAssignedEmployeeIds(item);
 
         if (filterAssignedAgent === 'UNASSIGNED') {
-          if (empName !== 'Unassigned') return false;
+          if (assignedEmployeeIds.length > 0 || empName !== 'Unassigned') return false;
         } else {
           const selectedEmp = employeesList.find((e: any) =>
             e.userId === filterAssignedAgent || e.id === filterAssignedAgent || e.user?.id === filterAssignedAgent
@@ -4134,10 +4250,14 @@ export default function Contacts() {
           ).toLowerCase();
 
           const matchIds = [filterAssignedAgent, selectedEmp?.id, selectedEmp?.userId, selectedEmp?.user?.id].filter(Boolean);
-          const directEmpId = item.assignedEmployeeId || item.assignedEmployee?.id || item.assignedEmployee?.userId;
+          const directEmpIds = [
+            ...assignedEmployeeIds,
+            item.assignedEmployee?.id,
+            item.assignedEmployee?.userId,
+          ].filter(Boolean);
 
           const isNameMatch = Boolean(selectedEmpName && empName.toLowerCase() === selectedEmpName);
-          const isIdMatch = Boolean(directEmpId && matchIds.includes(directEmpId));
+          const isIdMatch = directEmpIds.some((employeeId: string) => matchIds.includes(employeeId));
 
           // Strictly require that the contact's assigned employee matches the selected agent
           if (!isNameMatch && !isIdMatch) {
@@ -4150,6 +4270,7 @@ export default function Contacts() {
     });
   }, [
     activeTab, contactsRes, birthdayRes, search, selectedFilters, policyMap, claimMap, dateFrom, dateTo, filterProducts, excludeProduct,
+    user?.id, user?.role, employeesList,
     filterFollowUpFrom, filterFollowUpTo, filterGender, filterMaritalStatus, filterAgeRange, filterIncomeRange,
     filterEducation, filterOccupation, filterResidency, filterState, filterCity, filterBank, filterMedicalHistory,
     filterActiveStatus, filterPolicyCombo, filterRole, filterAssignedAgent
@@ -4369,7 +4490,11 @@ export default function Contacts() {
       label: 'ASSIGNED EMPLOYEE',
       sortable: true,
       render: r => {
-        const empName = getEmployeeName(r.assignedEmployeeId, r.assignedEmployee, r);
+        const assignedEmployeeIds = getAssignedEmployeeIds(r);
+        const assignedEmployeeNames = assignedEmployeeIds
+          .map((employeeId: string) => getEmployeeName(employeeId, undefined, r))
+          .filter((name: string) => name && name !== 'Unassigned');
+        const empName = assignedEmployeeNames.join(', ') || getEmployeeName(r.assignedEmployeeId, r.assignedEmployee, r);
         if (empName === 'Unassigned') {
           return (
             <div className="flex flex-wrap items-center gap-1.5 flex-wrap">
@@ -4392,7 +4517,16 @@ export default function Contacts() {
             </div>
           );
         }
-        return <span className="text-slate-700 text-sm font-bold">{empName}</span>;
+        return (
+          <span className="text-slate-700 text-sm font-bold">
+            {empName}
+            {user?.role === 'OWNER' && assignedEmployeeIds.length > 0 && (
+              <span className="ml-1 text-[10px] font-extrabold text-blue-700">
+                ({assignedEmployeeIds.length} {assignedEmployeeIds.length === 1 ? 'employee' : 'employees'})
+              </span>
+            )}
+          </span>
+        );
       }
     },
     {
@@ -4406,7 +4540,7 @@ export default function Contacts() {
       label: 'ACTIONS',
       render: r => {
         const isEmployee = authUser?.role === 'EMPLOYEE';
-        const showPickButton = isEmployee && !r.assignedEmployeeId;
+        const showPickButton = isEmployee && !r.assignedEmployeeId && getAssignedEmployeeIds(r).length === 0;
         return (
           <div className="flex gap-1.5 justify-start items-center" onClick={e => e.stopPropagation()}>
             {showPickButton && (
@@ -6552,28 +6686,175 @@ export default function Contacts() {
                       />
                     </div>
                     <div>
-                      <label className="label text-[10px] font-extrabold text-slate-500 uppercase tracking-wider block mb-1">Assigned Employee</label>
-                      <select
-                        className="input w-full focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 rounded-xl transition-all font-semibold bg-white"
-                        value={personalFields.assignedEmployeeId || ''}
-                        onChange={e => {
-                          const val = e.target.value;
-                          setPersonalFields(p => ({ ...p, assignedEmployeeId: val }));
-                          setLeadInfoFields(p => ({ ...p, assignedEmployeeId: val }));
-                          setProductInterests(prev => prev.map(c => ({ ...c, assignedEmployeeId: val })));
-                        }}
-                      >
-                        <option value="">Unassigned</option>
-                        {employeesList.map((emp: any) => {
-                          const empUserId = emp.userId || emp.user?.id || emp.id;
-                          const empName = `${emp.firstName || emp.user?.firstName || ''} ${emp.lastName || emp.user?.lastName || ''}`.trim() || emp.name || emp.email || 'Employee';
-                          return (
-                            <option key={emp.id || empUserId} value={empUserId}>
-                              {empName}
-                            </option>
-                          );
-                        })}
-                      </select>
+                      <label className="label text-[10px] font-extrabold text-slate-500 uppercase tracking-wider block mb-1">Assigned Employees</label>
+                      {(() => {
+                        const selectedIds: string[] = Array.isArray(personalFields.assignedEmployeeIds)
+                          ? personalFields.assignedEmployeeIds
+                          : (personalFields.assignedEmployeeId ? [personalFields.assignedEmployeeId] : []);
+                        const isEmpSelected = (emp: any) => {
+                          const ids = [emp.userId, emp.user?.id, emp.id].filter(Boolean);
+                          return selectedIds.some((id: string) => ids.includes(id));
+                        };
+                        const selectedEmployees = employeesList.filter((emp: any) => isEmpSelected(emp));
+                        const searchTerm = employeePickerSearch.trim().toLowerCase();
+                        const filteredEmployees = employeesList.filter((emp: any) => {
+                          const name = `${emp.firstName || emp.user?.firstName || ''} ${emp.lastName || emp.user?.lastName || ''}`.trim()
+                            || emp.name || emp.email || 'Employee';
+                          return !searchTerm
+                            || name.toLowerCase().includes(searchTerm)
+                            || (emp.email || emp.user?.email || '').toLowerCase().includes(searchTerm)
+                            || (emp.department || '').toLowerCase().includes(searchTerm);
+                        });
+                        const updateAssignedEmployees = (employeeIds: string[]) => {
+                          const primaryEmployeeId = employeeIds[0] || '';
+                          setPersonalFields(p => ({
+                            ...p,
+                            assignedEmployeeIds: employeeIds,
+                            assignedEmployeeId: primaryEmployeeId,
+                          }));
+                          setLeadInfoFields(p => ({ ...p, assignedEmployeeId: primaryEmployeeId }));
+                          setProductInterests(prev => prev.map(c => ({ ...c, assignedEmployeeId: primaryEmployeeId })));
+                        };
+
+                        return (
+                          <>
+                            <button
+                              type="button"
+                              disabled={authUser?.role === 'EMPLOYEE'}
+                              aria-expanded={isEmployeePickerOpen}
+                              aria-controls="contact-assigned-employees"
+                              onClick={() => setIsEmployeePickerOpen(open => !open)}
+                              className={clsx(
+                                'w-full min-h-[42px] px-3 py-2 rounded-xl border bg-white text-left transition-colors flex items-center justify-between gap-2',
+                                authUser?.role === 'EMPLOYEE'
+                                  ? 'border-slate-200 cursor-not-allowed'
+                                  : 'border-slate-300 hover:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500'
+                              )}
+                            >
+                              <span className="min-w-0 flex items-center gap-2">
+                                <Users size={15} className="shrink-0 text-blue-600" />
+                                <span className="truncate text-xs font-semibold text-slate-700">
+                                  {selectedEmployees.length
+                                    ? selectedEmployees.map((emp: any) =>
+                                        `${emp.firstName || emp.user?.firstName || ''} ${emp.lastName || emp.user?.lastName || ''}`.trim()
+                                        || emp.name || emp.email || 'Employee'
+                                      ).join(', ')
+                                    : 'Choose employees'}
+                                </span>
+                              </span>
+                              <span className="shrink-0 flex items-center gap-2">
+                                {selectedIds.length > 0 && (
+                                  <span className="rounded-full bg-blue-50 px-2 py-0.5 text-[10px] font-bold text-blue-700">
+                                    {selectedIds.length} selected
+                                  </span>
+                                )}
+                                {isEmployeePickerOpen ? <ChevronUp size={15} /> : <ChevronDown size={15} />}
+                              </span>
+                            </button>
+
+                            {selectedEmployees.length > 0 && (
+                              <div className="mt-2 flex flex-wrap gap-1.5">
+                                {selectedEmployees.map((emp: any) => {
+                                  const empId = emp.userId || emp.user?.id || emp.id;
+                                  const name = `${emp.firstName || emp.user?.firstName || ''} ${emp.lastName || emp.user?.lastName || ''}`.trim()
+                                    || emp.name || emp.email || 'Employee';
+                                  return (
+                                    <span key={empId} className="inline-flex items-center gap-1 rounded-full border border-blue-100 bg-blue-50 px-2.5 py-1 text-[10px] font-semibold text-blue-800">
+                                      <UserCheck size={11} />
+                                      <span className="max-w-[150px] truncate">{name}</span>
+                                    </span>
+                                  );
+                                })}
+                              </div>
+                            )}
+
+                            {isEmployeePickerOpen && authUser?.role !== 'EMPLOYEE' && (
+                              <div id="contact-assigned-employees" className="mt-2 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-lg">
+                                <div className="border-b border-slate-100 p-2.5">
+                                  <div className="relative">
+                                    <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                                    <input
+                                      type="search"
+                                      value={employeePickerSearch}
+                                      onChange={e => setEmployeePickerSearch(e.target.value)}
+                                      placeholder="Search by name, email or department"
+                                      className="w-full rounded-lg border border-slate-200 py-2 pl-9 pr-3 text-xs outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-500/10"
+                                    />
+                                  </div>
+                                  <div className="mt-2 flex items-center justify-between">
+                                    <span className="text-[10px] font-semibold text-slate-500">
+                                      {selectedIds.length} of {employeesList.length} selected
+                                    </span>
+                                    <div className="flex items-center gap-3">
+                                      <button
+                                        type="button"
+                                        className="text-[10px] font-bold text-blue-600 hover:text-blue-800"
+                                        onClick={() => updateAssignedEmployees(employeesList.map((emp: any) => emp.userId || emp.user?.id || emp.id))}
+                                      >
+                                        Select all
+                                      </button>
+                                      <button
+                                        type="button"
+                                        className="text-[10px] font-bold text-slate-500 hover:text-slate-800"
+                                        onClick={() => updateAssignedEmployees([])}
+                                      >
+                                        Clear
+                                      </button>
+                                    </div>
+                                  </div>
+                                </div>
+                                <div className="max-h-52 overflow-y-auto p-1.5">
+                                  {filteredEmployees.length === 0 ? (
+                                    <p className="px-3 py-5 text-center text-xs text-slate-500">No employees match your search.</p>
+                                  ) : filteredEmployees.map((emp: any) => {
+                                    const empId = emp.userId || emp.user?.id || emp.id;
+                                    const name = `${emp.firstName || emp.user?.firstName || ''} ${emp.lastName || emp.user?.lastName || ''}`.trim()
+                                      || emp.name || emp.email || 'Employee';
+                                    const email = emp.email || emp.user?.email;
+                                    const isSelected = isEmpSelected(emp);
+                                    return (
+                                      <label key={empId} className={clsx(
+                                        'flex cursor-pointer items-center gap-3 rounded-lg px-2.5 py-2 transition-colors',
+                                        isSelected ? 'bg-blue-50' : 'hover:bg-slate-50'
+                                      )}>
+                                        <input
+                                          type="checkbox"
+                                          checked={isSelected}
+                                          onChange={e => {
+                                            const empIds = [emp.userId, emp.user?.id, emp.id].filter(Boolean);
+                                            updateAssignedEmployees(
+                                              e.target.checked
+                                                ? Array.from(new Set([...selectedIds, empId]))
+                                                : selectedIds.filter(id => !empIds.includes(id))
+                                            );
+                                          }}
+                                          className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                                        />
+                                        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-slate-100 text-xs font-bold text-slate-600">
+                                          {name.charAt(0).toUpperCase()}
+                                        </span>
+                                        <span className="min-w-0 flex-1">
+                                          <span className="block truncate text-xs font-semibold text-slate-800">{name}</span>
+                                          <span className="block truncate text-[10px] text-slate-500">
+                                            {[email, emp.department].filter(Boolean).join(' · ') || 'Employee'}
+                                          </span>
+                                        </span>
+                                      </label>
+                                    );
+                                  })}
+                                </div>
+                                <div className="border-t border-slate-100 px-3 py-2 text-[10px] text-slate-500">
+                                  Changes are saved when you update the contact.
+                                </div>
+                              </div>
+                            )}
+
+                            {authUser?.role === 'EMPLOYEE' && (
+                              <p className="mt-1 text-[10px] text-slate-500">Only the owner can change employee assignments.</p>
+                            )}
+                          </>
+                        );
+                      })()}
                     </div>
                     </div>
                   )}

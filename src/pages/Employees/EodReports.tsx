@@ -16,10 +16,13 @@ import toast from 'react-hot-toast';
 import type { Employee } from './EmployeesLayout';
 import { sortData } from '../../utils/sortUtils';
 import EmployeeDailyDrillDown, { DailyDrillDownRecord } from './components/EmployeeDailyDrillDown';
+import { useAuthStore } from '@store/auth.store';
 
 export default function EmployeeEodReports() {
   const navigate = useNavigate();
   const qc = useQueryClient();
+  const user = useAuthStore(s => s.user);
+  const isEmployee = user?.role === 'EMPLOYEE';
 
   // Filter States - Automatically default to last 7 days window (e.g. 28/10/2026 to 04/11/2026)
   const [selectedEmpId, setSelectedEmpId] = useState<string>('ALL');
@@ -39,6 +42,7 @@ export default function EmployeeEodReports() {
   const { data: empData } = useQuery({
     queryKey: ['employees', 'all'],
     queryFn: () => employeesService.list({ page: 1, limit: 500 }),
+    enabled: !isEmployee,
   });
   const employeeOptions = (empData?.data ?? empData ?? []) as any[];
 
@@ -106,14 +110,16 @@ export default function EmployeeEodReports() {
   };
 
   // Real Workforce Productivity & Deliverables Query
+  const reportEmployeeId = isEmployee ? user?.id : selectedEmpId;
   const { data: reportData, isLoading: isReportLoading } = useQuery({
-    queryKey: ['workforce-reports', selectedEmpId, selectedDept, dateFrom, dateTo],
+    queryKey: ['workforce-reports', reportEmployeeId, selectedDept, dateFrom, dateTo],
     queryFn: () => employeesService.getWorkforceReports({
-      employeeId: selectedEmpId,
+      employeeId: reportEmployeeId,
       department: selectedDept,
       startDate: dateFrom,
       endDate: dateTo,
     }),
+    enabled: !isEmployee || Boolean(reportEmployeeId),
   });
 
   // Filtered / Received Period Records
@@ -218,7 +224,7 @@ export default function EmployeeEodReports() {
         {/* Filter Inputs Grid */}
         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
           {/* Employee Dropdown */}
-          <div>
+          {!isEmployee && <div>
             <label className="text-[11px] font-bold text-slate-600 block mb-1">Select Employee</label>
             <select
               value={selectedEmpId}
@@ -237,7 +243,7 @@ export default function EmployeeEodReports() {
                 );
               })}
             </select>
-          </div>
+          </div>}
 
           {/* Department Filter */}
           <div>

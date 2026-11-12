@@ -6,10 +6,10 @@ import { Search, Users, Shield, FileText, TrendingUp, UserCheck, Briefcase } fro
 import { useDebounce } from '../../hooks/useDebounce';
 
 const SECTION_META: Record<string, { label: string; Icon: React.ElementType; getRoute: (item: any) => string; color: string }> = {
-  contacts:   { label: 'Contacts',   Icon: Users,       getRoute: (i) => `/contacts/${i.id}`,   color: 'text-blue-600 bg-blue-50' },
+  contacts:   { label: 'Contacts',   Icon: Users,       getRoute: (i) => `/contacts?openContactId=${i.id}&viewMode=true`,   color: 'text-blue-600 bg-blue-50' },
   leads:      { label: 'Leads',      Icon: TrendingUp,  getRoute: (i) => `/leads/${i.id}`,      color: 'text-purple-600 bg-purple-50' },
   policies:   { label: 'Policies',   Icon: Shield,      getRoute: (i) => `/policies/${i.id}`,   color: 'text-emerald-600 bg-emerald-50' },
-  claims:     { label: 'Claims',     Icon: FileText,    getRoute: (i) => `/claims/${i.id}`,     color: 'text-amber-600 bg-amber-50' },
+  claims:     { label: 'Claims',     Icon: FileText,    getRoute: (i) => `/claims?openClaimId=${i.id}&view=detail`,     color: 'text-amber-600 bg-amber-50' },
   employees:  { label: 'Employees',  Icon: UserCheck,   getRoute: (i) => `/employees/${i.id}`,  color: 'text-teal-600 bg-teal-50' },
   operations: { label: 'Operations', Icon: Briefcase,   getRoute: () => `/operations`,          color: 'text-indigo-600 bg-indigo-50' },
 };
@@ -146,7 +146,15 @@ export default function GlobalSearch() {
                   {items.map((item: any) => (
                     <button
                       key={item.id}
-                      onClick={() => navigate(getRoute(item))}
+                      onClick={() => {
+                        if (section === 'contacts') {
+                          window.dispatchEvent(new CustomEvent('open-contact-modal', { detail: { contactId: item.id, isView: true } }));
+                        }
+                        if (section === 'claims') {
+                          window.dispatchEvent(new CustomEvent('open-claim-modal', { detail: { claimId: item.id, isView: true } }));
+                        }
+                        navigate(getRoute(item));
+                      }}
                       className="w-full flex items-center justify-between px-3 py-2.5 rounded-lg hover:bg-gray-50 text-left transition-colors group cursor-pointer">
                       <div className="min-w-0">
                         <p className="text-sm font-medium text-gray-900 truncate">{getItemLabel(section, item)}</p>

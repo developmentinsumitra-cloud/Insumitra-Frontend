@@ -10,10 +10,10 @@ import { useDebounce } from '@hooks/useDebounce';
 import { useEffect } from 'react';
 
 const SECTION_META: Record<string, { label: string; Icon: React.ElementType; color: string; iconBg: string; getRoute: (item: any) => string }> = {
-  contacts:   { label: 'Contacts',   Icon: Users,       color: 'text-blue-600',    iconBg: 'bg-blue-50',    getRoute: (i) => `/contacts/${i.id}` },
+  contacts:   { label: 'Contacts',   Icon: Users,       color: 'text-blue-600',    iconBg: 'bg-blue-50',    getRoute: (i) => `/contacts?openContactId=${i.id}&viewMode=true` },
   leads:      { label: 'Leads',      Icon: TrendingUp,  color: 'text-purple-600',  iconBg: 'bg-purple-50',  getRoute: (i) => `/leads/${i.id}` },
   policies:   { label: 'Policies',   Icon: Shield,      color: 'text-emerald-600', iconBg: 'bg-emerald-50', getRoute: (i) => `/policies/${i.id}` },
-  claims:     { label: 'Claims',     Icon: FileText,    color: 'text-amber-600',   iconBg: 'bg-amber-50',   getRoute: (i) => `/claims/${i.id}` },
+  claims:     { label: 'Claims',     Icon: FileText,    color: 'text-amber-600',   iconBg: 'bg-amber-50',   getRoute: (i) => `/claims?openClaimId=${i.id}&view=detail` },
   employees:  { label: 'Employees',  Icon: UserCheck,   color: 'text-teal-600',    iconBg: 'bg-teal-50',    getRoute: (i) => `/employees/${i.id}` },
   operations: { label: 'Operations', Icon: Briefcase,   color: 'text-indigo-600',  iconBg: 'bg-indigo-50',  getRoute: () => `/operations` },
 };
@@ -230,6 +230,12 @@ export default function Header({ title, setMobileOpen }: { title?: string, setMo
                                     e.preventDefault();
                                     setShowSearch(false);
                                     setQuery('');
+                                    if (section === 'contacts') {
+                                      window.dispatchEvent(new CustomEvent('open-contact-modal', { detail: { contactId: item.id, isView: true } }));
+                                    }
+                                    if (section === 'claims') {
+                                      window.dispatchEvent(new CustomEvent('open-claim-modal', { detail: { claimId: item.id, isView: true } }));
+                                    }
                                     navigate(getRoute(item));
                                   }}
                                 >

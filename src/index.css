@@ -71,18 +71,83 @@
   input[type='number']::-webkit-inner-spin-button,
   input[type='number']::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
   input[type='number'] { -moz-appearance: textfield; appearance: textfield; }
-  /* Global Table Styles */
+  /* ── Global Unified Table Design System ───────────────────────────────────── */
+
+  /* Table wrapper — shared across ALL modules */
   table {
-    @apply w-full border-collapse border border-slate-200;
+    width: 100%;
+    border-collapse: collapse;
+    border: 1px solid #e2e8f0;
+    font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+    font-size: 0.8125rem; /* 13px unified */
+    color: #0f172a;
   }
-  th, td {
-    @apply border border-slate-200;
+
+  /* ── Table Header ── */
+  thead tr,
+  thead > tr {
+    background: #f8fafc !important;
+    border-bottom: 2px solid #e2e8f0 !important;
   }
+
+  thead th,
+  th {
+    padding: 10px 14px !important;
+    font-size: 11px !important;
+    font-weight: 700 !important;
+    text-transform: uppercase !important;
+    letter-spacing: 0.045em !important;
+    color: #475569 !important;
+    text-align: left;
+    white-space: nowrap;
+    background: #f8fafc !important;
+    border: none !important;
+    border-bottom: 2px solid #e2e8f0 !important;
+    border-right: 1px solid #f1f5f9 !important;
+    vertical-align: middle;
+    line-height: 1.4;
+  }
+
+  thead th:last-child,
+  th:last-child {
+    border-right: none !important;
+  }
+
+  /* ── Table Body Rows ── */
+  tbody tr {
+    border-bottom: 1px solid #f1f5f9 !important;
+    transition: background-color 0.1s ease;
+  }
+
   tbody tr:nth-child(even) {
-    @apply bg-slate-50/80;
+    background-color: #f8fafc !important;
   }
+
   tbody tr:nth-child(odd) {
-    @apply bg-white;
+    background-color: #ffffff !important;
+  }
+
+  tbody tr:hover {
+    background-color: #eff6ff !important;
+  }
+
+  /* ── Table Cells ── */
+  tbody td,
+  td {
+    padding: 10px 14px !important;
+    font-size: 13px !important;
+    font-weight: 500 !important;
+    color: #1e293b !important;
+    border: none !important;
+    border-bottom: 1px solid #f1f5f9 !important;
+    border-right: 1px solid #f8fafc !important;
+    vertical-align: middle;
+    line-height: 1.45;
+  }
+
+  tbody td:last-child,
+  td:last-child {
+    border-right: none !important;
   }
 }
 
@@ -272,18 +337,39 @@
     scrollbar-width: none;
   }
 
-  /* ──────────────────────────── Tables (legacy) ───────────────────────────── */
+  /* ──────────────────────────── Tables (unified) ─────────────────────────── */
 
-  .modern-table { @apply w-full border-collapse; }
+  /* modern-table: now uses same design as global table (kept for backwards compat) */
+  .modern-table {
+    width: 100%;
+    border-collapse: collapse;
+    border: 1px solid #e2e8f0;
+  }
   .modern-table th {
-    @apply px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider
-           text-gray-400 border-b border-gray-100 bg-gray-50/70;
+    padding: 10px 14px !important;
+    font-size: 11px !important;
+    font-weight: 700 !important;
+    text-transform: uppercase !important;
+    letter-spacing: 0.045em !important;
+    color: #475569 !important;
+    background: #f8fafc !important;
+    border: none !important;
+    border-bottom: 2px solid #e2e8f0 !important;
+    text-align: left;
+    white-space: nowrap;
+    vertical-align: middle;
   }
   .modern-table td {
-    @apply px-4 py-3 text-sm text-gray-700 border-b border-gray-50;
+    padding: 10px 14px !important;
+    font-size: 13px !important;
+    font-weight: 500 !important;
+    color: #1e293b !important;
+    border: none !important;
+    border-bottom: 1px solid #f1f5f9 !important;
+    vertical-align: middle;
   }
-  .hover-row { @apply transition-colors duration-100 cursor-pointer; }
-  .hover-row:hover { @apply bg-blue-50/30; }
+  .hover-row { transition: background-color 0.1s ease; cursor: pointer; }
+  .hover-row:hover { background-color: #eff6ff !important; }
 
   /* ──────────────────────────── Assign badge ──────────────────────────────── */
 
@@ -476,14 +562,21 @@ body, button, input, select, textarea {
 .module-scale-80 .text-2xl  { font-size: 1.625rem !important; line-height: 1.35 !important; }   /* ~26px */
 .module-scale-80 .text-3xl  { font-size: 2rem !important; line-height: 1.3 !important; }       /* ~32px */
 
-/* Table headers & cells inside scaled modules */
+/* Table headers & cells inside scaled modules — scaled relative to unified base */
 .module-scale-80 th {
   font-size: 13.5px !important;
   font-weight: 700 !important;
-  letter-spacing: 0.03em !important;
+  letter-spacing: 0.045em !important;
+  text-transform: uppercase !important;
+  color: #475569 !important;
+  background: #f8fafc !important;
+  padding: 12px 17px !important;
 }
 .module-scale-80 td {
-  font-size: 14.5px !important;
+  font-size: 16px !important;
+  font-weight: 500 !important;
+  padding: 12px 17px !important;
+  color: #1e293b !important;
 }
 
 /* Inputs, buttons & controls inside scaled modules */
@@ -570,14 +663,152 @@ div.relative > input[placeholder*="search"] {
 }
 
 
+/* ═══════════════════════════════════════════════════════════════════════════
+   UNIFIED MODULE DESIGN SYSTEM
+   Consistent look & feel for ALL pages: Contacts, Leads, Policies, Claims,
+   Employees, Commissions, Calendar, Documents — zero component changes.
+   ═══════════════════════════════════════════════════════════════════════════ */
 
+/* ── Page-level table container ── */
+.module-table-wrap {
+  border-radius: 12px;
+  border: 1px solid #e2e8f0;
+  overflow: hidden;
+  background: #ffffff;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.04), 0 1px 2px rgba(0,0,0,0.02);
+}
 
+/* ── Pagination ── */
+.pagination-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 32px;
+  height: 32px;
+  padding: 0 10px;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  border: 1px solid #e2e8f0;
+  background: #ffffff;
+  color: #374151;
+  cursor: pointer;
+  transition: all 0.12s ease;
+}
+.pagination-btn:hover {
+  background: #eff6ff;
+  border-color: #93c5fd;
+  color: #1d4ed8;
+}
+.pagination-btn.active {
+  background: #2563eb;
+  border-color: #2563eb;
+  color: #ffffff;
+  box-shadow: 0 1px 3px rgba(37,99,235,0.3);
+}
 
+/* ── Quick filter / tab chips ── */
+.quick-filter-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 11px;
+  border-radius: 20px;
+  font-size: 11.5px;
+  font-weight: 600;
+  border: 1.5px solid #e2e8f0;
+  background: #f8fafc;
+  color: #475569;
+  cursor: pointer;
+  transition: all 0.12s ease;
+  white-space: nowrap;
+}
+.quick-filter-chip:hover {
+  background: #eff6ff;
+  border-color: #93c5fd;
+  color: #1d4ed8;
+}
+.quick-filter-chip.active {
+  background: #2563eb;
+  border-color: #2563eb;
+  color: #ffffff;
+}
 
+/* ── Uniform table action icon buttons ── */
+.tbl-action-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  border: none;
+  cursor: pointer;
+  transition: all 0.12s ease;
+  font-size: 13px;
+}
+.tbl-action-btn:hover {
+  transform: scale(1.08);
+}
 
+/* ── Standardize inline status badges in tables ── */
+tbody td .badge,
+tbody td span.badge {
+  font-size: 11px !important;
+  font-weight: 700 !important;
+  letter-spacing: 0.03em !important;
+  padding: 2px 9px !important;
+  border-radius: 20px !important;
+  display: inline-flex;
+  align-items: center;
+}
 
+/* ── Sortable column header arrows ── */
+thead th button,
+th button {
+  all: unset;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px !important;
+  font-weight: 700 !important;
+  text-transform: uppercase !important;
+  letter-spacing: 0.045em !important;
+  color: #475569 !important;
+  white-space: nowrap;
+}
+thead th button:hover,
+th button:hover {
+  color: #1e40af !important;
+}
 
+/* ── Uniform "Records showing" footer text ── */
+.table-footer-text {
+  font-size: 12px;
+  font-weight: 600;
+  color: #64748b;
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+}
 
+/* ── Empty state inside tables ── */
+tbody tr td[colspan] {
+  text-align: center;
+  color: #94a3b8;
+  font-size: 13px;
+  font-weight: 500;
+  padding: 40px 20px !important;
+  background: #ffffff !important;
+}
 
-
-
+/* ── Responsive: on small screens, reduce padding slightly ── */
+@media (max-width: 639px) {
+  thead th, th {
+    padding: 8px 10px !important;
+    font-size: 10px !important;
+  }
+  tbody td, td {
+    padding: 8px 10px !important;
+    font-size: 12px !important;
+  }
+}

@@ -128,6 +128,17 @@ export default function ClaimPolicyDetailsTab({
   const planCategory = p.plan?.category || p.category || 'Health';
   const sumAssuredVal = p.sumAssured || p.sumInsured || p.plan?.sumInsured;
   const premiumVal = p.premiumAmount;
+  const isLifeOrTerm = [
+    p.plan?.category,
+    p.plan?.company?.category,
+    p.category,
+    p.policyCategory,
+    p.policyType,
+  ].some(category => {
+    if (!category) return false;
+    const normalized = String(category).toUpperCase();
+    return normalized.includes('LIFE') || normalized.includes('TERM');
+  });
   const agentName = p.agentName
     || `${p.agent?.firstName || p.assignedEmployee?.employeeProfile?.firstName || ''} ${p.agent?.lastName || p.assignedEmployee?.employeeProfile?.lastName || ''}`.trim()
     || '—';
@@ -323,14 +334,18 @@ export default function ClaimPolicyDetailsTab({
             label="Premium Amount (₹)"
             value={premiumVal ? `₹${Number(premiumVal).toLocaleString('en-IN')}` : '—'}
           />
-          <DetailField
-            label="1st Year Premium Amount (₹)"
-            value={firstYearPremium ? `₹${Number(firstYearPremium).toLocaleString('en-IN')}` : '—'}
-          />
-          <DetailField
-            label="2nd Year Onwards Premium Amount (₹)"
-            value={secondYearPremium ? `₹${Number(secondYearPremium).toLocaleString('en-IN')}` : '—'}
-          />
+          {isLifeOrTerm && (
+            <>
+              <DetailField
+                label="1st Year Premium Amount (₹)"
+                value={firstYearPremium ? `₹${Number(firstYearPremium).toLocaleString('en-IN')}` : '—'}
+              />
+              <DetailField
+                label="2nd Year Onwards Premium Amount (₹)"
+                value={secondYearPremium ? `₹${Number(secondYearPremium).toLocaleString('en-IN')}` : '—'}
+              />
+            </>
+          )}
           <DetailField label="Installment Frequency" value={p.paymentFrequency || '—'} />
           <DetailField
             label="Payment Method / Mode"

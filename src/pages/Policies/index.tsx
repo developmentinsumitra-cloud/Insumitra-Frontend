@@ -405,6 +405,8 @@ export const policyFormSchema = z.object({
     return [];
   }, z.array(z.string()).default([])),
   deductible: z.string().optional(),
+  bonus1: z.string().optional(),
+  bonus2: z.string().optional(),
   status: z.string().optional(),
   assignedEmployeeId: z.string().optional(),
   nextDueDate: z.string().optional(),
@@ -466,6 +468,8 @@ export function parseExtraNotes(notesText?: string | null): Record<string, any> 
     policyZoneLocationTier: '',
     familySize: '',
     deductible: '',
+    bonus1: '',
+    bonus2: '',
     riders: [] as string[],
     firstYearPremium: undefined as number | undefined,
     secondYearPremium: undefined as number | undefined,
@@ -582,6 +586,10 @@ export function parseExtraNotes(notesText?: string | null): Record<string, any> 
       res.policyTerm = line.replace('Policy Term: ', '').trim();
     } else if (line.startsWith('Deductible: ')) {
       res.deductible = line.replace('Deductible: ', '').trim();
+    } else if (/^Bonus 1(?:\s*\(No Claim Bonus\))?:\s*/i.test(line)) {
+      res.bonus1 = line.replace(/^Bonus 1(?:\s*\(No Claim Bonus\))?:\s*/i, '').trim();
+    } else if (/^Bonus 2(?:\s*\(Super\s*\/\s*Cumulative\))?:\s*/i.test(line)) {
+      res.bonus2 = line.replace(/^Bonus 2(?:\s*\(Super\s*\/\s*Cumulative\))?:\s*/i, '').trim();
     } else if (line.startsWith('Riders/Addons: ')) {
       res.riders = line.replace('Riders/Addons: ', '').split(',').map(s => s.trim());
     } else if (line.startsWith('First Premium Date: ')) {
@@ -814,6 +822,8 @@ export const policyEditFormSchema = z.object({
     return [];
   }, z.array(z.string()).default([])),
   deductible: z.string().optional(),
+  bonus1: z.string().optional(),
+  bonus2: z.string().optional(),
   assignedEmployeeId: z.string().optional(),
   firstPremiumDate: z.string().optional(),
   premiumPaymentPeriod: z.coerce.number().optional(),
@@ -2111,6 +2121,8 @@ export default function Policies() {
         return [];
       }, z.array(z.string()).default([])),
       deductible: z.string().optional().or(z.literal('')),
+      bonus1: z.string().optional().or(z.literal('')),
+      bonus2: z.string().optional().or(z.literal('')),
       status: z.string().optional(),
       assignedEmployeeId: isFieldRequired('assignedEmployeeId', false) ? z.string().min(1, 'Required') : z.string().optional(),
       nextDueDate: isFieldRequired('nextDueDate', false) ? z.string().min(1, 'Required') : z.string().optional(),
@@ -2171,6 +2183,8 @@ export default function Policies() {
         return [];
       }, z.array(z.string()).default([])),
       deductible: z.string().optional().or(z.literal('')),
+      bonus1: z.string().optional().or(z.literal('')),
+      bonus2: z.string().optional().or(z.literal('')),
       assignedEmployeeId: isFieldRequired('assignedEmployeeId', false) ? z.string().min(1, 'Required') : z.string().optional(),
       firstPremiumDate: isFieldRequired('firstPremiumDate', false) ? z.string().min(1, 'Required') : z.string().optional(),
       premiumPaymentPeriod: isFieldRequired('premiumPaymentPeriod', false) ? z.coerce.number().min(1, 'Required') : z.coerce.number().optional().or(z.literal('')),
@@ -2839,6 +2853,8 @@ export default function Policies() {
     setValue('agentCode', p.agentCode ?? '');
     setValue('notes', extra.cleanNotes || '');
     setValue('deductible', extra.deductible || '');
+    setValue('bonus1', extra.bonus1 || '');
+    setValue('bonus2', extra.bonus2 || '');
     setValue('riders', extra.riders || []);
     setValue('assignedEmployeeId', p.assignedEmployeeId ?? '');
     setValue('firstPremiumDate', extra.firstPremiumDate || '');
@@ -3090,7 +3106,7 @@ export default function Policies() {
       openedPolicyIdRef.current = null;
       return;
     }
-    if (openedPolicyIdRef.current === targetViewPolicyId && modalOpen) return;
+    if (openedPolicyIdRef.current === targetViewPolicyId) return;
 
     const fetchedPolicy = routePolicyRes?.data || routePolicyRes;
     if (fetchedPolicy && (fetchedPolicy.id === targetViewPolicyId || (fetchedPolicy as any)._id === targetViewPolicyId)) {
@@ -3106,7 +3122,7 @@ export default function Policies() {
         openView(match);
       }
     }
-  }, [targetViewPolicyId, routePolicyRes, rawPolicies, modalOpen]);
+  }, [targetViewPolicyId, routePolicyRes, rawPolicies]);
 
   useEffect(() => {
     if (targetViewPolicyId && routePolicyError) {
@@ -3263,7 +3279,7 @@ export default function Policies() {
         render: r => {
           const name = r.contact ? `${r.contact.firstName} ${r.contact.lastName || ''}`.trim() : '—';
           return (
-            <span className="font-extrabold text-slate-900 text-xs hover:text-blue-600 transition-colors">
+            <span className="font-extrabold text-slate-900 text-sm hover:text-blue-600 transition-colors">
               {name}
             </span>
           );
@@ -3273,7 +3289,7 @@ export default function Policies() {
         key: 'proposerContact',
         label: 'Proposer Contact No.',
         sortable: true,
-        render: r => <span className="font-bold text-slate-800 text-xs">{r.contact?.phone || '—'}</span>
+        render: r => <span className="font-bold text-slate-800 text-sm">{r.contact?.phone || '—'}</span>
       },
       {
         key: 'insuredPerson',
@@ -3282,7 +3298,7 @@ export default function Policies() {
         render: r => {
           const extra = parseExtraNotes(r.notes);
           const name = extra.insuredPerson || (r.contact ? `${r.contact.firstName} ${r.contact.lastName || ''}`.trim() : '—');
-          return <span className="font-extrabold text-slate-900 text-xs">{name}</span>;
+          return <span className="font-extrabold text-slate-900 text-sm">{name}</span>;
         }
       },
       {
@@ -3291,7 +3307,7 @@ export default function Policies() {
         sortable: true,
         render: r => {
           const extra = parseExtraNotes(r.notes);
-          return <span className="font-bold text-slate-800 text-xs">{extra.policyZoneLocationCity || (r.contact as any)?.address?.city || (r.contact as any)?.city || '—'}</span>;
+          return <span className="font-bold text-slate-800 text-sm">{extra.policyZoneLocationCity || (r.contact as any)?.address?.city || (r.contact as any)?.city || '—'}</span>;
         }
       },
       {
@@ -3310,7 +3326,7 @@ export default function Policies() {
         sortable: true,
         render: r => {
           const extra = parseExtraNotes(r.notes);
-          return <span className="font-extrabold text-slate-900 text-xs">{extra.companyName || (r.plan?.company ? r.plan.company.name : '—')}</span>;
+          return <span className="font-extrabold text-slate-900 text-sm">{extra.companyName || (r.plan?.company ? r.plan.company.name : '—')}</span>;
         }
       },
       {
@@ -3319,14 +3335,14 @@ export default function Policies() {
         sortable: true,
         render: r => {
           const extra = parseExtraNotes(r.notes);
-          return <span className="font-bold text-slate-800 text-xs">{extra.planCategory || r.plan?.category || '—'}</span>;
+          return <span className="font-bold text-slate-800 text-sm">{extra.planCategory || r.plan?.category || '—'}</span>;
         }
       },
       {
         key: 'plan.name',
         label: 'Plan Name',
         sortable: true,
-        render: r => <span className="font-extrabold text-blue-900 text-xs">{r.plan?.name ? r.plan.name : '—'}</span>
+        render: r => <span className="font-extrabold text-blue-900 text-sm">{r.plan?.name ? r.plan.name : '—'}</span>
       },
       {
         key: 'customerCategory',
@@ -3334,7 +3350,7 @@ export default function Policies() {
         sortable: true,
         render: r => {
           const extra = parseExtraNotes(r.notes);
-          return <span className="font-bold text-slate-800 text-xs">{extra.customerCategory || (r.businessType ? (r.businessType === 'FRESH' ? 'Fresh' : r.businessType === 'PORT' ? 'Port' : r.businessType === 'RENEWAL' ? 'Renewal' : r.businessType) : '') || (r.contact as any)?.category || (r as any).customerCategory || '—'}</span>;
+          return <span className="font-bold text-slate-800 text-sm">{extra.customerCategory || (r.businessType ? (r.businessType === 'FRESH' ? 'Fresh' : r.businessType === 'PORT' ? 'Port' : r.businessType === 'RENEWAL' ? 'Renewal' : r.businessType) : '') || (r.contact as any)?.category || (r as any).customerCategory || '—'}</span>;
         }
       },
       {
@@ -3343,14 +3359,14 @@ export default function Policies() {
         sortable: true,
         render: r => {
           const extra = parseExtraNotes(r.notes);
-          return <span className="font-bold text-slate-800 text-xs">{extra.policyType || (r as any).policyType || r.plan?.category || '—'}</span>;
+          return <span className="font-bold text-slate-800 text-sm">{extra.policyType || (r as any).policyType || r.plan?.category || '—'}</span>;
         }
       },
       {
         key: 'policyNumber',
         label: 'Policy Number',
         sortable: true,
-        render: r => <span className="font-black text-slate-900 text-xs tracking-tight bg-slate-50 px-2 py-0.5 rounded border border-slate-200/60">{r.policyNumber || '—'}</span>
+        render: r => <span className="font-black text-slate-900 text-sm tracking-tight bg-slate-50 px-2 py-0.5 rounded border border-slate-200/60">{r.policyNumber || '—'}</span>
       },
       {
         key: 'status',
@@ -3369,7 +3385,7 @@ export default function Policies() {
         key: 'sumAssured',
         label: 'Sum Insured',
         sortable: true,
-        render: r => <span className="font-extrabold text-slate-900 text-xs">{r.sumAssured ? `₹${Number(r.sumAssured).toLocaleString('en-IN')}` : '—'}</span>
+        render: r => <span className="font-extrabold text-slate-900 text-sm">{r.sumAssured ? `₹${Number(r.sumAssured).toLocaleString('en-IN')}` : '—'}</span>
       },
       {
         key: 'policyTenure',
@@ -3377,12 +3393,12 @@ export default function Policies() {
         sortable: true,
         render: r => {
           const extra = parseExtraNotes(r.notes);
-          if (extra.policyTenure) return <span className="font-bold text-slate-800 text-xs">{extra.policyTenure}</span>;
+          if (extra.policyTenure) return <span className="font-bold text-slate-800 text-sm">{extra.policyTenure}</span>;
           if (r.startDate && r.endDate) {
             const years = Math.max(1, Math.round((new Date(r.endDate).getTime() - new Date(r.startDate).getTime()) / (365.25 * 24 * 60 * 60 * 1000)));
-            return <span className="font-bold text-slate-800 text-xs">{`${years} ${years === 1 ? 'Year' : 'Years'}`}</span>;
+            return <span className="font-bold text-slate-800 text-sm">{`${years} ${years === 1 ? 'Year' : 'Years'}`}</span>;
           }
-          return <span className="font-bold text-slate-800 text-xs">{(r as any).tenure || (r as any).duration || '—'}</span>;
+          return <span className="font-bold text-slate-800 text-sm">{(r as any).tenure || (r as any).duration || '—'}</span>;
         }
       },
       {
@@ -3390,9 +3406,9 @@ export default function Policies() {
         label: 'Policy Term (Period of Coverage in Years)',
         sortable: true,
         render: r => {
-          if (!r.startDate || !r.endDate) return <span className="font-bold text-slate-800 text-xs">{(r as any).policyTerm ? `${(r as any).policyTerm} Years` : '—'}</span>;
+          if (!r.startDate || !r.endDate) return <span className="font-bold text-slate-800 text-sm">{(r as any).policyTerm ? `${(r as any).policyTerm} Years` : '—'}</span>;
           const years = Math.max(1, Math.round((new Date(r.endDate).getTime() - new Date(r.startDate).getTime()) / (365.25 * 24 * 60 * 60 * 1000)));
-          return <span className="font-bold text-slate-800 text-xs">{`${years} ${years === 1 ? 'Year' : 'Years'}`}</span>;
+          return <span className="font-bold text-slate-800 text-sm">{`${years} ${years === 1 ? 'Year' : 'Years'}`}</span>;
         }
       },
       {
@@ -3403,7 +3419,7 @@ export default function Policies() {
           const empName = r.assignedEmployee?.employeeProfile
             ? `${r.assignedEmployee.employeeProfile.firstName} ${r.assignedEmployee.employeeProfile.lastName}`
             : ((r.assignedEmployee as any)?.firstName ? `${(r.assignedEmployee as any).firstName} ${(r.assignedEmployee as any).lastName || ''}` : '—');
-          return <span className="font-bold text-slate-800 text-xs">{empName}</span>;
+          return <span className="font-bold text-slate-800 text-sm">{empName}</span>;
         }
       },
       {
@@ -3418,7 +3434,7 @@ export default function Policies() {
         sortable: true,
         render: r => {
           const val = (r as any).firstYearPremium ? `₹${Number((r as any).firstYearPremium).toLocaleString('en-IN')}` : (r.premiumAmount ? `₹${Number(r.premiumAmount).toLocaleString('en-IN')}` : '—');
-          return <span className="font-extrabold text-slate-900 text-xs">{val}</span>;
+          return <span className="font-extrabold text-slate-900 text-sm">{val}</span>;
         }
       },
       {
@@ -3427,14 +3443,14 @@ export default function Policies() {
         sortable: true,
         render: r => {
           const val = (r as any).secondYearPremium ? `₹${Number((r as any).secondYearPremium).toLocaleString('en-IN')}` : (r.premiumAmount ? `₹${Number(r.premiumAmount).toLocaleString('en-IN')}` : '—');
-          return <span className="font-extrabold text-slate-900 text-xs">{val}</span>;
+          return <span className="font-extrabold text-slate-900 text-sm">{val}</span>;
         }
       },
       {
         key: 'premiumAmount',
         label: 'Premium Amount',
         sortable: true,
-        render: r => <span className="font-extrabold text-slate-900 text-xs">{r.premiumAmount ? `₹${Number(r.premiumAmount).toLocaleString('en-IN')}` : '—'}</span>
+        render: r => <span className="font-extrabold text-slate-900 text-sm">{r.premiumAmount ? `₹${Number(r.premiumAmount).toLocaleString('en-IN')}` : '—'}</span>
       },
       {
         key: 'installmentCase',
@@ -3455,7 +3471,7 @@ export default function Policies() {
         sortable: true,
         render: r => {
           const extra = parseExtraNotes(r.notes);
-          return <span className="font-bold text-slate-800 text-xs">{extra.downpaymentAmount ? `₹${Number(extra.downpaymentAmount).toLocaleString('en-IN')}` : '—'}</span>;
+          return <span className="font-bold text-slate-800 text-sm">{extra.downpaymentAmount ? `₹${Number(extra.downpaymentAmount).toLocaleString('en-IN')}` : '—'}</span>;
         }
       },
       {
@@ -3464,7 +3480,7 @@ export default function Policies() {
         sortable: true,
         render: r => {
           const extra = parseExtraNotes(r.notes);
-          return <span className="font-bold text-slate-800 text-xs">{extra.processingFee ? `₹${Number(extra.processingFee).toLocaleString('en-IN')}` : '—'}</span>;
+          return <span className="font-bold text-slate-800 text-sm">{extra.processingFee ? `₹${Number(extra.processingFee).toLocaleString('en-IN')}` : '—'}</span>;
         }
       },
       {
@@ -3474,7 +3490,7 @@ export default function Policies() {
         render: r => {
           const extra = parseExtraNotes(r.notes);
           const amt = extra.installmentAmount || extra.emiPremium;
-          return <span className="font-bold text-slate-800 text-xs">{amt ? `₹${Number(amt).toLocaleString('en-IN')}` : '—'}</span>;
+          return <span className="font-bold text-slate-800 text-sm">{amt ? `₹${Number(amt).toLocaleString('en-IN')}` : '—'}</span>;
         }
       },
       {
@@ -3483,7 +3499,7 @@ export default function Policies() {
         sortable: true,
         render: r => {
           const extra = parseExtraNotes(r.notes);
-          return <span className="font-bold text-slate-800 text-xs">{extra.noOfInstallments || (r as any).noOfInstallments || '—'}</span>;
+          return <span className="font-bold text-slate-800 text-sm">{extra.noOfInstallments || (r as any).noOfInstallments || '—'}</span>;
         }
       },
       {
@@ -3493,7 +3509,7 @@ export default function Policies() {
         render: r => {
           const extra = parseExtraNotes(r.notes);
           const d = extra.lastInstallmentDate || extra.lastPremiumDate || r.lastPremiumDate;
-          return <span className="font-bold text-slate-800 text-xs">{d ? d.slice(0, 10) : '—'}</span>;
+          return <span className="font-bold text-slate-800 text-sm">{d ? d.slice(0, 10) : '—'}</span>;
         }
       },
       {
@@ -3505,24 +3521,24 @@ export default function Policies() {
           if (extra.nominees && extra.nominees.length > 0) {
             const nom = extra.nominees[0];
             return (
-              <div className="text-xs">
+              <div className="text-sm">
                 <span className="font-extrabold text-purple-900">{nom.name}</span>
                 <span className="text-slate-500 font-medium ml-1">({nom.relationship})</span>
-                {nom.dob && <span className="block text-[10px] text-slate-500 font-medium">DoB: {nom.dob}</span>}
+                {nom.dob && <span className="block text-[11px] text-slate-500 font-medium">DoB: {nom.dob}</span>}
               </div>
             );
           }
           if ((r as any).nominees && (r as any).nominees.length > 0) {
             const nom = (r as any).nominees[0];
             return (
-              <div className="text-xs">
+              <div className="text-sm">
                 <span className="font-extrabold text-purple-900">{nom.name}</span>
                 <span className="text-slate-500 font-medium ml-1">({nom.relationship})</span>
-                {nom.dateOfBirth && <span className="block text-[10px] text-slate-500 font-medium">DoB: {nom.dateOfBirth.slice(0, 10)}</span>}
+                {nom.dateOfBirth && <span className="block text-[11px] text-slate-500 font-medium">DoB: {nom.dateOfBirth.slice(0, 10)}</span>}
               </div>
             );
           }
-          return <span className="text-slate-400 text-xs">—</span>;
+          return <span className="text-slate-400 text-sm">—</span>;
         }
       }
     ];
@@ -3601,6 +3617,8 @@ export default function Policies() {
     // Format notes to include extra Excel fields
     let extraNotes = body.notes ? body.notes.trim() : '';
     if (body.deductible) extraNotes += `\nDeductible: ${body.deductible}`;
+    if (body.bonus1) extraNotes += `\nBonus 1 (No Claim Bonus): ${body.bonus1}`;
+    if (body.bonus2) extraNotes += `\nBonus 2 (Super / Cumulative): ${body.bonus2}`;
     if (body.riders && body.riders.length > 0) extraNotes += `\nRiders/Addons: ${body.riders.join(', ')}`;
     if (body.firstPremiumDate) extraNotes += `\nFirst Premium Date: ${body.firstPremiumDate}`;
     if (body.premiumPaymentPeriod) extraNotes += `\nPremium Payment Period: ${body.premiumPaymentPeriod} Years`;
@@ -3831,6 +3849,8 @@ export default function Policies() {
         extraNotes += `\nInsured Person: ${insuredPerson}`;
       }
       if (body.deductible) extraNotes += `\nDeductible: ${body.deductible}`;
+      if (body.bonus1) extraNotes += `\nBonus 1 (No Claim Bonus): ${body.bonus1}`;
+      if (body.bonus2) extraNotes += `\nBonus 2 (Super / Cumulative): ${body.bonus2}`;
       if (body.riders && body.riders.length > 0) extraNotes += `\nRiders/Addons: ${body.riders.join(', ')}`;
       if (body.firstPremiumDate) extraNotes += `\nFirst Premium Date: ${body.firstPremiumDate}`;
       if (body.premiumPaymentPeriod) extraNotes += `\nPremium Payment Period: ${body.premiumPaymentPeriod} Years`;
@@ -5517,6 +5537,7 @@ export default function Policies() {
                               Bonus 1 (No Claim Bonus)
                             </label>
                             <input
+                              {...register('bonus1')}
                               type="text"
                               className="input w-full h-10 text-xs rounded-xl bg-white border border-slate-200 focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
                               placeholder="e.g. 50% NCB Bonus"
@@ -5529,6 +5550,7 @@ export default function Policies() {
                               Bonus 2 (Super / Cumulative)
                             </label>
                             <input
+                              {...register('bonus2')}
                               type="text"
                               className="input w-full h-10 text-xs rounded-xl bg-white border border-slate-200 focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
                               placeholder="e.g. Cumulative Super Bonus"

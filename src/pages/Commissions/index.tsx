@@ -164,6 +164,7 @@ export default function Commissions() {
     claimNumber?: string;
     proposerName: string;
     baseAmount: number;
+    assignedEmployeeName?: string;
     status?: string;
   } | null>(null);
   const [selectedEmployeesList, setSelectedEmployeesList] = useState<{
@@ -205,7 +206,6 @@ export default function Commissions() {
   const allCommissionsList: any[] = allCommissionsData?.data ?? [];
 
   const [selectedEmployeeSummary, setSelectedEmployeeSummary] = useState<any | null>(null);
-  const [summaryModalStatusFilter, setSummaryModalStatusFilter] = useState<'ALL' | 'PAID' | 'UNPAID'>('ALL');
 
   const existingDistributedForSelected = useMemo(() => {
     if (!selectedPolicy) return [];
@@ -217,12 +217,18 @@ export default function Commissions() {
         if (selectedPolicy.claimNumber && claimNum && claimNum.toLowerCase() === String(selectedPolicy.claimNumber).toLowerCase()) return true;
         if (selectedPolicy.item?.id && claimNum && claimNum === selectedPolicy.item.id) return true;
         const effectivePolicyId = selectedPolicy.effectivePolicyId;
-        return effectivePolicyId && c.policyId === effectivePolicyId && Boolean(claimNum);
+        return effectivePolicyId && (c.policyId === effectivePolicyId || c.policy?.id === effectivePolicyId) && Boolean(claimNum);
       });
     } else {
       return allCommissionsList.filter((c: any) => {
         const isClaimComm = c.notes?.match(/\[Claim:\s*([^\]]+)\]/i);
-        return c.policyId === (selectedPolicy.effectivePolicyId || selectedPolicy.item?.id) && !isClaimComm;
+        const targetPolId = selectedPolicy.item?.id || selectedPolicy.effectivePolicyId;
+        const matchesPolicy = (
+          c.policyId === targetPolId ||
+          c.policy?.id === targetPolId ||
+          (selectedPolicy.policyNumber && (c.policy?.policyNumber === selectedPolicy.policyNumber || c.notes?.includes(selectedPolicy.policyNumber)))
+        );
+        return matchesPolicy && !isClaimComm;
       });
     }
   }, [selectedPolicy, allCommissionsList]);
@@ -397,6 +403,26 @@ export default function Commissions() {
       ? `${p.contact.firstName || ''} ${p.contact.lastName || ''}`.trim()
       : (((p as any).customer?.firstName) ? `${(p as any).customer.firstName} ${(p as any).customer.lastName || ''}`.trim() : '');
 
+    const targetEmpId = p.assignedEmployeeId || p.assignedEmployee?.id || p.policy?.assignedEmployeeId;
+    let assignedEmpName = '';
+    if (targetEmpId) {
+      const found = employeesList.find((e: any) =>
+        e.id === targetEmpId || e.userId === targetEmpId || e.user?.id === targetEmpId
+      );
+      if (found) {
+        assignedEmpName = `${found.firstName || ''} ${found.lastName || ''}`.trim() || found.user?.email || '';
+      }
+    }
+    if (!assignedEmpName && p.assignedEmployee) {
+      assignedEmpName = `${p.assignedEmployee.firstName || p.assignedEmployee.employeeProfile?.firstName || ''} ${p.assignedEmployee.lastName || p.assignedEmployee.employeeProfile?.lastName || ''}`.trim();
+    }
+    if (!assignedEmpName && p.policy?.assignedEmployee) {
+      assignedEmpName = `${p.policy.assignedEmployee.firstName || p.policy.assignedEmployee.employeeProfile?.firstName || ''} ${p.policy.assignedEmployee.lastName || p.policy.assignedEmployee.employeeProfile?.lastName || ''}`.trim();
+    }
+    if (!assignedEmpName && p.agentName) {
+      assignedEmpName = p.agentName;
+    }
+
     const newPol = {
       id: uniqueKey,
       item: p,
@@ -407,6 +433,7 @@ export default function Commissions() {
       policyNumber: pNum,
       claimNumber: isClaim ? p.claimNumber : undefined,
       proposerName: proposer,
+      assignedEmployeeName: assignedEmpName || 'Unassigned',
       baseAmount: prem,
       status: p.status || (isClaim ? 'Claim' : 'Active'),
     };
@@ -415,28 +442,40 @@ export default function Commissions() {
     setValue('policyId', effectivePolicyId, { shouldValidate: true });
     setValue('basePremium', prem);
 
-    // Update base amount and recalculate commissions for currently selected employees
-    setSelectedEmployeesList(prev => {
-      const updated = prev.map(emp => {
-        const amt = Math.round(prem * (emp.rate / 100));
-        return { ...emp, baseAmount: prem, commissionAmount: amt };
-      });
-      const totalAmt = updated.reduce((acc, curr) => acc + curr.commissionAmount, 0);
-      setValue('amount', totalAmt, { shouldValidate: true });
-      setValue('baseCommissionAmount', totalAmt);
-      return updated;
-    });
+    // Check existing commissions for this item
+    const isClaimItem = p._itemType === 'CLAIM';
+    const existingComms = isClaimItem
+      ? allCommissionsList.filter((c: any) => {
+          const claimMatch = c.notes?.match(/\[Claim:\s*([^\]]+)\]/i);
+          const claimNum = claimMatch ? claimMatch[1].trim() : '';
+          return (p.claimNumber && claimNum && claimNum.toLowerCase() === String(p.claimNumber).toLowerCase()) || (p.id && claimNum && claimNum === p.id);
+        })
+      : allCommissionsList.filter((c: any) => {
+          const isClaimComm = c.notes?.match(/\[Claim:\s*([^\]]+)\]/i);
+          const polId = p.id;
+          return (c.policyId === polId || c.policy?.id === polId) && !isClaimComm;
+        });
 
-    // Auto-add assigned employee if employees list is empty
-    const targetEmpId = p.assignedEmployeeId || p.assignedEmployee?.id || p.policy?.assignedEmployeeId;
-    if (targetEmpId) {
-      const found = employeesList.find((e: any) =>
-        e.id === targetEmpId || e.userId === targetEmpId || e.user?.id === targetEmpId
-      );
-      if (found) {
-        handleAddEmployee(found, newPol);
-      } else if (p.assignedEmployee) {
-        handleAddEmployee(p.assignedEmployee, newPol);
+    if (existingComms.length > 0) {
+      // If commissions already exist, keep new distribution list clean so user can review existing assigned employees
+      setSelectedEmployeesList([]);
+      setValue('amount', 0);
+      setValue('baseCommissionAmount', 0);
+    } else {
+      setSelectedEmployeesList([]);
+      setValue('amount', 0);
+      setValue('baseCommissionAmount', 0);
+
+      // Auto-add assigned employee if first time distributing commission
+      if (targetEmpId) {
+        const found = employeesList.find((e: any) =>
+          e.id === targetEmpId || e.userId === targetEmpId || e.user?.id === targetEmpId
+        );
+        if (found) {
+          handleAddEmployee(found, newPol);
+        } else if (p.assignedEmployee) {
+          handleAddEmployee(p.assignedEmployee, newPol);
+        }
       }
     }
 
@@ -2058,8 +2097,9 @@ return (
                               return (
                                 <div
                                   key={`grid-claim-${item.id}`}
+                                  onClick={() => handleClickPolicyOrClaim(item)}
                                   className={clsx(
-                                    "bg-white rounded-2xl border transition-all p-4 flex flex-col justify-between group",
+                                    "bg-white rounded-2xl border transition-all p-4 flex flex-col justify-between group cursor-pointer",
                                     isSelected
                                       ? "border-amber-400 ring-2 ring-amber-400/30 bg-amber-50/20 shadow-md"
                                       : "border-slate-200/90 shadow-2xs hover:shadow-md hover:border-amber-300"
@@ -2154,8 +2194,9 @@ return (
                             return (
                               <div
                                 key={`grid-policy-${item.id}`}
+                                onClick={() => handleClickPolicyOrClaim(item)}
                                 className={clsx(
-                                  "bg-white rounded-2xl border transition-all p-4 flex flex-col justify-between group",
+                                  "bg-white rounded-2xl border transition-all p-4 flex flex-col justify-between group cursor-pointer",
                                   isSelected
                                     ? "border-indigo-400 ring-2 ring-indigo-400/30 bg-indigo-50/20 shadow-md"
                                     : "border-slate-200/90 shadow-2xs hover:shadow-md hover:border-indigo-300"
@@ -2295,12 +2336,13 @@ return (
                                   return (
                                     <tr
                                       key={`tbl-clm-${item.id}`}
+                                      onClick={() => handleClickPolicyOrClaim(item)}
                                       className={clsx(
-                                        "transition-colors",
-                                        isSelected ? "bg-amber-50/70" : "hover:bg-amber-50/30"
+                                        "transition-colors cursor-pointer",
+                                        isSelected ? "bg-amber-50/70" : "hover:bg-amber-50/40"
                                       )}
                                     >
-                                      <td className="py-3 px-3 text-center">
+                                      <td className="py-3 px-3 text-center" onClick={(e) => e.stopPropagation()}>
                                         <input
                                           type="checkbox"
                                           checked={isSelected}
@@ -2381,12 +2423,13 @@ return (
                                 return (
                                   <tr
                                     key={`tbl-pol-${item.id}`}
+                                    onClick={() => handleClickPolicyOrClaim(item)}
                                     className={clsx(
-                                      "transition-colors",
-                                      isSelected ? "bg-indigo-50/70" : "hover:bg-indigo-50/30"
+                                      "transition-colors cursor-pointer",
+                                      isSelected ? "bg-indigo-50/70" : "hover:bg-indigo-50/40"
                                     )}
                                   >
-                                    <td className="py-3 px-3 text-center">
+                                    <td className="py-3 px-3 text-center" onClick={(e) => e.stopPropagation()}>
                                       <input
                                         type="checkbox"
                                         checked={isSelected}
@@ -2672,16 +2715,16 @@ return (
                   </div>
 
                   {selectedPolicy ? (
-                    <div className="flex items-center justify-between px-3 py-2 rounded-xl border border-indigo-200 bg-gradient-to-r from-indigo-50/80 to-blue-50/50 min-h-[46px]">
+                    <div className="flex items-center justify-between px-3.5 py-2.5 rounded-xl border border-indigo-200 bg-gradient-to-r from-indigo-50/90 via-blue-50/50 to-white min-h-[50px] shadow-2xs">
                       <div className="flex items-center gap-2.5 min-w-0">
                         <div className={clsx(
-                          "w-7 h-7 rounded-lg flex items-center justify-center text-[10px] font-black shrink-0",
+                          "w-8 h-8 rounded-lg flex items-center justify-center text-[10px] font-black shrink-0 shadow-2xs",
                           selectedPolicy.itemType === 'CLAIM' ? "bg-amber-500 text-white" : "bg-indigo-600 text-white"
                         )}>
-                          {selectedPolicy.itemType === 'CLAIM' ? 'CL' : <Shield size={14} />}
+                          {selectedPolicy.itemType === 'CLAIM' ? 'CL' : <Shield size={15} />}
                         </div>
                         <div className="min-w-0">
-                          <div className="flex items-center gap-1.5">
+                          <div className="flex items-center gap-2">
                             <p className="text-xs font-bold text-slate-900 truncate">
                               {selectedPolicy.title}
                             </p>
@@ -2689,11 +2732,15 @@ return (
                               ₹{Number(selectedPolicy.baseAmount || 0).toLocaleString('en-IN')}
                             </span>
                           </div>
-                          <p className="text-[10px] text-slate-500 truncate">
-                            {selectedPolicy.policyNumber ? `Pol #${selectedPolicy.policyNumber}` : ''}
-                            {selectedPolicy.companyName ? ` • ${selectedPolicy.companyName}` : ''}
-                            {selectedPolicy.proposerName ? ` • ${selectedPolicy.proposerName}` : ''}
-                          </p>
+                          <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px] text-slate-500 mt-0.5">
+                            {selectedPolicy.policyNumber && <span>Pol #{selectedPolicy.policyNumber}</span>}
+                            {selectedPolicy.claimNumber && <span>Claim #{selectedPolicy.claimNumber}</span>}
+                            {selectedPolicy.companyName && <span>• {selectedPolicy.companyName}</span>}
+                            {selectedPolicy.proposerName && <span>• Client: <strong className="text-slate-700 font-semibold">{selectedPolicy.proposerName}</strong></span>}
+                            <span className="inline-flex items-center gap-1 font-bold text-indigo-700 bg-white border border-indigo-200 px-1.5 py-0.2 rounded shadow-2xs">
+                              <User size={10} className="text-indigo-600" /> Assigned: {selectedPolicy.assignedEmployeeName || 'Unassigned'}
+                            </span>
+                          </div>
                         </div>
                       </div>
                       <button
@@ -2828,14 +2875,14 @@ return (
               {/* ALREADY COMMISSION DISTRIBUTED EMPLOYEES */}
               {selectedPolicy && (
                 <div className="bg-gradient-to-r from-amber-50/70 via-slate-50 to-indigo-50/40 border border-amber-200/90 rounded-2xl p-3.5 space-y-2.5">
-                  <div className="flex items-center justify-between">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
                     <div className="flex items-center gap-2">
                       <div className="w-5 h-5 rounded-full bg-emerald-600 text-white flex items-center justify-center text-[10px] font-black shadow-2xs">
                         ✓
                       </div>
                       <div>
                         <span className="text-xs font-bold text-slate-800">
-                          Already Commission Distributed Employees
+                          Previously Assigned / Commission Distributed Employees
                         </span>
                         <span className={clsx(
                           "ml-1.5 text-[10px] font-extrabold px-2 py-0.5 rounded-full",
@@ -2849,22 +2896,27 @@ return (
                     </div>
                     {existingDistributedForSelected.length > 0 && (
                       <span className="text-xs font-extrabold text-emerald-700 bg-white border border-emerald-200 px-2.5 py-0.5 rounded-lg shadow-2xs">
-                        Distributed: ₹{existingDistributedForSelected.reduce((sum: number, c: any) => sum + Number(c.amount || 0), 0).toLocaleString('en-IN')}
+                        Total Distributed: ₹{existingDistributedForSelected.reduce((sum: number, c: any) => sum + Number(c.amount || 0), 0).toLocaleString('en-IN')}
                       </span>
                     )}
                   </div>
 
                   {existingDistributedForSelected.length === 0 ? (
-                    <div className="flex items-center gap-2 px-3 py-2 bg-white/80 border border-slate-200 rounded-xl text-xs text-slate-500">
-                      <Info size={14} className="text-slate-400 shrink-0" />
-                      <span>No commission has been distributed for this {selectedPolicy.itemType === 'CLAIM' ? 'claim' : 'policy'} yet. You are distributing the first commission.</span>
+                    <div className="flex items-center gap-2 px-3 py-2.5 bg-white/90 border border-slate-200 rounded-xl text-xs text-slate-600">
+                      <Info size={14} className="text-indigo-500 shrink-0" />
+                      <span>
+                        No commission has been distributed for this {selectedPolicy.itemType === 'CLAIM' ? 'claim' : 'policy'} yet.
+                        {selectedPolicy.assignedEmployeeName && selectedPolicy.assignedEmployeeName !== 'Unassigned' && (
+                          <> System assigned agent: <strong className="text-indigo-800 font-bold">{selectedPolicy.assignedEmployeeName}</strong>.</>
+                        )}
+                      </span>
                     </div>
                   ) : (
                     <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-2xs">
                       <table className="w-full border-collapse text-left text-xs">
                         <thead>
                           <tr className="bg-slate-50 text-[10px] font-extrabold uppercase text-slate-500 border-b border-slate-200">
-                            <th className="px-3 py-2">Employee</th>
+                            <th className="px-3 py-2">Assigned Employee</th>
                             <th className="px-3 py-2 text-right">Commission Amount</th>
                             <th className="px-3 py-2 text-center">Status</th>
                             <th className="px-3 py-2">Remark / Paid Date</th>
@@ -2872,13 +2924,20 @@ return (
                         </thead>
                         <tbody className="divide-y divide-slate-100">
                           {existingDistributedForSelected.map((dc: any, idx: number) => {
-                            const bName = dc.beneficiary
-                              ? `${dc.beneficiary.firstName || ''} ${dc.beneficiary.lastName || ''}`.trim()
-                              : (dc.notes?.match(/Beneficiary:\s*([^\n]+)/i)?.[1] || 'Employee');
+                            const employeeProfile = dc.beneficiary?.employeeProfile;
+                            const bName = [
+                              dc.beneficiary?.firstName || employeeProfile?.firstName,
+                              dc.beneficiary?.lastName || employeeProfile?.lastName,
+                            ].filter(Boolean).join(' ').trim()
+                              || dc.notes?.match(/Beneficiary:\s*([^\n]+)/i)?.[1]?.trim()
+                              || 'Employee';
                             const bDesig = dc.beneficiary?.designation || (dc.beneficiary?.role === 'OWNER' ? 'Owner / Admin' : 'Advisor / Agent');
                             const isPaid = Boolean(dc.isPaid);
                             const matchRemark = dc.notes?.match(/Payment Remark:\s*([^\n]+)/i);
                             const commentText = matchRemark ? matchRemark[1].trim() : (dc.remark || (dc.paidAt ? format(new Date(dc.paidAt), 'dd/MM/yyyy') : '—'));
+                            const commAmt = Number(dc.amount || 0);
+                            const baseAmt = Number(selectedPolicy.baseAmount || 0);
+                            const pct = baseAmt > 0 ? ((commAmt / baseAmt) * 100).toFixed(1) : null;
 
                             return (
                               <tr key={dc.id || idx} className="hover:bg-slate-50/60 transition-colors">
@@ -2894,7 +2953,8 @@ return (
                                   </div>
                                 </td>
                                 <td className="px-3 py-2 text-right font-extrabold text-emerald-600 whitespace-nowrap">
-                                  ₹{Number(dc.amount || 0).toLocaleString('en-IN')}
+                                  ₹{commAmt.toLocaleString('en-IN')}
+                                  {pct && <span className="text-[10px] text-slate-400 font-medium ml-1">({pct}%)</span>}
                                 </td>
                                 <td className="px-3 py-2 text-center whitespace-nowrap">
                                   <span className={clsx(
@@ -3678,7 +3738,7 @@ return (
       {/* ── Employee Commission Full Summary Modal ────────────────────────────── */}
       <Modal
         open={!!selectedEmployeeSummary}
-        onClose={() => { setSelectedEmployeeSummary(null); setSummaryModalStatusFilter('ALL'); }}
+        onClose={() => setSelectedEmployeeSummary(null)}
         title="Employee Commission Summary"
         subtitle={selectedEmployeeSummary ? "Detailed commission breakdown and profile" : undefined}
         size="2xl"
@@ -3686,7 +3746,7 @@ return (
         {selectedEmployeeSummary && (() => {
           const selectedEmpId = selectedEmployeeSummary.beneficiaryId || selectedEmployeeSummary.beneficiary?.id;
           const selectedEmpName = selectedEmployeeSummary.beneficiary
-            ? `${selectedEmployeeSummary.beneficiary.firstName || ''} ${selectedEmployeeSummary.beneficiary.lastName || ''}`.trim()
+            ? `${selectedEmployeeSummary.beneficiary.firstName || selectedEmployeeSummary.beneficiary.employeeProfile?.firstName || ''} ${selectedEmployeeSummary.beneficiary.lastName || selectedEmployeeSummary.beneficiary.employeeProfile?.lastName || ''}`.trim()
             : (selectedEmployeeSummary.notes?.match(/Beneficiary:\s*([^\n]+)/i)?.[1] || 'Employee');
 
           const employeeProfile = employeesList.find((e: any) =>
@@ -3703,23 +3763,30 @@ return (
           const displayEmpDesig = employeeProfile?.designation || employeeProfile?.role || selectedEmployeeSummary.beneficiary?.designation || 'Advisor / Agent';
           const displayEmpCode = employeeProfile?.employeeCode || employeeProfile?.code || '';
 
-          const empAllComms = allCommissionsList.filter((c: any) => {
+          const employeeComms = allCommissionsList.filter((c: any) => {
             if (selectedEmpId && (c.beneficiaryId === selectedEmpId || c.beneficiary?.id === selectedEmpId)) return true;
             const cName = c.beneficiary
-              ? `${c.beneficiary.firstName || ''} ${c.beneficiary.lastName || ''}`.trim().toLowerCase()
+              ? `${c.beneficiary.firstName || c.beneficiary.employeeProfile?.firstName || ''} ${c.beneficiary.lastName || c.beneficiary.employeeProfile?.lastName || ''}`.trim().toLowerCase()
               : (c.notes?.match(/Beneficiary:\s*([^\n]+)/i)?.[1] || '').trim().toLowerCase();
             return cName && cName === selectedEmpName.toLowerCase();
           });
-
-          const totalEarned = empAllComms.reduce((sum: number, c: any) => sum + Number(c.amount || 0), 0);
-          const totalPaid = empAllComms.filter((c: any) => c.isPaid).reduce((sum: number, c: any) => sum + Number(c.amount || 0), 0);
-          const totalPending = empAllComms.filter((c: any) => !c.isPaid).reduce((sum: number, c: any) => sum + Number(c.amount || 0), 0);
-
-          const filteredModalComms = empAllComms.filter((c: any) => {
-            if (summaryModalStatusFilter === 'PAID') return c.isPaid;
-            if (summaryModalStatusFilter === 'UNPAID') return !c.isPaid;
-            return true;
+          const selectedClaimMatch = selectedEmployeeSummary.notes?.match(/\[Claim:\s*([^\]]+)\]/i);
+          const selectedClaimNumber = selectedClaimMatch?.[1]?.trim();
+          const selectedPolicyId = selectedEmployeeSummary.policyId || selectedEmployeeSummary.policy?.id;
+          const matchingCurrentItemComms = employeeComms.filter((c: any) => {
+            const claimMatch = c.notes?.match(/\[Claim:\s*([^\]]+)\]/i);
+            const claimNumber = claimMatch?.[1]?.trim();
+            if (selectedClaimNumber) {
+              return claimNumber?.toLowerCase() === selectedClaimNumber.toLowerCase();
+            }
+            if (selectedPolicyId) {
+              return c.policyId === selectedPolicyId && !claimNumber;
+            }
+            return c.id === selectedEmployeeSummary.id;
           });
+          const empAllComms = matchingCurrentItemComms.length > 0
+            ? matchingCurrentItemComms
+            : [selectedEmployeeSummary];
 
           return (
             <div className="space-y-4 py-1">
@@ -3761,87 +3828,19 @@ return (
                 </div>
               </div>
 
-              {/* 4 Stat KPI Cards */}
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
-                <div className="p-3 bg-white rounded-xl border border-slate-200 shadow-2xs">
-                  <span className="text-[10px] font-extrabold uppercase text-slate-400 block tracking-wider">Total Earned</span>
-                  <span className="text-base font-black text-slate-900 block mt-0.5">
-                    ₹{totalEarned.toLocaleString('en-IN')}
-                  </span>
-                  <span className="text-[10px] text-slate-400 font-semibold">{empAllComms.length} entries</span>
-                </div>
-                <div className="p-3 bg-white rounded-xl border border-emerald-200 bg-emerald-50/20 shadow-2xs">
-                  <span className="text-[10px] font-extrabold uppercase text-emerald-600 block tracking-wider">Paid / Settled</span>
-                  <span className="text-base font-black text-emerald-700 block mt-0.5">
-                    ₹{totalPaid.toLocaleString('en-IN')}
-                  </span>
-                  <span className="text-[10px] text-emerald-600 font-semibold">
-                    {empAllComms.filter((c: any) => c.isPaid).length} paid
-                  </span>
-                </div>
-                <div className="p-3 bg-white rounded-xl border border-rose-200 bg-rose-50/20 shadow-2xs">
-                  <span className="text-[10px] font-extrabold uppercase text-rose-600 block tracking-wider">Pending / Due</span>
-                  <span className="text-base font-black text-rose-700 block mt-0.5">
-                    ₹{totalPending.toLocaleString('en-IN')}
-                  </span>
-                  <span className="text-[10px] text-rose-600 font-semibold">
-                    {empAllComms.filter((c: any) => !c.isPaid).length} pending
-                  </span>
-                </div>
-                <div className="p-3 bg-white rounded-xl border border-indigo-200 bg-indigo-50/20 shadow-2xs">
-                  <span className="text-[10px] font-extrabold uppercase text-indigo-600 block tracking-wider">Settlement Rate</span>
-                  <span className="text-base font-black text-indigo-700 block mt-0.5">
-                    {totalEarned > 0 ? `${Math.round((totalPaid / totalEarned) * 100)}%` : '0%'}
-                  </span>
-                  <span className="text-[10px] text-indigo-500 font-semibold">settled</span>
-                </div>
-              </div>
-
-              {/* Status Filter Tabs & Table Header */}
+              {/* Commission Breakdown */}
               <div className="space-y-2 pt-1">
                 <div className="flex items-center justify-between flex-wrap gap-2">
                   <h4 className="text-xs font-bold text-slate-800 flex items-center gap-1.5 uppercase tracking-wider">
                     <FileText size={14} className="text-indigo-600" />
                     <span>Distributed Commissions Breakdown</span>
                   </h4>
-                  <div className="flex items-center gap-1 bg-slate-100 p-0.5 rounded-lg text-xs">
-                    <button
-                      type="button"
-                      onClick={() => setSummaryModalStatusFilter('ALL')}
-                      className={clsx(
-                        "px-2.5 py-1 rounded-md text-[11px] font-bold transition-all cursor-pointer",
-                        summaryModalStatusFilter === 'ALL' ? "bg-white text-indigo-700 shadow-2xs" : "text-slate-600 hover:text-slate-900"
-                      )}
-                    >
-                      All ({empAllComms.length})
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setSummaryModalStatusFilter('PAID')}
-                      className={clsx(
-                        "px-2.5 py-1 rounded-md text-[11px] font-bold transition-all cursor-pointer",
-                        summaryModalStatusFilter === 'PAID' ? "bg-emerald-600 text-white shadow-2xs" : "text-slate-600 hover:text-emerald-700"
-                      )}
-                    >
-                      Paid ({empAllComms.filter((c: any) => c.isPaid).length})
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setSummaryModalStatusFilter('UNPAID')}
-                      className={clsx(
-                        "px-2.5 py-1 rounded-md text-[11px] font-bold transition-all cursor-pointer",
-                        summaryModalStatusFilter === 'UNPAID' ? "bg-rose-600 text-white shadow-2xs" : "text-slate-600 hover:text-rose-700"
-                      )}
-                    >
-                      Unpaid ({empAllComms.filter((c: any) => !c.isPaid).length})
-                    </button>
-                  </div>
                 </div>
 
-                {filteredModalComms.length === 0 ? (
+                {empAllComms.length === 0 ? (
                   <div className="border border-slate-200 rounded-xl p-8 text-center bg-slate-50/50">
                     <Clock size={28} className="mx-auto text-slate-300 mb-1" />
-                    <p className="text-xs text-slate-400 font-semibold">No commissions found for this filter</p>
+                    <p className="text-xs text-slate-400 font-semibold">No commissions found</p>
                   </div>
                 ) : (
                   <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white max-h-[340px] shadow-2xs">
@@ -3857,7 +3856,7 @@ return (
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100">
-                        {filteredModalComms.map((c: any, i: number) => {
+                        {empAllComms.map((c: any, i: number) => {
                           const claimMatch = c.notes?.match(/\[Claim:\s*([^\]]+)\]/i);
                           const claimNum = claimMatch ? claimMatch[1].trim() : null;
                           const pNum = c.policy?.policyNumber || '—';

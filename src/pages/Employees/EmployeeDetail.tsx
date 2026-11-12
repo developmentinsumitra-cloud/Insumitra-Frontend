@@ -98,8 +98,6 @@ const MODULES = [
   { key: 'leads',             label: 'Leads Pipeline' },
   { key: 'policies',          label: 'Policies' },
   { key: 'claims',            label: 'Claims' },
-  { key: 'calendar',          label: 'Calendar & Tasks' },
-  { key: 'whatsapp',          label: 'WhatsApp Broadcasts' },
   { key: 'operations',        label: 'Operations' },
   { key: 'commissions',       label: 'Commissions' },
   { key: 'employees',         label: 'Employees Directory' },
@@ -158,76 +156,87 @@ export default function EmployeeDetail() {
     retry: false,
   });
 
-  // Fallback mock employee when backend is offline or loading
-  const baseEmp = (employee?.data ?? employee) || {
-    id: id || 'emp-001',
-    firstName: 'Rahul',
-    lastName: 'Sharma',
-    phone: '+91 98765 43210',
-    alternatePhone: '+91 98111 22334',
-    designation: 'Senior Insurance Specialist',
-    department: 'Sales & Business Development',
-    reportingManager: 'Rahul Mehta (Agency Principal)',
-    dateOfJoining: '2022-04-15',
-    dateOfBirth: '1992-08-20',
-    gender: 'MALE',
-    bloodGroup: 'B+',
-    panNumber: 'ABCPS1234F',
-    aadhaarNumber: '4589 1234 5678',
-    emergencyContactName: 'Sunita Sharma (Spouse)',
-    emergencyContactPhone: '+91 98765 99887',
-    address: 'Flat 402, Sea View Towers, Worli, Mumbai 400018',
-    baseSalary: 45000,
-    bonusPlanned: 15000,
-    monthlyTarget: 500000,
-    callsTarget: 25,
-    visitsTarget: 5,
-    commissionRate: 12.5,
-    bankName: 'HDFC Bank Ltd',
-    bankAccountNumber: '50100234567890',
-    bankIfscCode: 'HDFC0001234',
-    bankBranch: 'Nariman Point, Mumbai',
-    bankAccountType: 'Savings',
+  // Default empty employee structure
+  const defaultEmptyEmp = {
+    id: id || '',
+    firstName: '',
+    lastName: '',
+    phone: '',
+    alternatePhone: '',
+    designation: '',
+    department: '',
+    reportingManager: '',
+    dateOfJoining: '',
+    dateOfBirth: '',
+    gender: '',
+    bloodGroup: '',
+    panNumber: '',
+    aadhaarNumber: '',
+    emergencyContactName: '',
+    emergencyContactPhone: '',
+    address: '',
+    baseSalary: undefined,
+    bonusPlanned: undefined,
+    monthlyTarget: undefined,
+    callsTarget: 0,
+    visitsTarget: 0,
+    commissionRate: undefined,
+    bankName: '',
+    bankAccountNumber: '',
+    bankIfscCode: '',
+    bankBranch: '',
+    bankAccountType: '',
     isActive: true,
     user: {
-      email: 'rahul.sharma@demo-agency.com',
+      email: '',
       role: 'EMPLOYEE',
-      permissions: ['contacts', 'leads', 'policies', 'claims', 'calendar', 'workspace']
+      permissions: ['contacts', 'leads', 'policies', 'claims', 'workspace']
     }
   };
+
+  const rawEmp = (employee?.data ?? employee) || null;
+  const baseEmp = rawEmp ? {
+    ...defaultEmptyEmp,
+    ...rawEmp,
+    user: {
+      ...(defaultEmptyEmp.user || {}),
+      ...(rawEmp.user || {}),
+      permissions: Array.isArray(rawEmp.user?.permissions) ? rawEmp.user.permissions : (defaultEmptyEmp.user?.permissions || []),
+    }
+  } : defaultEmptyEmp;
 
   const [empState, setEmpState] = useState<any>(baseEmp);
 
   const editForm = useForm<EmployeeEditForm>({
     resolver: zodResolver(employeeEditSchema),
     defaultValues: {
-      firstName: baseEmp.firstName,
-      lastName: baseEmp.lastName,
-      phone: baseEmp.phone,
+      firstName: baseEmp.firstName || '',
+      lastName: baseEmp.lastName || '',
+      phone: baseEmp.phone || '',
       alternatePhone: baseEmp.alternatePhone || '',
       designation: baseEmp.designation || '',
       department: baseEmp.department || '',
       reportingManager: baseEmp.reportingManager || '',
       dateOfJoining: baseEmp.dateOfJoining ? baseEmp.dateOfJoining.slice(0, 10) : '',
       dateOfBirth: baseEmp.dateOfBirth ? baseEmp.dateOfBirth.slice(0, 10) : '',
-      gender: baseEmp.gender as any,
+      gender: (baseEmp.gender || '') as any,
       bloodGroup: baseEmp.bloodGroup || '',
       panNumber: baseEmp.panNumber || '',
       aadhaarNumber: baseEmp.aadhaarNumber || '',
       emergencyContactName: baseEmp.emergencyContactName || '',
       emergencyContactPhone: baseEmp.emergencyContactPhone || '',
       address: baseEmp.address || '',
-      baseSalary: baseEmp.baseSalary,
-      bonusPlanned: baseEmp.bonusPlanned,
-      monthlyTarget: baseEmp.monthlyTarget,
-      callsTarget: baseEmp.callsTarget,
-      visitsTarget: baseEmp.visitsTarget,
-      commissionRate: baseEmp.commissionRate || 12,
+      baseSalary: baseEmp.baseSalary ?? '',
+      bonusPlanned: baseEmp.bonusPlanned ?? '',
+      monthlyTarget: baseEmp.monthlyTarget ?? '',
+      callsTarget: baseEmp.callsTarget ?? 0,
+      visitsTarget: baseEmp.visitsTarget ?? 0,
+      commissionRate: baseEmp.commissionRate ?? '',
       bankName: baseEmp.bankName || '',
       bankAccountNumber: baseEmp.bankAccountNumber || '',
       bankIfscCode: baseEmp.bankIfscCode || '',
       bankBranch: baseEmp.bankBranch || '',
-      bankAccountType: baseEmp.bankAccountType || 'Savings',
+      bankAccountType: baseEmp.bankAccountType || '',
     }
   });
 
@@ -244,43 +253,43 @@ export default function EmployeeDetail() {
     if (employee?.data || employee) {
       const rawData = employee?.data ?? employee;
       const merged = { 
-        ...baseEmp, 
+        ...defaultEmptyEmp, 
         ...rawData,
         user: {
-          ...(baseEmp.user || {}),
+          ...(defaultEmptyEmp.user || {}),
           ...(rawData.user || {}),
-          permissions: Array.isArray(rawData.user?.permissions) ? rawData.user.permissions : (baseEmp.user?.permissions || []),
+          permissions: Array.isArray(rawData.user?.permissions) ? rawData.user.permissions : (defaultEmptyEmp.user?.permissions || []),
         }
       };
       setEmpState(merged);
       editForm.reset({
-        firstName: merged.firstName,
-        lastName: merged.lastName,
-        phone: merged.phone,
+        firstName: merged.firstName || '',
+        lastName: merged.lastName || '',
+        phone: merged.phone || '',
         alternatePhone: merged.alternatePhone || '',
         designation: merged.designation || '',
         department: merged.department || '',
         reportingManager: merged.reportingManager || '',
         dateOfJoining: merged.dateOfJoining ? merged.dateOfJoining.slice(0, 10) : '',
         dateOfBirth: merged.dateOfBirth ? merged.dateOfBirth.slice(0, 10) : '',
-        gender: merged.gender as any,
+        gender: (merged.gender || '') as any,
         bloodGroup: merged.bloodGroup || '',
         panNumber: merged.panNumber || '',
         aadhaarNumber: merged.aadhaarNumber || '',
         emergencyContactName: merged.emergencyContactName || '',
         emergencyContactPhone: merged.emergencyContactPhone || '',
         address: merged.address || '',
-        baseSalary: merged.baseSalary,
-        bonusPlanned: merged.bonusPlanned,
-        monthlyTarget: merged.monthlyTarget,
-        callsTarget: merged.callsTarget,
-        visitsTarget: merged.visitsTarget,
-        commissionRate: merged.commissionRate || 12,
+        baseSalary: merged.baseSalary ?? '',
+        bonusPlanned: merged.bonusPlanned ?? '',
+        monthlyTarget: merged.monthlyTarget ?? '',
+        callsTarget: merged.callsTarget ?? 0,
+        visitsTarget: merged.visitsTarget ?? 0,
+        commissionRate: merged.commissionRate ?? '',
         bankName: merged.bankName || '',
         bankAccountNumber: merged.bankAccountNumber || '',
         bankIfscCode: merged.bankIfscCode || '',
         bankBranch: merged.bankBranch || '',
-        bankAccountType: merged.bankAccountType || 'Savings',
+        bankAccountType: merged.bankAccountType || '',
       });
     }
   }, [employee]);
@@ -470,7 +479,7 @@ export default function EmployeeDetail() {
 
           <div className="space-y-1">
             <div className="flex flex-wrap items-center gap-2">
-              <h1 className="text-xl font-black text-gray-900">{emp.firstName} {emp.lastName}</h1>
+              <h1 className="text-xl font-black text-gray-900">{emp.firstName || '—'} {emp.lastName || ''}</h1>
               <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-emerald-50 text-emerald-700 border border-emerald-200 flex items-center gap-1">
                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
                 Active Employee
@@ -478,17 +487,17 @@ export default function EmployeeDetail() {
             </div>
 
             <p className="text-xs font-semibold text-gray-600 flex items-center gap-3">
-              <span>{emp.designation || 'Senior Insurance Specialist'}</span>
+              <span>{emp.designation || '—'}</span>
               <span>•</span>
-              <span className="text-primary-700 font-bold">{emp.department || 'Sales & Advisory'} Department</span>
+              <span className="text-primary-700 font-bold">{emp.department ? `${emp.department} Department` : '—'}</span>
               <span>•</span>
-              <span className="text-gray-400">ID: #{emp.id?.slice(-6) || 'EMP001'}</span>
+              <span className="text-gray-400">ID: #{emp.id?.slice(-6) || '—'}</span>
             </p>
 
             <div className="flex flex-wrap items-center gap-4 text-xs text-gray-500 pt-1">
               <span className="flex items-center gap-1"><Mail className="w-3.5 h-3.5 text-gray-400" /> {emp.user?.email || '—'}</span>
               <span className="flex items-center gap-1"><Phone className="w-3.5 h-3.5 text-gray-400" /> {emp.phone || '—'}</span>
-              <span className="flex items-center gap-1"><Calendar className="w-3.5 h-3.5 text-gray-400" /> Joined {emp.dateOfJoining ? format(new Date(emp.dateOfJoining), 'dd MMM yyyy') : '15 Apr 2022'}</span>
+              <span className="flex items-center gap-1"><Calendar className="w-3.5 h-3.5 text-gray-400" /> {emp.dateOfJoining ? `Joined ${format(new Date(emp.dateOfJoining), 'dd MMM yyyy')}` : 'Joined —'}</span>
             </div>
           </div>
         </div>
@@ -497,15 +506,25 @@ export default function EmployeeDetail() {
         <div className="flex items-center gap-3 border-t md:border-t-0 md:border-l border-gray-100 pt-4 md:pt-0 md:pl-6">
           <div className="text-center px-3">
             <span className="text-[10px] font-bold text-gray-400 uppercase">Target (Monthly)</span>
-            <p className="text-base font-black text-gray-900">₹{(Number(emp.monthlyTarget || 500000) / 100000).toFixed(1)}L</p>
+            <p className="text-base font-black text-gray-900">
+              {emp.monthlyTarget && Number(emp.monthlyTarget) > 0 
+                ? `₹${Number(emp.monthlyTarget) >= 100000 ? (Number(emp.monthlyTarget) / 100000).toFixed(1) + 'L' : Number(emp.monthlyTarget).toLocaleString('en-IN')}` 
+                : '₹0'}
+            </p>
           </div>
           <div className="text-center px-3 border-l border-gray-100">
             <span className="text-[10px] font-bold text-gray-400 uppercase">Achieved</span>
-            <p className="text-base font-black text-emerald-600">₹3.8L (76%)</p>
+            <p className="text-base font-black text-emerald-600">
+              {emp.monthlyTarget && Number(emp.monthlyTarget) > 0
+                ? `₹${((stats?.data?.premiumThisMonth || 0) / 100000).toFixed(1)}L (${Math.round(((stats?.data?.premiumThisMonth || 0) / Number(emp.monthlyTarget)) * 100)}%)`
+                : '₹0 (0%)'}
+            </p>
           </div>
           <div className="text-center px-3 border-l border-gray-100">
             <span className="text-[10px] font-bold text-gray-400 uppercase">Commissions</span>
-            <p className="text-base font-black text-purple-600">₹42.5k</p>
+            <p className="text-base font-black text-purple-600">
+              {stats?.data?.totalCommission !== undefined ? `₹${Number(stats.data.totalCommission).toLocaleString('en-IN')}` : '₹0'}
+            </p>
           </div>
         </div>
       </div>
@@ -597,7 +616,7 @@ export default function EmployeeDetail() {
                   {isEditMode ? (
                     <input {...editForm.register('firstName')} className="input w-full p-2 mt-1 text-xs font-semibold" />
                   ) : (
-                    <p className="font-bold text-gray-800 mt-1">{emp.firstName}</p>
+                    <p className="font-bold text-gray-800 mt-1">{emp.firstName || '—'}</p>
                   )}
                 </div>
 
@@ -606,7 +625,7 @@ export default function EmployeeDetail() {
                   {isEditMode ? (
                     <input {...editForm.register('lastName')} className="input w-full p-2 mt-1 text-xs font-semibold" />
                   ) : (
-                    <p className="font-bold text-gray-800 mt-1">{emp.lastName}</p>
+                    <p className="font-bold text-gray-800 mt-1">{emp.lastName || '—'}</p>
                   )}
                 </div>
 
@@ -659,7 +678,7 @@ export default function EmployeeDetail() {
                   {isEditMode ? (
                     <DatePicker {...editForm.register('dateOfBirth')} className="input w-full p-2 mt-1 text-xs font-semibold" />
                   ) : (
-                    <p className="font-bold text-gray-800 mt-1">{emp.dateOfBirth ? format(new Date(emp.dateOfBirth), 'dd MMM yyyy') : '20 Aug 1992'}</p>
+                    <p className="font-bold text-gray-800 mt-1">{emp.dateOfBirth ? format(new Date(emp.dateOfBirth), 'dd MMM yyyy') : '—'}</p>
                   )}
                 </div>
 
@@ -667,12 +686,13 @@ export default function EmployeeDetail() {
                   <span className="text-[10px] font-bold text-gray-400 uppercase">Gender</span>
                   {isEditMode ? (
                     <select {...editForm.register('gender')} className="input w-full p-2 mt-1 text-xs font-semibold">
+                      <option value="">Select Gender</option>
                       <option value="MALE">Male</option>
                       <option value="FEMALE">Female</option>
                       <option value="OTHER">Other</option>
                     </select>
                   ) : (
-                    <p className="font-bold text-gray-800 mt-1">{emp.gender || 'MALE'}</p>
+                    <p className="font-bold text-gray-800 mt-1">{emp.gender || '—'}</p>
                   )}
                 </div>
 
@@ -681,7 +701,7 @@ export default function EmployeeDetail() {
                   {isEditMode ? (
                     <input {...editForm.register('aadhaarNumber')} className="input w-full p-2 mt-1 text-xs font-semibold" placeholder="12-digit Aadhaar" maxLength={12} />
                   ) : (
-                    <p className="font-bold font-mono text-gray-800 mt-1">{emp.aadhaarNumber || '4589 1234 5678'}</p>
+                    <p className="font-bold font-mono text-gray-800 mt-1">{emp.aadhaarNumber || '—'}</p>
                   )}
                 </div>
 
@@ -690,7 +710,7 @@ export default function EmployeeDetail() {
                   {isEditMode ? (
                     <input {...editForm.register('panNumber')} className="input w-full p-2 mt-1 text-xs font-semibold uppercase" placeholder="e.g. ABCPS1234F" />
                   ) : (
-                    <p className="font-bold font-mono text-gray-800 mt-1">{emp.panNumber || 'ABCPS1234F'}</p>
+                    <p className="font-bold font-mono text-gray-800 mt-1">{emp.panNumber || '—'}</p>
                   )}
                 </div>
 
@@ -716,7 +736,9 @@ export default function EmployeeDetail() {
                     </div>
                   ) : (
                     <p className="font-bold text-gray-800 mt-1">
-                      {emp.emergencyContactName || 'Sunita Sharma (Spouse)'} • {emp.emergencyContactPhone || '+91 98765 99887'}
+                      {emp.emergencyContactName || emp.emergencyContactPhone 
+                        ? `${emp.emergencyContactName || ''}${emp.emergencyContactName && emp.emergencyContactPhone ? ' • ' : ''}${emp.emergencyContactPhone || ''}` 
+                        : '—'}
                     </p>
                   )}
                 </div>
@@ -737,7 +759,7 @@ export default function EmployeeDetail() {
                   {isEditMode ? (
                     <input {...editForm.register('designation')} className="input w-full p-2 mt-1 text-xs font-semibold" />
                   ) : (
-                    <p className="font-bold text-gray-800 mt-1">{emp.designation || 'Senior Insurance Specialist'}</p>
+                    <p className="font-bold text-gray-800 mt-1">{emp.designation || '—'}</p>
                   )}
                 </div>
 
@@ -746,7 +768,7 @@ export default function EmployeeDetail() {
                   {isEditMode ? (
                     <input {...editForm.register('department')} className="input w-full p-2 mt-1 text-xs font-semibold" />
                   ) : (
-                    <p className="font-bold text-gray-800 mt-1">{emp.department || 'Sales & Business Development'}</p>
+                    <p className="font-bold text-gray-800 mt-1">{emp.department || '—'}</p>
                   )}
                 </div>
 
@@ -755,7 +777,7 @@ export default function EmployeeDetail() {
                   {isEditMode ? (
                     <input {...editForm.register('reportingManager')} className="input w-full p-2 mt-1 text-xs font-semibold" />
                   ) : (
-                    <p className="font-bold text-gray-800 mt-1">{emp.reportingManager || 'Rahul Mehta (Broker-Owner)'}</p>
+                    <p className="font-bold text-gray-800 mt-1">{emp.reportingManager || '—'}</p>
                   )}
                 </div>
 
@@ -764,14 +786,14 @@ export default function EmployeeDetail() {
                   {isEditMode ? (
                     <DatePicker {...editForm.register('dateOfJoining')} className="input w-full p-2 mt-1 text-xs font-semibold" />
                   ) : (
-                    <p className="font-bold text-gray-800 mt-1">{emp.dateOfJoining ? format(new Date(emp.dateOfJoining), 'dd MMM yyyy') : '15 Apr 2022'}</p>
+                    <p className="font-bold text-gray-800 mt-1">{emp.dateOfJoining ? format(new Date(emp.dateOfJoining), 'dd MMM yyyy') : '—'}</p>
                   )}
                 </div>
 
                 <div>
                   <span className="text-[10px] font-bold text-gray-400 uppercase">Login Email (Read-Only)</span>
                   <p className="font-bold font-mono text-gray-700 mt-1 bg-slate-50 p-2 rounded-xl border border-slate-200">
-                    {emp.user?.email || 'rahul.sharma@demo-agency.com'}
+                    {emp.user?.email || '—'}
                   </p>
                 </div>
 
@@ -787,7 +809,7 @@ export default function EmployeeDetail() {
                   {isEditMode ? (
                     <textarea {...editForm.register('address')} rows={2} className="input w-full p-2 mt-1 text-xs font-medium" />
                   ) : (
-                    <p className="font-bold text-gray-800 mt-1">{emp.address || 'Flat 402, Sea View Towers, Worli, Mumbai 400018'}</p>
+                    <p className="font-bold text-gray-800 mt-1">{emp.address || '—'}</p>
                   )}
                 </div>
               </div>
@@ -807,7 +829,9 @@ export default function EmployeeDetail() {
                   {isEditMode ? (
                     <input type="number" {...editForm.register('baseSalary')} className="input w-full p-2 mt-1 text-xs font-semibold" />
                   ) : (
-                    <p className="font-black text-gray-900 text-sm mt-1">₹{(emp.baseSalary || 45000).toLocaleString('en-IN')}</p>
+                    <p className="font-black text-gray-900 text-sm mt-1">
+                      {emp.baseSalary && Number(emp.baseSalary) > 0 ? `₹${Number(emp.baseSalary).toLocaleString('en-IN')}` : '—'}
+                    </p>
                   )}
                 </div>
 
@@ -816,7 +840,9 @@ export default function EmployeeDetail() {
                   {isEditMode ? (
                     <input type="number" {...editForm.register('bonusPlanned')} className="input w-full p-2 mt-1 text-xs font-semibold" />
                   ) : (
-                    <p className="font-black text-emerald-600 text-sm mt-1">₹{(emp.bonusPlanned || 15000).toLocaleString('en-IN')}</p>
+                    <p className="font-black text-emerald-600 text-sm mt-1">
+                      {emp.bonusPlanned && Number(emp.bonusPlanned) > 0 ? `₹${Number(emp.bonusPlanned).toLocaleString('en-IN')}` : '—'}
+                    </p>
                   )}
                 </div>
 
@@ -825,7 +851,9 @@ export default function EmployeeDetail() {
                   {isEditMode ? (
                     <input type="number" {...editForm.register('monthlyTarget')} className="input w-full p-2 mt-1 text-xs font-semibold" />
                   ) : (
-                    <p className="font-black text-purple-700 text-sm mt-1">₹{(emp.monthlyTarget || 500000).toLocaleString('en-IN')}</p>
+                    <p className="font-black text-purple-700 text-sm mt-1">
+                      {emp.monthlyTarget && Number(emp.monthlyTarget) > 0 ? `₹${Number(emp.monthlyTarget).toLocaleString('en-IN')}` : '—'}
+                    </p>
                   )}
                 </div>
 
@@ -834,7 +862,9 @@ export default function EmployeeDetail() {
                   {isEditMode ? (
                     <input type="number" step="0.5" {...editForm.register('commissionRate')} className="input w-full p-2 mt-1 text-xs font-semibold" />
                   ) : (
-                    <p className="font-black text-blue-700 text-sm mt-1">{emp.commissionRate || 12.5}%</p>
+                    <p className="font-black text-blue-700 text-sm mt-1">
+                      {emp.commissionRate !== undefined && emp.commissionRate !== null && emp.commissionRate !== '' ? `${emp.commissionRate}%` : '—'}
+                    </p>
                   )}
                 </div>
 
@@ -843,7 +873,9 @@ export default function EmployeeDetail() {
                   {isEditMode ? (
                     <input type="number" {...editForm.register('callsTarget')} className="input w-full p-2 mt-1 text-xs font-semibold" />
                   ) : (
-                    <p className="font-bold text-gray-800 mt-1">{emp.callsTarget || 25} Calls/day</p>
+                    <p className="font-bold text-gray-800 mt-1">
+                      {emp.callsTarget !== undefined && emp.callsTarget !== null && emp.callsTarget !== '' ? `${emp.callsTarget} Calls/day` : '—'}
+                    </p>
                   )}
                 </div>
 
@@ -852,7 +884,9 @@ export default function EmployeeDetail() {
                   {isEditMode ? (
                     <input type="number" {...editForm.register('visitsTarget')} className="input w-full p-2 mt-1 text-xs font-semibold" />
                   ) : (
-                    <p className="font-bold text-gray-800 mt-1">{emp.visitsTarget || 5} Proposals/day</p>
+                    <p className="font-bold text-gray-800 mt-1">
+                      {emp.visitsTarget !== undefined && emp.visitsTarget !== null && emp.visitsTarget !== '' ? `${emp.visitsTarget} Proposals/day` : '—'}
+                    </p>
                   )}
                 </div>
               </div>
@@ -872,7 +906,7 @@ export default function EmployeeDetail() {
                   {isEditMode ? (
                     <input {...editForm.register('bankName')} className="input w-full p-2 mt-1 text-xs font-semibold" />
                   ) : (
-                    <p className="font-bold text-gray-800 mt-1">{emp.bankName || 'HDFC Bank Ltd'}</p>
+                    <p className="font-bold text-gray-800 mt-1">{emp.bankName || '—'}</p>
                   )}
                 </div>
 
@@ -881,7 +915,9 @@ export default function EmployeeDetail() {
                   {isEditMode ? (
                     <input {...editForm.register('bankAccountNumber')} className="input w-full p-2 mt-1 text-xs font-semibold" />
                   ) : (
-                    <p className="font-bold font-mono text-gray-800 mt-1">{emp.bankAccountNumber || '•••••••• 7890'}</p>
+                    <p className="font-bold font-mono text-gray-800 mt-1">
+                      {emp.bankAccountNumber ? (emp.bankAccountNumber.length > 4 ? `•••••••• ${emp.bankAccountNumber.slice(-4)}` : emp.bankAccountNumber) : '—'}
+                    </p>
                   )}
                 </div>
 
@@ -890,7 +926,7 @@ export default function EmployeeDetail() {
                   {isEditMode ? (
                     <input {...editForm.register('bankIfscCode')} className="input w-full p-2 mt-1 text-xs font-semibold uppercase" />
                   ) : (
-                    <p className="font-bold font-mono text-gray-800 mt-1">{emp.bankIfscCode || 'HDFC0001234'}</p>
+                    <p className="font-bold font-mono text-gray-800 mt-1">{emp.bankIfscCode || '—'}</p>
                   )}
                 </div>
 
@@ -899,7 +935,7 @@ export default function EmployeeDetail() {
                   {isEditMode ? (
                     <input {...editForm.register('bankBranch')} className="input w-full p-2 mt-1 text-xs font-semibold" />
                   ) : (
-                    <p className="font-bold text-gray-800 mt-1">{emp.bankBranch || 'Nariman Point, Mumbai'}</p>
+                    <p className="font-bold text-gray-800 mt-1">{emp.bankBranch || '—'}</p>
                   )}
                 </div>
 
@@ -907,12 +943,13 @@ export default function EmployeeDetail() {
                   <span className="text-[10px] font-bold text-gray-400 uppercase">Account Type</span>
                   {isEditMode ? (
                     <select {...editForm.register('bankAccountType')} className="input w-full p-2 mt-1 text-xs font-semibold">
+                      <option value="">Select Account Type</option>
                       <option value="Savings">Savings</option>
                       <option value="Current">Current</option>
                       <option value="Salary">Salary Account</option>
                     </select>
                   ) : (
-                    <p className="font-bold text-gray-800 mt-1">{emp.bankAccountType || 'Savings'}</p>
+                    <p className="font-bold text-gray-800 mt-1">{emp.bankAccountType || '—'}</p>
                   )}
                 </div>
               </div>
@@ -966,28 +1003,32 @@ export default function EmployeeDetail() {
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             <div className="bg-white p-5 rounded-2xl border border-gray-100 shadow-sm">
               <span className="text-[11px] font-bold text-gray-500 uppercase">Monthly Target</span>
-              <p className="text-2xl font-black text-gray-900 mt-1">₹5,00,000</p>
+              <p className="text-2xl font-black text-gray-900 mt-1">
+                {emp.monthlyTarget && Number(emp.monthlyTarget) > 0 ? `₹${Number(emp.monthlyTarget).toLocaleString('en-IN')}` : '₹0'}
+              </p>
               <span className="text-[10px] font-semibold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full mt-1 inline-block">
-                ₹3,82,000 Achieved (76.4%)
+                {emp.monthlyTarget && Number(emp.monthlyTarget) > 0 
+                  ? `₹${(stats?.data?.premiumThisMonth || 0).toLocaleString('en-IN')} Achieved (${Math.round(((stats?.data?.premiumThisMonth || 0) / Number(emp.monthlyTarget)) * 100)}%)` 
+                  : '₹0 Achieved (0%)'}
               </span>
             </div>
 
             <div className="bg-white p-5 rounded-2xl border border-gray-100 shadow-sm">
               <span className="text-[11px] font-bold text-gray-500 uppercase">Policies Sold</span>
-              <p className="text-2xl font-black text-purple-700 mt-1">14</p>
+              <p className="text-2xl font-black text-purple-700 mt-1">{stats?.data?.policiesThisMonth ?? stats?.data?.totalPolicies ?? 0}</p>
               <span className="text-[10px] font-semibold text-gray-500 mt-1 inline-block">Across Health, Motor &amp; Life</span>
             </div>
 
             <div className="bg-white p-5 rounded-2xl border border-gray-100 shadow-sm">
               <span className="text-[11px] font-bold text-gray-500 uppercase">Leads Converted</span>
-              <p className="text-2xl font-black text-blue-600 mt-1">18 / 24</p>
-              <span className="text-[10px] font-semibold text-blue-600 mt-1 inline-block">75% Conversion Rate</span>
+              <p className="text-2xl font-black text-blue-600 mt-1">{stats?.data?.leadsThisMonth ?? stats?.data?.totalLeads ?? 0}</p>
+              <span className="text-[10px] font-semibold text-blue-600 mt-1 inline-block">Assigned Leads</span>
             </div>
 
             <div className="bg-white p-5 rounded-2xl border border-gray-100 shadow-sm">
               <span className="text-[11px] font-bold text-gray-500 uppercase">Active Work Time</span>
-              <p className="text-2xl font-black text-emerald-600 mt-1">142h 30m</p>
-              <span className="text-[10px] font-semibold text-gray-500 mt-1 inline-block">This Month (21 Days)</span>
+              <p className="text-2xl font-black text-emerald-600 mt-1">{stats?.data?.activeWorkTime || '0h 0m'}</p>
+              <span className="text-[10px] font-semibold text-gray-500 mt-1 inline-block">This Month</span>
             </div>
           </div>
 
@@ -997,41 +1038,8 @@ export default function EmployeeDetail() {
               <TrendingUp className="w-4 h-4 text-purple-600" /> Policy Contribution Breakdown
             </h3>
 
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs">
-                <thead>
-                  <tr className="border-b border-gray-100 text-gray-400 font-bold uppercase text-[10px]">
-                    <th className="py-2.5">Policy / Client</th>
-                    <th className="py-2.5">Insurer</th>
-                    <th className="py-2.5">Sum Insured</th>
-                    <th className="py-2.5">Premium</th>
-                    <th className="py-2.5">Date Issued</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-50 text-gray-700 font-medium">
-                  <tr>
-                    <td className="py-3 font-bold text-gray-900">Dr. Vikrant Kulkarni</td>
-                    <td className="py-3">HDFC Life Click 2 Protect</td>
-                    <td className="py-3">₹1.50 Cr</td>
-                    <td className="py-3 font-bold text-emerald-600">₹75,000</td>
-                    <td className="py-3 text-gray-400">18 Aug 2026</td>
-                  </tr>
-                  <tr>
-                    <td className="py-3 font-bold text-gray-900">Sunita Patil</td>
-                    <td className="py-3">Star Comprehensive Health</td>
-                    <td className="py-3">₹15.0 Lakh</td>
-                    <td className="py-3 font-bold text-emerald-600">₹32,400</td>
-                    <td className="py-3 text-gray-400">14 Aug 2026</td>
-                  </tr>
-                  <tr>
-                    <td className="py-3 font-bold text-gray-900">Apex Technologies</td>
-                    <td className="py-3">ICICI Lombard Group Health</td>
-                    <td className="py-3">₹5.0 Lakh (50 Lives)</td>
-                    <td className="py-3 font-bold text-emerald-600">₹1,85,000</td>
-                    <td className="py-3 text-gray-400">10 Aug 2026</td>
-                  </tr>
-                </tbody>
-              </table>
+            <div className="py-8 text-center text-xs text-gray-400">
+              No policies issued or contributed by {emp.firstName || 'this employee'} yet.
             </div>
           </div>
         </div>
@@ -1142,58 +1150,41 @@ export default function EmployeeDetail() {
           {taskSubView === 'LIST' ? (
             <div className="bg-white p-6 rounded-3xl border border-gray-100 shadow-sm space-y-4">
               <h3 className="text-sm font-bold text-gray-900 flex items-center gap-2">
-                <CheckSquare className="w-4 h-4 text-primary-600" /> Work Queue for {emp.firstName}
+                <CheckSquare className="w-4 h-4 text-primary-600" /> Work Queue for {emp.firstName || 'Employee'}
               </h3>
 
               <div className="space-y-3">
-                <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-200 flex items-start justify-between">
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <span className="text-[10px] font-mono font-bold text-blue-700 bg-blue-50 border border-blue-200 px-1.5 py-0.5 rounded shrink-0">
-                        T1
-                      </span>
-                      <p className="text-xs font-bold text-gray-900">Follow up on Star Health Comprehensive Family Floater</p>
+                {tasks?.data && tasks.data.length > 0 ? (
+                  tasks.data.map((t: any, idx: number) => (
+                    <div key={t.id || idx} className="p-3.5 rounded-2xl bg-slate-50 border border-slate-200 flex items-start justify-between">
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <span className="text-[10px] font-mono font-bold text-blue-700 bg-blue-50 border border-blue-200 px-1.5 py-0.5 rounded shrink-0">
+                            T{idx + 1}
+                          </span>
+                          <p className="text-xs font-bold text-gray-900">{t.title}</p>
+                        </div>
+                        {t.description && <p className="text-[11px] text-gray-500 mt-0.5">{t.description}</p>}
+                        {t.dueDate && (
+                          <span className="text-[10px] font-semibold text-primary-700 bg-primary-50 px-2 py-0.5 rounded mt-1 inline-block">
+                            Due {format(new Date(t.dueDate), 'dd MMM yyyy')}
+                          </span>
+                        )}
+                      </div>
+                      <span className="text-[9px] font-bold px-2 py-0.5 rounded-full bg-blue-600 text-white uppercase">{t.priority || 'NORMAL'}</span>
                     </div>
-                    <p className="text-[11px] text-gray-500 mt-0.5">Amit Sharma (+91 98765 43210) — confirm Sum Insured ₹10L</p>
-                    <span className="text-[10px] font-semibold text-primary-700 bg-primary-50 px-2 py-0.5 rounded mt-1 inline-block">
-                      Due Today • 30m
-                    </span>
+                  ))
+                ) : (
+                  <div className="py-8 text-center text-xs text-gray-400">
+                    No tasks assigned to {emp.firstName || 'this employee'} yet. Click &quot;Assign New Task / Event&quot; to create one.
                   </div>
-                  <span className="text-[9px] font-bold px-2 py-0.5 rounded-full bg-rose-600 text-white uppercase">Critical</span>
-                </div>
-
-                <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-200 flex items-start justify-between">
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <span className="text-[10px] font-mono font-bold text-blue-700 bg-blue-50 border border-blue-200 px-1.5 py-0.5 rounded shrink-0">
-                        T2
-                      </span>
-                      <p className="text-xs font-bold text-gray-900">Upload medical KYC documents for Policy #POL-8902</p>
-                    </div>
-                    <p className="text-[11px] text-gray-500 mt-0.5">Submit 2-D Echo report to HDFC Ergo underwriting</p>
-                    <span className="text-[10px] font-semibold text-primary-700 bg-primary-50 px-2 py-0.5 rounded mt-1 inline-block">
-                      Due Today • 45m
-                    </span>
-                  </div>
-                  <span className="text-[9px] font-bold px-2 py-0.5 rounded-full bg-amber-500 text-white uppercase">High</span>
-                </div>
-
-                <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-200 flex items-start justify-between">
-                  <div>
-                    <p className="text-xs font-bold text-gray-900">Weekly Agency Sales Review Meeting [Event]</p>
-                    <p className="text-[11px] text-gray-500 mt-0.5">Recurring team meeting every Monday</p>
-                    <span className="text-[10px] font-semibold text-purple-700 bg-purple-50 px-2 py-0.5 rounded mt-1 inline-block">
-                      ⚡ Weekly Event • 45m
-                    </span>
-                  </div>
-                  <span className="text-[9px] font-bold px-2 py-0.5 rounded-full bg-purple-600 text-white uppercase">Event</span>
-                </div>
+                )}
               </div>
             </div>
           ) : (
             <EmployeeCalendarTaskView
               employeeId={emp.id}
-              employeeName={`${emp.firstName} ${emp.lastName}`}
+              employeeName={`${emp.firstName || ''} ${emp.lastName || ''}`.trim()}
               tasks={tasks?.data || []}
             />
           )}
@@ -1210,15 +1201,15 @@ export default function EmployeeDetail() {
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
             <div className="p-4 bg-emerald-50/70 rounded-2xl border border-emerald-200/80">
               <span className="text-[10px] font-bold text-emerald-700 uppercase">Published / Paid</span>
-              <p className="text-xl font-black text-emerald-900 mt-1">₹42,500</p>
+              <p className="text-xl font-black text-emerald-900 mt-1">₹0</p>
             </div>
             <div className="p-4 bg-amber-50/70 rounded-2xl border border-amber-200/80">
               <span className="text-[10px] font-bold text-amber-700 uppercase">Pending Approval</span>
-              <p className="text-xl font-black text-amber-900 mt-1">₹12,000</p>
+              <p className="text-xl font-black text-amber-900 mt-1">₹0</p>
             </div>
             <div className="p-4 bg-purple-50/70 rounded-2xl border border-purple-200/80">
               <span className="text-[10px] font-bold text-purple-700 uppercase">Total YTD Earnings</span>
-              <p className="text-xl font-black text-purple-900 mt-1">₹2,84,000</p>
+              <p className="text-xl font-black text-purple-900 mt-1">₹0</p>
             </div>
           </div>
         </div>
@@ -1238,7 +1229,9 @@ export default function EmployeeDetail() {
             <button
               onClick={() => {
                 const currentRole = (emp.user?.role || 'EMPLOYEE') as 'OWNER' | 'EMPLOYEE' | 'CONTACT';
-                const currentPerms = Array.isArray(emp.user?.permissions) ? [...emp.user.permissions] : [];
+                const currentPerms = Array.isArray(emp.user?.permissions)
+                  ? emp.user.permissions.filter((permission: string) => MODULES.some(module => module.key === permission))
+                  : [];
                 setSelectedRole(currentRole);
                 setSelectedPermissions(currentPerms);
                 setPermModal(true);

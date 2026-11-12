@@ -12,6 +12,7 @@ import {
   useEmployeeTasks
 } from '@hooks/useWorkspace';
 import { commissionsService, employeesService, workspaceService } from '@api/index';
+import DataTable, { Column } from '@comps/common/DataTable';
 import {
   Clock, CheckCircle, Play, Square,
   TrendingUp, ListTodo, ClipboardList,
@@ -59,6 +60,7 @@ export default function Workspace() {
 
   // Active tab state
   const [activeTab, setActiveTab] = useState<TabType>('commissions');
+  const [commissionPage, setCommissionPage] = useState(1);
 
   // Task filter & form state
   const [taskStatusFilter, setTaskStatusFilter] = useState<'ALL' | 'PENDING' | 'COMPLETED'>('ALL');
@@ -91,7 +93,7 @@ export default function Workspace() {
   // My commissions — backend filters by beneficiaryId for EMPLOYEE role
   const { data: commRes, isLoading: commLoading } = useQuery({
     queryKey: ['my-commissions'],
-    queryFn: () => commissionsService.list({ limit: 50 }),
+    queryFn: () => commissionsService.list({ limit: 1000 }),
     staleTime: 60_000,
   });
 
@@ -409,8 +411,74 @@ export default function Workspace() {
               if (notes.includes('[Saved as Draft]')) return false;
               return notes.includes('[Published to Workspace]');
             });
+            const commissionPageSize = 20;
+            const currentPage = Math.min(commissionPage, Math.max(1, Math.ceil(commList.length / commissionPageSize)));
+            const pageStart = (currentPage - 1) * commissionPageSize;
+            const paginatedCommissions = commList.slice(pageStart, pageStart + commissionPageSize);
             const totalCommission = commList.reduce((sum: number, c: any) => sum + Number(c.amount ?? 0), 0);
             const paidCommission  = commList.filter((c: any) => c.isPaid).reduce((sum: number, c: any) => sum + Number(c.amount ?? 0), 0);
+            const commissionColumns: Column<any>[] = [
+              {
+                key: 'policyDetails',
+                label: 'Policy Details',
+                render: (c: any) => {
+                  const contactName = c.policy?.contact
+                    ? `${c.policy.contact.firstName ?? ''} ${c.policy.contact.lastName ?? ''}`.trim()
+                    : '';
+                  const planName = c.policy?.plan?.name || c.policyName || 'Insurance Policy';
+                  return (
+                    <div className="flex flex-col">
+                      <span className="font-bold text-slate-900">{planName}</span>
+                      {contactName && <span className="text-xs text-slate-500 font-medium">Holder: {contactName}</span>}
+                    </div>
+                  );
+                },
+              },
+              {
+                key: 'policyNumber',
+                label: 'Policy Number',
+                render: (c: any) => (
+                  <span className="font-mono text-xs font-bold text-blue-600 bg-blue-50 px-2 py-0.5 rounded-md border border-blue-100">
+                    #{c.policy?.policyNumber ?? '—'}
+                  </span>
+                ),
+              },
+              {
+                key: 'year',
+                label: 'Year',
+                render: (c: any) => c.commissionYear?.name ?? (c.year ? `Year ${c.year}` : '—'),
+              },
+              {
+                key: 'amount',
+                label: 'Commission Amount',
+                className: 'text-right',
+                render: (c: any) => <span className="font-bold text-slate-900">₹{Number(c.amount ?? 0).toLocaleString('en-IN')}</span>,
+              },
+              {
+                key: 'comment',
+                label: 'Comment',
+                render: (c: any) => {
+                  const matchRemark = c.notes?.match(/Payment Remark:\s*([^\n]+)/i);
+                  const commentText = matchRemark ? matchRemark[1].trim() : (c.remark || '');
+                  return <span className="truncate block max-w-[180px]" title={commentText}>{commentText}</span>;
+                },
+              },
+              {
+                key: 'status',
+                label: 'Status',
+                className: 'text-center',
+                render: (c: any) => (
+                  <span className={c.isPaid ? 'badge-green' : 'badge-yellow'}>
+                    {c.isPaid ? 'Paid' : 'Pending'}
+                  </span>
+                ),
+              },
+              {
+                key: 'paidAt',
+                label: 'Paid Date',
+                render: (c: any) => c.paidAt ? format(new Date(c.paidAt), 'dd/MMM/yyyy') : '—',
+              },
+            ];
             return (
               <div className="card bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
                 <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-4">
@@ -430,63 +498,17 @@ export default function Workspace() {
                 ) : commList.length === 0 ? (
                   <div className="text-center py-8 text-sm text-gray-400">No commission entries found.</div>
                 ) : (
-                  <div className="overflow-x-auto">
-                    <table className="min-w-full divide-y divide-gray-100">
-                      <thead>
-                        <tr className="text-left text-xs font-semibold text-gray-400 uppercase tracking-wider">
-                          <th className="pb-3 px-3">Policy Details</th>
-                          <th className="pb-3 px-3">Policy Number</th>
-                          <th className="pb-3 px-3">Year</th>
-                          <th className="pb-3 px-3 text-right">Commission Amount</th>
-                          <th className="pb-3 px-3">Comment</th>
-                          <th className="pb-3 px-3 text-center">Status</th>
-                          <th className="pb-3 px-3">Paid Date</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-gray-100 text-xs">
-                        {commList.map((c: any) => {
-                          const contactName = c.policy?.contact ? `${c.policy.contact.firstName ?? ''} ${c.policy.contact.lastName ?? ''}`.trim() : '';
-                          const planName = c.policy?.plan?.name || c.policyName || 'Insurance Policy';
-                          return (
-                            <tr key={c.id} className="text-gray-700 hover:bg-gray-50 transition-colors">
-                              <td className="py-3 px-3">
-                                <div className="flex flex-col">
-                                  <span className="font-bold text-gray-900 text-xs">{planName}</span>
-                                  {contactName && <span className="text-[11px] text-gray-500 font-medium">Holder: {contactName}</span>}
-                                </div>
-                              </td>
-                              <td className="py-3 px-3">
-                                <span className="font-mono text-xs font-bold text-blue-600 bg-blue-50 px-2 py-0.5 rounded-md border border-blue-100">
-                                  #{c.policy?.policyNumber ?? '—'}
-                                </span>
-                              </td>
-                              <td className="py-3 px-3 text-gray-600 font-medium">{c.commissionYear?.name ?? (c.year ? `Year ${c.year}` : '—')}</td>
-                              <td className="py-3 px-3 text-right font-bold text-gray-900">₹{Number(c.amount ?? 0).toLocaleString('en-IN')}</td>
-                              <td className="py-3 px-3 text-gray-600 font-medium max-w-[180px]">
-                                {(() => {
-                                  const matchRemark = c.notes?.match(/Payment Remark:\s*([^\n]+)/i);
-                                  const commentText = matchRemark ? matchRemark[1].trim() : (c.remark || (c.notes && !c.notes.includes('[Claim:') ? c.notes : '—'));
-                                  return (
-                                    <span className="truncate block" title={commentText}>
-                                      {commentText || '—'}
-                                    </span>
-                                  );
-                                })()}
-                              </td>
-                              <td className="py-3 px-3 text-center">
-                                <span className={c.isPaid ? 'badge-green' : 'badge-yellow'}>
-                                  {c.isPaid ? 'Paid' : 'Pending'}
-                                </span>
-                              </td>
-                              <td className="py-3 px-3 text-gray-500">
-                                {c.paidAt ? format(new Date(c.paidAt), 'dd/MMM/yyyy') : '—'}
-                              </td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
+                  <DataTable
+                    columns={commissionColumns}
+                    data={paginatedCommissions}
+                    total={commList.length}
+                    page={currentPage}
+                    pageSize={commissionPageSize}
+                    onPageChange={setCommissionPage}
+                    rowKey={c => c.id}
+                    showPagination
+                    horizontalScroll
+                  />
                 )}
               </div>
             );

@@ -12,7 +12,7 @@ import {
   Plus, Search, Pencil, Trash2, Shield, Upload, Phone, Calendar,
   MessageCircle, LayoutGrid, List, Filter, X, UserPlus, Users,
   UserCircle2, Mail, ChevronDown, Flame, Thermometer, Snowflake,
-  Columns, ArrowUpDown, ChevronUp, ChevronRight, Send, RefreshCw, Save, FileText, History, Lock, Download, Activity, ExternalLink, CalendarDays, Eye
+  Columns, ArrowUpDown, ChevronUp, ChevronLeft, ChevronRight, Send, RefreshCw, Save, FileText, History, Lock, Download, Activity, ExternalLink, CalendarDays, Eye
 } from 'lucide-react';
 import { useForm } from 'react-hook-form';
 import { z } from 'zod';
@@ -717,7 +717,11 @@ export default function Leads() {
       navigate(`/contacts?openContactId=${contactId}`);
     }
   };
-  const [viewMode, setViewMode] = useState<'board' | 'table'>('board');
+  const [viewMode, setViewMode] = useState<'board' | 'table'>(() => {
+    const v = searchParams.get('view');
+    if (v === 'table') return 'table';
+    return 'board';
+  });
   const [showFilters, setShowFilters] = useState(false);
   const [createInitialStage, setCreateInitialStage] = useState<string>('TO_CONTACT');
 
@@ -1872,14 +1876,34 @@ export default function Leads() {
       // Employee role data isolation safeguard: only see self-assigned or unassigned
       if (user?.role === 'EMPLOYEE') {
         const currentUserId = user.id;
-        const assignedEmpId = lead.assignedEmployeeId || lead.assignedEmployee?.id || lead.assignedEmployee?.userId;
-        if (assignedEmpId) {
-          const myEmp = employeesList.find((e: any) => e.userId === currentUserId || e.user?.id === currentUserId || e.id === currentUserId);
-          const validMyIds = [currentUserId];
-          if (myEmp?.id) validMyIds.push(myEmp.id);
-          if (myEmp?.userId) validMyIds.push(myEmp.userId);
-          if (myEmp?.user?.id) validMyIds.push(myEmp.user.id);
-          if (!validMyIds.includes(assignedEmpId)) {
+        const myEmp = employeesList.find((e: any) => e.userId === currentUserId || e.user?.id === currentUserId || e.id === currentUserId);
+        const validMyIds = [currentUserId];
+        if (myEmp?.id) validMyIds.push(myEmp.id);
+        if (myEmp?.userId) validMyIds.push(myEmp.userId);
+        if (myEmp?.user?.id) validMyIds.push(myEmp.user.id);
+
+        const contactAssigneeIds = Array.isArray(lead.contact?.assignedEmployeeIds) ? lead.contact.assignedEmployeeIds : [];
+        const directEmpIds = [
+          ...contactAssigneeIds,
+          lead.assignedEmployeeId,
+          lead.assignedEmployee?.id,
+          lead.assignedEmployee?.userId,
+          lead.contact?.assignedEmployeeId,
+          lead.contact?.assignedEmployee?.id,
+          lead.contact?.assignedEmployee?.userId,
+        ].filter(Boolean);
+
+        if (directEmpIds.length > 0) {
+          const isAssignedToMe = directEmpIds.some((empId: string) => {
+            if (validMyIds.includes(empId)) return true;
+            const matchedEmp = employeesList.find((e: any) => e.id === empId || e.userId === empId || e.user?.id === empId);
+            if (matchedEmp) {
+              const empUserOrProfileIds = [matchedEmp.id, matchedEmp.userId, matchedEmp.user?.id].filter(Boolean);
+              return empUserOrProfileIds.some((id: string) => validMyIds.includes(id));
+            }
+            return false;
+          });
+          if (!isAssignedToMe) {
             return false;
           }
         }
@@ -7187,7 +7211,15 @@ function LeadsTable({
   onViewConnectedPolicy?: (r: any) => void;
 }) {
   const [tableColMenuOpen, setTableColMenuOpen] = useState(false);
+  const [page, setPage] = useState(1);
+  const pageSize = 20;
   const sortableKeys = ['leadId', 'name', 'phone', 'email', 'plan', 'premiumBudget', 'followUpDate', 'source', 'createdAt', 'stage'];
+  const totalPages = Math.ceil(data.length / pageSize) || 1;
+  const paginatedData = data.slice((page - 1) * pageSize, page * pageSize);
+
+  useEffect(() => {
+    setPage(1);
+  }, [data]);
 
   const colDefs = [
     {
@@ -7375,15 +7407,15 @@ function LeadsTable({
   const activeCols = colDefs.filter(c => visibleColumns[c.key] !== false);
 
   return (
-    <div className="bg-white rounded-2xl border border-slate-100 shadow-sm flex-1 flex flex-col overflow-hidden min-h-[400px]">
+    <div className="bg-white rounded-2xl border border-slate-200/70 shadow-sm flex-1 flex flex-col overflow-hidden min-h-[400px]">
       <div className="overflow-x-auto overflow-y-auto custom-scrollbar flex-1 max-h-[calc(100vh-220px)]">
         <table className="min-w-full text-sm">
           <thead className="sticky top-0 z-10 shadow-2xs">
-            <tr className="bg-slate-100 border-b border-slate-200/80">
+            <tr className="bg-gradient-to-r from-slate-100/90 via-slate-50 to-slate-100/90 border-b border-slate-200/80">
               {activeCols.map(col => (
                 <th key={col.key}
                   onClick={() => sortableKeys.includes(col.key) && onSort(col.key)}
-                  className={clsx('px-5 py-3 text-left text-[11px] font-bold uppercase tracking-wider text-slate-700 whitespace-nowrap select-none border border-slate-200',
+                  className={clsx('px-3 sm:px-4 py-2.5 text-left text-xs font-black uppercase tracking-wider text-slate-500 whitespace-normal sm:whitespace-nowrap select-none border border-slate-200/80',
                     sortableKeys.includes(col.key) && 'cursor-pointer hover:text-slate-900')}>
                   <span className="inline-flex flex-wrap items-center gap-1">
                     {col.label}
@@ -7404,7 +7436,7 @@ function LeadsTable({
               ? Array.from({ length: 5 }).map((_, i) => (
                 <tr key={i}>
                   {activeCols.map(col => (
-                    <td key={col.key} className="px-5 py-4 border border-slate-200">
+                    <td key={col.key} className="px-3 sm:px-4 py-2.5 border border-slate-200/80">
                       <div className="h-3.5 rounded-full animate-pulse bg-gray-100" style={{ width: `${55 + (i * 13 + col.label.length * 7) % 35}%` }} />
                     </td>
                   ))}
@@ -7426,11 +7458,11 @@ function LeadsTable({
                     </td>
                   </tr>
                 )
-                : data.map((row, idx) => (
+                : paginatedData.map((row, idx) => (
                   <tr key={row.id} onClick={() => onRowClick(row)}
                     className={clsx("cursor-pointer transition-colors duration-150", idx % 2 === 1 ? 'bg-slate-50/80' : 'bg-white')}>
                     {activeCols.map(col => (
-                      <td key={col.key} className="px-5 py-3.5 text-gray-700 align-middle text-[13px] font-medium border border-slate-200">
+                      <td key={col.key} className="px-3 sm:px-4 py-2.5 text-slate-700 align-middle text-sm font-medium border border-slate-200/80">
                         {col.render(row)}
                       </td>
                     ))}
@@ -7440,6 +7472,58 @@ function LeadsTable({
           </tbody>
         </table>
       </div>
+      {data.length > 0 && (
+        <div className="flex flex-col sm:flex-row items-center justify-between gap-3 px-5 py-3 border-t border-slate-100 bg-slate-50/50">
+          <p className="text-sm font-medium text-slate-500">
+            Showing{' '}
+            <span className="font-extrabold text-slate-800">
+              {(page - 1) * pageSize + 1}–{Math.min(page * pageSize, data.length)}
+            </span>
+            {' '}of{' '}
+            <span className="font-extrabold text-slate-800">{data.length}</span> leads
+          </p>
+          <div className="flex flex-wrap items-center gap-1">
+            <button
+              type="button"
+              aria-label="Previous page"
+              disabled={page === 1}
+              onClick={() => setPage(current => current - 1)}
+              className="p-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed text-slate-600 transition-all shadow-2xs"
+            >
+              <ChevronLeft size={15} />
+            </button>
+            {Array.from({ length: Math.min(totalPages, 5) }).map((_, index) => {
+              const firstPage = Math.max(1, Math.min(page - 2, totalPages - 4));
+              const pageNumber = firstPage + index;
+              return (
+                <button
+                  type="button"
+                  key={pageNumber}
+                  aria-current={pageNumber === page ? 'page' : undefined}
+                  onClick={() => setPage(pageNumber)}
+                  className={clsx(
+                    'min-w-[30px] h-7 px-2 rounded-lg text-sm font-extrabold transition-all border cursor-pointer',
+                    pageNumber === page
+                      ? 'bg-blue-600 text-white border-blue-600 shadow-md shadow-blue-500/20'
+                      : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50 shadow-2xs',
+                  )}
+                >
+                  {pageNumber}
+                </button>
+              );
+            })}
+            <button
+              type="button"
+              aria-label="Next page"
+              disabled={page >= totalPages}
+              onClick={() => setPage(current => current + 1)}
+              className="p-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed text-slate-600 transition-all shadow-2xs"
+            >
+              <ChevronRight size={15} />
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

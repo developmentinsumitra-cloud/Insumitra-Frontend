@@ -22,8 +22,6 @@ export const SYSTEM_MODULES = [
   { key: 'leads',             label: 'Leads Pipeline',     category: 'Sales',       desc: 'Lead stages, quotation generation & follow-ups' },
   { key: 'policies',          label: 'Policies Management', category: 'Core Insurance', desc: 'Active policies, renewals, endorsements & documents' },
   { key: 'claims',            label: 'Claims Assistance',  category: 'Core Insurance', desc: 'Claim intimations, hospital cashless & settlements' },
-  { key: 'calendar',          label: 'Calendar & Meetings',category: 'Productivity', desc: 'Scheduled client visits, reminders & task sync' },
-  { key: 'whatsapp',          label: 'WhatsApp Broadcasts',category: 'Marketing',   desc: 'Templates, chatbot automations & campaign logs' },
   { key: 'operations',        label: 'Operations & KYC',   category: 'Operations',  desc: 'Document verification, underwriting & portal sync' },
   { key: 'commissions',       label: 'Commissions',        category: 'Finance',     desc: 'Payout structures, insurer reconciliations & rates' },
   { key: 'employees',         label: 'Employees Directory',category: 'Administration', desc: 'Staff directory, targets, attendance & leaves' },
@@ -42,14 +40,14 @@ const PRESETS = [
     name: 'Sales & Advisory Specialist',
     badge: 'bg-purple-100 text-purple-800 border-purple-200',
     role: 'EMPLOYEE',
-    permissions: ['dashboard', 'workspace', 'contacts', 'leads', 'policies', 'claims', 'calendar', 'whatsapp'],
-    desc: 'Lead conversion, client servicing, policy issuance, claims & WhatsApp.'
+    permissions: ['dashboard', 'workspace', 'contacts', 'leads', 'policies', 'claims'],
+    desc: 'Lead conversion, client servicing, policy issuance & claims.'
   },
   {
     name: 'Operations & Claims Executive',
     badge: 'bg-emerald-100 text-emerald-800 border-emerald-200',
     role: 'EMPLOYEE',
-    permissions: ['dashboard', 'workspace', 'contacts', 'policies', 'claims', 'operations', 'calendar'],
+    permissions: ['dashboard', 'workspace', 'contacts', 'policies', 'claims', 'operations'],
     desc: 'Policy booking, underwriting documents, KYC verification & claims processing.'
   },
   {
@@ -63,7 +61,7 @@ const PRESETS = [
     name: 'View Only / Compliance Auditor',
     badge: 'bg-slate-100 text-slate-800 border-slate-200',
     role: 'EMPLOYEE',
-    permissions: ['dashboard', 'contacts', 'policies', 'claims', 'calendar'],
+    permissions: ['dashboard', 'contacts', 'policies', 'claims'],
     desc: 'Read-only access for compliance inspection and audits.'
   }
 ];
@@ -102,7 +100,7 @@ export default function EmployeeAccessControl() {
       user: {
         email: 'rahul.sharma@demo-agency.com',
         role: 'EMPLOYEE',
-        permissions: ['dashboard', 'workspace', 'contacts', 'leads', 'policies', 'claims', 'calendar', 'whatsapp']
+        permissions: ['dashboard', 'workspace', 'contacts', 'leads', 'policies', 'claims']
       }
     },
     {
@@ -114,7 +112,7 @@ export default function EmployeeAccessControl() {
       user: {
         email: 'employee@demo-agency.com',
         role: 'EMPLOYEE',
-        permissions: ['workspace', 'contacts', 'leads', 'policies', 'claims', 'calendar']
+        permissions: ['workspace', 'contacts', 'leads', 'policies', 'claims']
       }
     },
     {
@@ -126,7 +124,7 @@ export default function EmployeeAccessControl() {
       user: {
         email: 'anjali.ops@demo-agency.com',
         role: 'EMPLOYEE',
-        permissions: ['dashboard', 'workspace', 'contacts', 'policies', 'claims', 'operations', 'calendar']
+        permissions: ['dashboard', 'workspace', 'contacts', 'policies', 'claims', 'operations']
       }
     },
     {
@@ -206,7 +204,9 @@ export default function EmployeeAccessControl() {
     e.stopPropagation();
     setPermEditEmp(emp);
     setSelectedRole(emp.user?.role as any || 'EMPLOYEE');
-    setSelectedPermissions(emp.user?.permissions || []);
+    setSelectedPermissions((emp.user?.permissions || []).filter(permission =>
+      SYSTEM_MODULES.some(module => module.key === permission)
+    ));
   };
 
   const handleApplyPreset = (preset: typeof PRESETS[0]) => {
@@ -267,7 +267,7 @@ export default function EmployeeAccessControl() {
             </span>
           );
         }
-        const perms = r.user?.permissions ?? [];
+        const perms = (r.user?.permissions ?? []).filter((p: string) => SYSTEM_MODULES.some(m => m.key === p));
         if (perms.length === 0) {
           return <span className="text-xs text-gray-400 italic">No module permissions enabled</span>;
         }
