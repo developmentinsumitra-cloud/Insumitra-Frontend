@@ -142,6 +142,14 @@ const STATUS_BADGE: Record<string, string> = {
 
 const UI_STATUSES = ["Pending", "In Progress", "Approved", "Settled", "Rejected"];
 
+const normalizeClaimColumnName = (name: string) => {
+  const normalized = (name || '').replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
+  if (['claimid', 'claimno', 'claimnumber'].includes(normalized)) return 'claimid';
+  if (['claimedamt', 'claimamount', 'amount'].includes(normalized)) return 'claimedamt';
+  if (['datefiled', 'intimatedat'].includes(normalized)) return 'datefiled';
+  return normalized;
+};
+
 const BACKEND_TO_UI: Record<string, string> = {
   INTIMATED: 'Pending',
   DOC_COLLECTION: 'Pending',
@@ -811,7 +819,13 @@ export function ClaimEditForm({ initial, isPending, onSave, onCancel, employees,
     formatDateForInput(initial.intimatedAt || (notesData as any).intimatedAt || (initial as any).createdAt) || getTodayDateInputValue()
   );
   const [claimAmount, setClaimAmount] = useState(String((initial as any).claimAmount ?? ''));
-  const [approvedAmount, setApprovedAmount] = useState(String((initial as any).approvedAmount ?? ''));
+  const [approvedAmount, setApprovedAmount] = useState(
+    (initial as any).approvedAmount != null && (initial as any).approvedAmount !== ''
+      ? String((initial as any).approvedAmount)
+      : (notesData as any).amtPayableToInsured != null && (notesData as any).amtPayableToInsured !== '' && Number((notesData as any).amtPayableToInsured) > 0
+        ? String((notesData as any).amtPayableToInsured)
+        : ''
+  );
   const [rejectionReason, setRejectionReason] = useState((initial as any).rejectionReason ?? '');
   const [assignedEmployeeId, setAssignedEmployeeId] = useState((initial as any).assignedEmployeeId ?? '');
   const [activeClaimTab, setActiveClaimTab] = useState((initial as any)?.defaultTab || 'Claim Details');
@@ -1031,7 +1045,7 @@ export function ClaimEditForm({ initial, isPending, onSave, onCancel, employees,
   const [notesText, setNotesText] = useState(notesData.notes || (initial as any).notes || '');
   const [subClaimNo, setSubClaimNo] = useState(notesData.subClaimNo || '');
   const [uiClaimStatus, setUiClaimStatus] = useState(
-    notesData.uiClaimStatus || (initial.status && BACKEND_TO_UI[initial.status] ? (initial.status === 'APPROVED' ? 'Approved' : initial.status === 'REJECTED' ? 'Rejected' : initial.status === 'SETTLED' ? 'Approved' : 'Intimated') : '')
+    notesData.uiClaimStatus || (initial.status && BACKEND_TO_UI[initial.status] ? (initial.status === 'APPROVED' ? 'Approved' : initial.status === 'REJECTED' ? 'Rejected' : initial.status === 'SETTLED' ? 'Settled' : 'Intimated') : '')
   );
   const [comment, setComment] = useState(notesData.comment || '');
   const [insuranceCompanyCategory, setInsuranceCompanyCategory] = useState(notesData.insuranceCompanyCategory || '');
@@ -1277,7 +1291,7 @@ export function ClaimEditForm({ initial, isPending, onSave, onCancel, employees,
         claimNumber: claimNumber || initial.claimNumber,
         intimatedAt: intimatedAt ? new Date(intimatedAt).toISOString() : (initial.intimatedAt ? new Date(initial.intimatedAt).toISOString() : new Date().toISOString()),
         claimAmount: Number(claimAmount),
-        approvedAmount: approvedAmount ? Number(approvedAmount) : undefined,
+        approvedAmount: (approvedAmount !== '' && !isNaN(Number(approvedAmount))) ? Number(approvedAmount) : undefined,
         rejectionReason: rejectionReason || undefined,
         assignedEmployeeId: assignedEmployeeId || null,
         notes: serializeNotes({
@@ -1316,7 +1330,9 @@ export function ClaimEditForm({ initial, isPending, onSave, onCancel, employees,
           claimsPerson1Contact, claimsPerson2Name, claimsPerson2Contact, hospitalComment,
           hospitalDoctors: JSON.stringify(doctors),
           diagnosisSimple, roomCategory, typeOfManagement: typeOfManagement === 'Other' ? (otherManagementDetail || 'Other') : typeOfManagement, typeOfAdmission, isMedicoLegalCase, isFirLegalDocAvailable, hospitalisationComment, amtAnesthesia, billingComment,
-          amtFinalBill, amtNonPayables, amtCopay, amtDeductible, amtBalanceEMIs, amtNcdRecovery, amtExcessSumInsured, amtExcessAilmentLimit, amtHigherRoomRent, amtReasonableCost, amtOtherRecoveries, amtPatientToPay, amtExcessAgreedPackage, amtNetworkDiscount, amtNotCollected, amtPayableToInsured, approvalComment, fileUploadComment
+          amtFinalBill, amtNonPayables, amtCopay, amtDeductible, amtBalanceEMIs, amtNcdRecovery, amtExcessSumInsured, amtExcessAilmentLimit, amtHigherRoomRent, amtReasonableCost, amtOtherRecoveries, amtPatientToPay, amtExcessAgreedPackage, amtNetworkDiscount, amtNotCollected,
+          amtPayableToInsured: (approvedAmount !== '' && !isNaN(Number(approvedAmount))) ? Number(approvedAmount) : amtPayableToInsured,
+          approvalComment, fileUploadComment
 
         })
       });
@@ -1466,46 +1482,76 @@ export function ClaimEditForm({ initial, isPending, onSave, onCancel, employees,
                     </div>
                   </div>
 
-                  <div className={clsx('grid grid-cols-1 gap-2.5', user?.role !== 'EMPLOYEE' ? 'sm:grid-cols-3' : 'sm:grid-cols-2')}>
-                    <div>
-                      <label className="label text-[9px] font-extrabold text-slate-500 uppercase tracking-wider">Claim Status</label>
-                      <CustomSelect
-                        className="input mt-1 h-8 text-[11px]"
-                        value={uiClaimStatus}
-                        onChange={val => setUiClaimStatus(val)}
-                        placeholder="Select Status"
-                        options={getActiveDropdownOptions('Claim', 'Claim Status', CLAIM_STATUS_OPTIONS)}
-                      />
-                    </div>
-                    <div>
-                      <label className="label text-[9px] font-extrabold text-slate-500 uppercase tracking-wider">Intimation Date</label>
-                      <input
-                        type="date"
-                        max={getTodayDateInputValue()}
-                        className="input mt-1 h-8 text-[11px] py-1"
-                        value={intimatedAt}
-                        onChange={e => setIntimatedAt(e.target.value)}
-                      />
-                    </div>
-                    {user?.role !== 'EMPLOYEE' && (
-                      <div>
-                        <label className="label text-[9px] font-extrabold text-slate-500 uppercase tracking-wider">Assignee</label>
-                        <CustomSelect
-                          className="input mt-1 h-8 text-[11px]"
-                          value={assignedEmployeeId}
-                          onChange={val => setAssignedEmployeeId(val)}
-                          placeholder="Unassigned"
-                          options={[
-                            { value: '', label: 'Unassigned' },
-                            ...employees.map((emp: any) => ({
-                              value: emp.userId || emp.id,
-                              label: `${emp.firstName} ${emp.lastName}`
-                            }))
-                          ]}
-                        />
+                  {(() => {
+                    const isSettledStatus = (uiClaimStatus || '').toLowerCase().includes('settle');
+                    return (
+                      <div className={clsx('grid grid-cols-1 gap-2.5', user?.role !== 'EMPLOYEE' ? 'sm:grid-cols-4' : 'sm:grid-cols-3')}>
+                        <div>
+                          <label className="label text-[9px] font-extrabold text-slate-500 uppercase tracking-wider">Claim Status</label>
+                          <CustomSelect
+                            className="input mt-1 h-8 text-[11px]"
+                            value={uiClaimStatus}
+                            onChange={val => {
+                              setUiClaimStatus(val);
+                              if (val.toLowerCase().includes('settle') && !approvedAmount && claimAmount) {
+                                setApprovedAmount(String(claimAmount));
+                              }
+                            }}
+                            placeholder="Select Status"
+                            options={getActiveDropdownOptions('Claim', 'Claim Status', CLAIM_STATUS_OPTIONS)}
+                          />
+                        </div>
+                        <div>
+                          <label className="label text-[9px] font-extrabold text-slate-500 uppercase tracking-wider">
+                            Settled Amount (₹) {isSettledStatus && <span className="text-emerald-600 font-bold">•</span>}
+                          </label>
+                          <input
+                            type="number"
+                            min="0"
+                            step="any"
+                            disabled={!isSettledStatus}
+                            className={clsx(
+                              "input mt-1 h-8 text-[11px] py-1 font-semibold",
+                              isSettledStatus
+                                ? "bg-white border-emerald-300 text-emerald-900 focus:ring-emerald-500 shadow-2xs"
+                                : "bg-slate-100 border-slate-200 text-slate-400 cursor-not-allowed"
+                            )}
+                            value={approvedAmount}
+                            onChange={e => setApprovedAmount(e.target.value)}
+                            placeholder={isSettledStatus ? "Enter settled amount" : "Enable when status is Settled"}
+                          />
+                        </div>
+                        <div>
+                          <label className="label text-[9px] font-extrabold text-slate-500 uppercase tracking-wider">Intimation Date</label>
+                          <input
+                            type="date"
+                            max={getTodayDateInputValue()}
+                            className="input mt-1 h-8 text-[11px] py-1"
+                            value={intimatedAt}
+                            onChange={e => setIntimatedAt(e.target.value)}
+                          />
+                        </div>
+                        {user?.role !== 'EMPLOYEE' && (
+                          <div>
+                            <label className="label text-[9px] font-extrabold text-slate-500 uppercase tracking-wider">Assignee</label>
+                            <CustomSelect
+                              className="input mt-1 h-8 text-[11px]"
+                              value={assignedEmployeeId}
+                              onChange={val => setAssignedEmployeeId(val)}
+                              placeholder="Unassigned"
+                              options={[
+                                { value: '', label: 'Unassigned' },
+                                ...employees.map((emp: any) => ({
+                                  value: emp.userId || emp.id,
+                                  label: `${emp.firstName} ${emp.lastName}`
+                                }))
+                              ]}
+                            />
+                          </div>
+                        )}
                       </div>
-                    )}
-                  </div>
+                    );
+                  })()}
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                     <div>
@@ -1842,6 +1888,7 @@ export function ClaimEditForm({ initial, isPending, onSave, onCancel, employees,
           policyId={(initial as any).policy?.id || (initial as any).policyId}
           contact={(initial as any).contact}
           claimId={initial?.id}
+          claim={initial}
           onGoToClaimTab={() => setActiveClaimTab('Claim Details')}
         />
       )}
@@ -2996,6 +3043,7 @@ export default function Claims({ contactId, contact, embedded = false }: ClaimsP
     mutationFn: ({ id, body }: { id: string; body: any }) => claimsService.update(id, body),
     onSuccess: (res: any) => {
       qc.invalidateQueries({ queryKey: ['claims'] });
+      qc.invalidateQueries({ queryKey: ['policies'] });
       qc.invalidateQueries({ queryKey: ['contact-activity'] });
       qc.refetchQueries({ queryKey: ['contact-activity'] });
       toast.success('Claim updated successfully');
@@ -3033,6 +3081,8 @@ export default function Claims({ contactId, contact, embedded = false }: ClaimsP
   const openedRouteClaimIdRef = useRef<string | null>(null);
 
   useEffect(() => {
+    let cancelled = false;
+    let requestPending = false;
     if (searchParams.get('action') === 'add') {
       setModalOpen(true);
     }
@@ -3040,14 +3090,28 @@ export default function Claims({ contactId, contact, embedded = false }: ClaimsP
     const cid = !isDetailView ? (searchParams.get('claimId') || (location.state as any)?.claimId) : null;
     if (!cid) {
       openedRouteClaimIdRef.current = null;
-      return;
+      return () => {
+        cancelled = true;
+      };
     }
-    if (cid !== openedRouteClaimIdRef.current && !editTarget) {
+    const returnedClaim = (location.state as any)?.claim;
+    if (
+      !editTarget &&
+      cid !== openedRouteClaimIdRef.current &&
+      returnedClaim &&
+      (returnedClaim.id === cid || returnedClaim._id === cid)
+    ) {
+      const reqTab = searchParams.get('tab') || (location.state as any)?.tab;
       openedRouteClaimIdRef.current = cid;
+      setEditTarget(reqTab ? { ...returnedClaim, defaultTab: reqTab } : returnedClaim);
+    } else if (cid !== openedRouteClaimIdRef.current && !editTarget) {
+      openedRouteClaimIdRef.current = cid;
+      requestPending = true;
       claimsService.get(cid)
         .then((res: any) => {
+          requestPending = false;
           const claim = res?.data?.data || res?.data || res;
-          if (claim && (claim.id === cid || (claim as any)._id === cid)) {
+          if (!cancelled && openedRouteClaimIdRef.current === cid && claim && (claim.id === cid || (claim as any)._id === cid)) {
             const reqTab = searchParams.get('tab') || (location.state as any)?.tab;
             if (reqTab) {
               (claim as any).defaultTab = reqTab;
@@ -3056,10 +3120,19 @@ export default function Claims({ contactId, contact, embedded = false }: ClaimsP
           }
         })
         .catch((err: any) => {
-          if (openedRouteClaimIdRef.current === cid) openedRouteClaimIdRef.current = null;
-          console.error('Failed to preload claim from URL/state', err);
+          requestPending = false;
+          if (!cancelled) {
+            if (openedRouteClaimIdRef.current === cid) openedRouteClaimIdRef.current = null;
+            console.error('Failed to preload claim from URL/state', err);
+          }
         });
     }
+    return () => {
+      cancelled = true;
+      if (requestPending && openedRouteClaimIdRef.current === cid) {
+        openedRouteClaimIdRef.current = null;
+      }
+    };
   }, [searchParams, location.state, editTarget]);
   
   // Claim Detail sheet
@@ -3096,7 +3169,27 @@ export default function Claims({ contactId, contact, embedded = false }: ClaimsP
 
   // Fetch all claims for client side filtering matching reference app
   const { data: claimsRes, isLoading } = useClaims({ page: 1, limit: 500 });
-  const rawClaims = claimsRes?.data ?? [];
+  const rawClaims = useMemo(() => {
+    const list = claimsRes?.data ?? [];
+    if (authUser?.role === 'EMPLOYEE') {
+      const myIds = [authUser.id, (authUser as any)?.userId].filter(Boolean);
+      const myEmp = employees.find((e: any) => e.userId === authUser.id || e.id === authUser.id || e.user?.id === authUser.id);
+      if (myEmp?.id) myIds.push(myEmp.id);
+      if (myEmp?.userId) myIds.push(myEmp.userId);
+
+      return list.filter((c: any) => {
+        const claimAssigneeIds = [
+          c.assignedEmployeeId,
+          c.assignedEmployee?.id,
+          c.assignedEmployee?.userId,
+          ...(Array.isArray(c.assignedEmployeeIds) ? c.assignedEmployeeIds : []),
+        ].filter(Boolean);
+
+        return claimAssigneeIds.some((id: string) => myIds.includes(id));
+      });
+    }
+    return list;
+  }, [claimsRes?.data, authUser, employees]);
 
   // Filters
   const [search, setSearch] = useState(() => searchParams.get('search') || searchParams.get('q') || '');
@@ -3283,8 +3376,16 @@ export default function Claims({ contactId, contact, embedded = false }: ClaimsP
       if (filterAssignedEmployee) {
         const targetEmp = employees.find((e: any) => e.userId === filterAssignedEmployee || e.id === filterAssignedEmployee);
         const matchIds = [filterAssignedEmployee, targetEmp?.id, targetEmp?.userId].filter(Boolean);
-        const cAssignedId = c.assignedEmployeeId || c.assignedEmployee?.id || c.assignedEmployee?.userId;
-        if (!matchIds.includes(cAssignedId)) return false;
+        const allEmpIds = [
+          c.assignedEmployeeId,
+          c.assignedEmployee?.id,
+          c.assignedEmployee?.userId,
+          ...(Array.isArray(c.assignedEmployeeIds) ? c.assignedEmployeeIds : []),
+          c.contact?.assignedEmployeeId,
+          ...(Array.isArray(c.contact?.assignedEmployeeIds) ? c.contact.assignedEmployeeIds : []),
+          c.policy?.assignedEmployeeId,
+        ].filter(Boolean);
+        if (!allEmpIds.some((id: string) => matchIds.includes(id))) return false;
       }
 
       // 5. Agent Name Filter
@@ -3473,6 +3574,18 @@ export default function Claims({ contactId, contact, embedded = false }: ClaimsP
       if (key === 'intimatedAt') return row.intimatedAt || '';
       if (key === 'claimType') return row.claimType || '';
       if (key === 'assignedTo') {
+        const ids: string[] = [];
+        if (Array.isArray((row as any).assignedEmployeeIds)) ids.push(...(row as any).assignedEmployeeIds);
+        if (row.assignedEmployeeId) ids.push(row.assignedEmployeeId);
+        if (Array.isArray(row.contact?.assignedEmployeeIds)) ids.push(...row.contact.assignedEmployeeIds);
+        if (row.contact?.assignedEmployeeId) ids.push(row.contact.assignedEmployeeId);
+        if (row.policy?.assignedEmployeeId) ids.push(row.policy.assignedEmployeeId);
+        const uniqueIds = Array.from(new Set(ids.filter(Boolean)));
+        const names = uniqueIds.map((id: string) => {
+          const emp = employees.find((e: any) => e.userId === id || e.id === id || e.user?.id === id);
+          return emp ? `${emp.firstName || emp.employeeProfile?.firstName || ''} ${emp.lastName || emp.employeeProfile?.lastName || ''}`.trim() : '';
+        }).filter(Boolean);
+        if (names.length > 0) return names.join(', ');
         return row.assignedEmployee?.employeeProfile
           ? `${row.assignedEmployee.employeeProfile.firstName} ${row.assignedEmployee.employeeProfile.lastName || ''}`.trim()
           : ((row.assignedEmployee as any)?.firstName ? `${(row.assignedEmployee as any).firstName} ${(row.assignedEmployee as any).lastName || ''}`.trim() : '');
@@ -4215,8 +4328,12 @@ export default function Claims({ contactId, contact, embedded = false }: ClaimsP
         diagnosisSimple, roomCategory, typeOfManagement: typeOfManagement === 'Other' ? (otherManagementDetail || 'Other') : typeOfManagement, typeOfAdmission, isMedicoLegalCase, isFirLegalDocAvailable, hospitalisationComment, amtAnesthesia, billingComment,
         amtFinalBill, amtNonPayables, amtCopay, amtDeductible, amtBalanceEMIs, amtNcdRecovery, amtExcessSumInsured, amtExcessAilmentLimit, amtHigherRoomRent, amtReasonableCost, amtOtherRecoveries, amtPatientToPay, amtExcessAgreedPackage, amtNetworkDiscount, amtNotCollected, amtPayableToInsured, approvalComment
       });
+      const finalApprovedAmount = (body.approvedAmount !== undefined && body.approvedAmount !== null && (body.approvedAmount as any) !== '' && !isNaN(Number(body.approvedAmount)))
+        ? Number(body.approvedAmount)
+        : undefined;
       const res = await createClaim.mutateAsync({
         ...rest,
+        approvedAmount: finalApprovedAmount,
         status: getBackendStatusFromUi(uiClaimStatus),
         assignedEmployeeId: assignedEmployeeId || undefined,
         notes: notesJson,
@@ -4245,6 +4362,7 @@ export default function Claims({ contactId, contact, embedded = false }: ClaimsP
       }
 
       qc.invalidateQueries({ queryKey: ['claims'] });
+      qc.invalidateQueries({ queryKey: ['policies'] });
       toast.success('Claim created successfully');
       if (claimId) {
         setModalOpen(false);
@@ -4269,15 +4387,27 @@ export default function Claims({ contactId, contact, embedded = false }: ClaimsP
     try {
       let fileToUpload = file;
       if (/\.(xlsx|xls)$/i.test(file.name)) {
-        const workbook = XLSX.read(await file.arrayBuffer(), { type: 'array' });
+        const workbook = XLSX.read(await file.arrayBuffer(), { type: 'array', cellDates: false });
         const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
         if (!firstSheet) throw new Error('The Excel file does not contain a worksheet');
         const csvContent = XLSX.utils.sheet_to_csv(firstSheet);
-        fileToUpload = new File([csvContent], file.name.replace(/\.[^/.]+$/, '.csv'), { type: 'text/csv' });
+        fileToUpload = new File([`\uFEFF${csvContent}`], file.name.replace(/\.[^/.]+$/, '.csv'), { type: 'text/csv;charset=utf-8' });
       }
       const res = await claimsService.importCsv(fileToUpload);
-      toast.success(res.message || `Successfully imported claims!`, { id: toastId });
+      if (res.created > 0) {
+        toast.success(res.message || `Successfully imported ${res.created} claim(s)!`, { id: toastId });
+        if (res.skipped?.length > 0) {
+          toast.error(`Skipped ${res.skipped.length} record(s): ${res.skipped.slice(0, 3).join(', ')}`, { duration: 6000 });
+        }
+      } else if (res.skipped?.length > 0) {
+        toast.error(`Import skipped: ${res.skipped.join(', ')}`, { id: toastId, duration: 8000 });
+      } else {
+        toast.error(res.message || 'No claims were imported from the file', { id: toastId });
+      }
       qc.invalidateQueries({ queryKey: ['claims'] });
+      qc.refetchQueries({ queryKey: ['claims'] });
+      qc.invalidateQueries({ queryKey: ['policies'] });
+      qc.invalidateQueries({ queryKey: ['contacts'] });
       if (fileInputRef.current) fileInputRef.current.value = '';
     } catch (err: any) {
       toast.error(err?.response?.data?.message || err?.message || 'Failed to import claims', { id: toastId });
@@ -4326,11 +4456,14 @@ export default function Claims({ contactId, contact, embedded = false }: ClaimsP
       key: 'approvedAmount',
       label: 'Settled Amt',
       render: r => {
-        const settledAmount = r.approvedAmount && r.approvedAmount > 0
-          ? r.approvedAmount
-          : getClaimUiStatus(r) === 'Settled' && r.claimAmount > 0
-            ? r.claimAmount
-            : undefined;
+        const notes = getClaimNotesData(r.notes);
+        const settledAmount = (r.approvedAmount !== undefined && r.approvedAmount !== null && Number(r.approvedAmount) > 0)
+          ? Number(r.approvedAmount)
+          : (notes.amtPayableToInsured !== undefined && notes.amtPayableToInsured !== null && Number(notes.amtPayableToInsured) > 0)
+            ? Number(notes.amtPayableToInsured)
+            : (getClaimUiStatus(r) === 'Settled' && r.claimAmount > 0)
+              ? Number(r.claimAmount)
+              : undefined;
         return settledAmount !== undefined
           ? <span className="font-bold text-emerald-600 text-sm">₹{Number(settledAmount).toLocaleString('en-IN')}</span>
           : <span className="text-slate-400 text-sm font-medium">—</span>;
@@ -4365,6 +4498,50 @@ export default function Claims({ contactId, contact, embedded = false }: ClaimsP
       }
     },
     {
+      key: 'assignedTo' as any,
+      label: 'Assigned To',
+      render: r => {
+        const getEmpName = (empId?: string | null): string => {
+          if (!empId) return '';
+          const emp = employees.find((e: any) => e.userId === empId || e.id === empId || e.user?.id === empId);
+          if (emp) {
+            const fn = emp.firstName || emp.employeeProfile?.firstName || '';
+            const ln = emp.lastName || emp.employeeProfile?.lastName || '';
+            return `${fn} ${ln}`.trim();
+          }
+          return '';
+        };
+
+        const ids: string[] = [];
+        if (Array.isArray((r as any).assignedEmployeeIds)) ids.push(...(r as any).assignedEmployeeIds);
+        if (r.assignedEmployeeId) ids.push(r.assignedEmployeeId);
+        if (Array.isArray((r.contact as any)?.assignedEmployeeIds)) ids.push(...(r.contact as any).assignedEmployeeIds);
+        if ((r.contact as any)?.assignedEmployeeId) ids.push((r.contact as any).assignedEmployeeId);
+        if ((r.policy as any)?.assignedEmployeeId) ids.push((r.policy as any).assignedEmployeeId);
+        const uniqueIds = Array.from(new Set(ids.filter(Boolean)));
+
+        const names = uniqueIds.map(getEmpName).filter(Boolean);
+        if (names.length === 0) {
+          const direct = (r as any).assignedEmployee?.employeeProfile
+            ? `${(r as any).assignedEmployee.employeeProfile.firstName} ${(r as any).assignedEmployee.employeeProfile.lastName}`
+            : ((r as any).assignedEmployee?.firstName ? `${(r as any).assignedEmployee.firstName} ${(r as any).assignedEmployee.lastName || ''}` : '');
+          if (direct) names.push(direct.trim());
+        }
+
+        const display = names.join(', ') || '—';
+        return (
+          <span className="font-bold text-slate-800 text-sm">
+            {display}
+            {authUser?.role === 'OWNER' && uniqueIds.length > 1 && (
+              <span className="ml-1 text-[10px] font-extrabold text-blue-700">
+                ({uniqueIds.length} employees)
+              </span>
+            )}
+          </span>
+        );
+      }
+    },
+    {
       key: 'actions' as any,
       label: 'ACTIONS',
       render: r => (
@@ -4389,15 +4566,17 @@ export default function Claims({ contactId, contact, embedded = false }: ClaimsP
   ];
  
   const activeCols = useMemo(() => {
-    const norm = (s: string) => (s || '').replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
     const cols: Column<Claim>[] = [];
+    const seenColumns = new Set<string>();
 
     allClaimsColumnsConfig.forEach(colName => {
-      const n = norm(colName);
+      const n = normalizeClaimColumnName(colName);
+      if (seenColumns.has(n)) return;
+      seenColumns.add(n);
       if (n === 'actions') return;
       if (!isColVisibleInSettings(colName)) return;
 
-      const baseMatch = COLS.find(c => norm(c.label || String(c.key)) === n);
+      const baseMatch = COLS.find(c => normalizeClaimColumnName(c.label || String(c.key)) === n);
       if (baseMatch) {
         cols.push(baseMatch);
         return;
@@ -4460,6 +4639,15 @@ export default function Claims({ contactId, contact, embedded = false }: ClaimsP
 
     return cols;
   }, [allClaimsColumnsConfig, COLS, isColVisibleInSettings]);
+  const claimColumnOptions = useMemo(() => {
+    const seen = new Set<string>();
+    return allClaimsColumnsConfig.filter(colName => {
+      const normalized = normalizeClaimColumnName(colName);
+      if (normalized === 'actions' || seen.has(normalized)) return false;
+      seen.add(normalized);
+      return true;
+    });
+  }, [allClaimsColumnsConfig]);
 
   const genClaimNumber = () => `CLM-${Date.now().toString().slice(-8)}`;
 
@@ -4584,8 +4772,7 @@ export default function Claims({ contactId, contact, embedded = false }: ClaimsP
                 <div className="pb-1.5 border-b border-slate-100">
                   <p className="font-extrabold text-slate-400 uppercase tracking-wider text-[10px]">Show Columns</p>
                 </div>
-                {allClaimsColumnsConfig
-                  .filter(c => (c || '').trim().toLowerCase() !== 'actions')
+                {claimColumnOptions
                   .map(colName => {
                     const isVisible = isColVisibleInSettings(colName);
                     return (
@@ -5650,23 +5837,52 @@ export default function Claims({ contactId, contact, embedded = false }: ClaimsP
                     </div>
                   </div>
 
-                  {/* Row: Status | Intimation Date */}
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <div>
-                      <label className="label">Claim Status</label>
-                      <CustomSelect
-                        className="input mt-1"
-                        value={watch('uiClaimStatus') || ''}
-                        onChange={val => setValue('uiClaimStatus', val)}
-                        placeholder="Select Status"
-                        options={getActiveDropdownOptions('Claim', 'Claim Status', CLAIM_STATUS_OPTIONS)}
-                      />
-                    </div>
-                    <div>
-                      <label className="label">Intimation Date <span className="text-red-500">*</span></label>
-                      <input type="date" max={getTodayDateInputValue()} {...register('intimatedAt')} className="input mt-1 py-1 text-xs" />
-                    </div>
-                  </div>
+                  {/* Row: Status | Settled Amount | Intimation Date */}
+                  {(() => {
+                    const isNewSettled = (watch('uiClaimStatus') || '').toLowerCase().includes('settle');
+                    return (
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                        <div>
+                          <label className="label">Claim Status</label>
+                          <CustomSelect
+                            className="input mt-1"
+                            value={watch('uiClaimStatus') || ''}
+                            onChange={val => {
+                              setValue('uiClaimStatus', val);
+                              if (val.toLowerCase().includes('settle') && !watch('approvedAmount') && watch('claimAmount')) {
+                                setValue('approvedAmount', Number(watch('claimAmount')));
+                              }
+                            }}
+                            placeholder="Select Status"
+                            options={getActiveDropdownOptions('Claim', 'Claim Status', CLAIM_STATUS_OPTIONS)}
+                          />
+                        </div>
+                        <div>
+                          <label className="label">
+                            Settled Amount (₹) {isNewSettled && <span className="text-emerald-600 font-bold">•</span>}
+                          </label>
+                          <input
+                            type="number"
+                            min="0"
+                            step="any"
+                            disabled={!isNewSettled}
+                            className={clsx(
+                              "input mt-1",
+                              isNewSettled
+                                ? "bg-white border-emerald-300 text-emerald-900 font-semibold focus:ring-emerald-500 shadow-2xs"
+                                : "bg-slate-100 border-slate-200 text-slate-400 cursor-not-allowed"
+                            )}
+                            {...register('approvedAmount')}
+                            placeholder={isNewSettled ? "Enter settled amount" : "Enable when status is Settled"}
+                          />
+                        </div>
+                        <div>
+                          <label className="label">Intimation Date <span className="text-red-500">*</span></label>
+                          <input type="date" max={getTodayDateInputValue()} {...register('intimatedAt')} className="input mt-1 py-1 text-xs" />
+                        </div>
+                      </div>
+                    );
+                  })()}
 
                   {/* Row: Diagnosis | Comment */}
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -7352,6 +7568,12 @@ export function ClaimDetailView({ claim, onEdit }: { claim: any; onEdit?: () => 
             <span>Total Claim Amount:</span>
             <span>₹{Number(claim?.claimAmount || 0).toLocaleString('en-IN')}</span>
           </div>
+          {((claim?.approvedAmount != null && Number(claim.approvedAmount) > 0) || displayStatus === 'Settled') && (
+            <div className="flex justify-between col-span-2 pt-1 font-bold text-sm text-emerald-700">
+              <span>Settled Amount:</span>
+              <span>₹{Number(claim?.approvedAmount ?? notesData.amtPayableToInsured ?? claim?.claimAmount ?? 0).toLocaleString('en-IN')}</span>
+            </div>
+          )}
         </div>
       </div>
 

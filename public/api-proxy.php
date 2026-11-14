@@ -1,8 +1,12 @@
 <?php
 /**
- * Same-origin API Reverse Proxy for Hostinger (swara.exportshub.in)
+ * Same-origin API Reverse Proxy for Hostinger (insumitr.exportshub.in)
  * Routes Frontend API requests to the Render backend without browser CORS errors.
+ * Includes cold-start retry handling for Render free-tier instances.
  */
+
+@set_time_limit(120);
+@ini_set('max_execution_time', '120');
 
 $backendBase = 'https://insumitrabackend-2w2y.onrender.com/api/v1';
 $allowedOriginHeader = 'https://insumitr.exportshub.in';
@@ -21,31 +25,30 @@ if ($method === 'OPTIONS') {
     exit;
 }
 
-// Resolve endpoint path
-$path = '';
+// Resolve endpoint path (support both __path and _path)
+$rawPath = '';
 if (!empty($_GET['__path'])) {
-    $path = '/' . ltrim($_GET['__path'], '/');
+    $rawPath = $_GET['__path'];
+} elseif (!empty($_GET['_path'])) {
+    $rawPath = $_GET['_path'];
 } elseif (!empty($_SERVER['PATH_INFO'])) {
-    $path = '/' . ltrim($_SERVER['PATH_INFO'], '/');
+    $rawPath = $_SERVER['PATH_INFO'];
 } else {
     $uri = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
-    $path = preg_replace('#^/(api-proxy\.php|api/v1)#', '', $uri);
-    $path = '/' . ltrim((string)$path, '/');
+    $rawPath = preg_replace('#^/(api-proxy\.php|api/v1)#', '', $uri);
 }
 
-// Build query string excluding internal __path parameter
+$path = '/' . ltrim((string)$rawPath, '/');
+if ($path === '/' || $path === '') {
+    $path = '/health';
+}
+
+// Build query string excluding internal path parameters
 $queryParams = $_GET;
-unset($queryParams['__path']);
+unset($queryParams['__path'], $queryParams['_path']);
 $queryString = http_build_query($queryParams);
 
 $targetUrl = rtrim($backendBase, '/') . $path . ($queryString ? '?' . $queryString : '');
-
-$ch = curl_init($targetUrl);
-curl_setopt($ch, CURLOPT_CUSTOMREQUEST, $method);
-curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-curl_setopt($ch, CURLOPT_HEADER, true);
-curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
-curl_setopt($ch, CURLOPT_TIMEOUT, 60);
 
 // Collect request headers
 $incomingHeaders = function_exists('getallheaders') ? getallheaders() : [];
@@ -85,6 +88,8 @@ if (!empty($_SERVER['HTTP_ACCEPT'])) {
 }
 
 // Handle request payload for write methods
+$postFields = null;
+$rawBody = null;
 if (in_array($method, ['POST', 'PUT', 'PATCH', 'DELETE'], true)) {
     if (!empty($_FILES) || stripos($contentType, 'multipart/form-data') !== false) {
         $postFields = $_POST;
@@ -107,33 +112,61 @@ if (in_array($method, ['POST', 'PUT', 'PATCH', 'DELETE'], true)) {
                 );
             }
         }
-        curl_setopt($ch, CURLOPT_POSTFIELDS, $postFields);
     } else {
         $rawBody = file_get_contents('php://input');
-        if ($rawBody !== false && $rawBody !== '') {
-            curl_setopt($ch, CURLOPT_POSTFIELDS, $rawBody);
-        }
         if ($contentType) {
             $forwardHeaders[] = 'Content-Type: ' . $contentType;
         }
     }
 }
 
-curl_setopt($ch, CURLOPT_HTTPHEADER, $forwardHeaders);
+// Execute cURL with automatic retry on cold start (up to 3 attempts)
+$maxAttempts = 3;
+$response = false;
+$statusCode = 0;
+$headerSize = 0;
+$lastErr = '';
 
-$response = curl_exec($ch);
-if ($response === false) {
-    $err = curl_error($ch);
+for ($attempt = 1; $attempt <= $maxAttempts; $attempt++) {
+    $ch = curl_init($targetUrl);
+    curl_setopt($ch, CURLOPT_CUSTOMREQUEST, $method);
+    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+    curl_setopt($ch, CURLOPT_HEADER, true);
+    curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
+    curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 20);
+    curl_setopt($ch, CURLOPT_TIMEOUT, 60);
+
+    if ($postFields !== null) {
+        curl_setopt($ch, CURLOPT_POSTFIELDS, $postFields);
+    } elseif ($rawBody !== null && $rawBody !== '') {
+        curl_setopt($ch, CURLOPT_POSTFIELDS, $rawBody);
+    }
+    curl_setopt($ch, CURLOPT_HTTPHEADER, $forwardHeaders);
+
+    $response = curl_exec($ch);
+    $lastErr = curl_error($ch);
+    $statusCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    $headerSize = curl_getinfo($ch, CURLINFO_HEADER_SIZE);
     curl_close($ch);
-    http_response_code(502);
-    header('Content-Type: application/json');
-    echo json_encode(['statusCode' => 502, 'message' => 'Proxy error: ' . $err]);
-    exit;
+
+    // If we received a valid HTTP response (< 500), return immediately
+    if ($response !== false && $statusCode > 0 && $statusCode < 500) {
+        break;
+    }
+
+    // If Render returned 502/503/504 or connection timed out during cold start, wait and retry
+    if ($attempt < $maxAttempts && ($response === false || $statusCode >= 500)) {
+        sleep(2);
+        continue;
+    }
 }
 
-$statusCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-$headerSize = curl_getinfo($ch, CURLINFO_HEADER_SIZE);
-curl_close($ch);
+if ($response === false) {
+    http_response_code(502);
+    header('Content-Type: application/json');
+    echo json_encode(['statusCode' => 502, 'message' => 'Backend is waking up or unreachable. Please refresh in a few seconds. (' . $lastErr . ')']);
+    exit;
+}
 
 $rawResponseHeaders = substr($response, 0, $headerSize);
 $responseBody = substr($response, $headerSize);

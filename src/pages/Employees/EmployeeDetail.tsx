@@ -3,22 +3,21 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { employeesService } from '@api/index';
 import { 
-  ArrowLeft, CheckSquare, BookOpen, Plus, Check, Clock, 
-  Shield, Target, Key, Calendar, Pencil, TrendingUp, 
+  ArrowLeft, CheckSquare, Plus, Check, Clock, 
+  Shield, Key, Calendar, Pencil, 
   Users, DollarSign, FileText, AlertCircle, Sparkles, 
-  Briefcase, Mail, Phone, MapPin, Eye, Save, X, Lock, CheckCircle2, Building 
+  Briefcase, Mail, Phone, MapPin, Eye, Save, X, Lock, CheckCircle2, Building,
+  User, ShieldCheck
 } from 'lucide-react';
 import Modal from '@comps/common/Modal';
 import { useForm } from 'react-hook-form';
 import { z } from 'zod';
 import { zodResolver } from '@hookform/resolvers/zod';
-import { format, startOfMonth } from 'date-fns';
+import { format } from 'date-fns';
 import toast from 'react-hot-toast';
 import clsx from 'clsx';
 import { DatePicker } from '@comps/common/DatePicker';
 import { useAuthStore } from '@store/auth.store';
-import EmployeeCalendarTaskView from './components/EmployeeCalendarTaskView';
-import JobDescriptionPanel from '../Workspace/components/JobDescriptionPanel';
 
 const employeeEditSchema = z.object({
   firstName:         z.string().min(1, 'Required'),
@@ -51,36 +50,6 @@ const employeeEditSchema = z.object({
 });
 type EmployeeEditForm = z.infer<typeof employeeEditSchema>;
 
-const taskSchema = z.object({
-  title:       z.string().min(1, 'Required'),
-  description: z.string().optional(),
-  dueDate:     z.string().optional(),
-  priority:    z.enum(['LOW', 'MEDIUM', 'HIGH']).optional(),
-});
-type TaskForm = z.infer<typeof taskSchema>;
-
-const logSchema = z.object({
-  date:     z.string().min(1, 'Required'),
-  callsMade: z.coerce.number().min(0).optional(),
-  meetingsDone: z.coerce.number().min(0).optional(),
-  leadsGenerated: z.coerce.number().min(0).optional(),
-  policiesSold: z.coerce.number().min(0).optional(),
-  premiumCollected: z.coerce.number().min(0).optional(),
-  notes:    z.string().optional(),
-  checkIn:  z.string().optional(),
-  checkOut: z.string().optional(),
-  adminRemarks: z.string().optional(),
-});
-type LogForm = z.infer<typeof logSchema>;
-
-const targetSchema = z.object({
-  monthlyTarget: z.coerce.number().min(0),
-  callsTarget:   z.coerce.number().min(0),
-  visitsTarget:  z.coerce.number().min(0),
-  bonusPlanned:  z.coerce.number().min(0).optional(),
-});
-type TargetForm = z.infer<typeof targetSchema>;
-
 const permissionSchema = z.object({
   role: z.string().default('EMPLOYEE'),
   permissions: z.preprocess((val) => {
@@ -92,16 +61,16 @@ const permissionSchema = z.object({
 type PermissionForm = z.infer<typeof permissionSchema>;
 
 const MODULES = [
-  { key: 'dashboard',         label: 'Dashboard' },
-  { key: 'workspace',         label: 'Workspace' },
-  { key: 'contacts',          label: 'Contacts' },
-  { key: 'leads',             label: 'Leads Pipeline' },
-  { key: 'policies',          label: 'Policies' },
-  { key: 'claims',            label: 'Claims' },
-  { key: 'operations',        label: 'Operations' },
-  { key: 'commissions',       label: 'Commissions' },
-  { key: 'employees',         label: 'Employees Directory' },
-  { key: 'deletion_requests', label: 'Delete Requests' },
+  { key: 'dashboard',         label: 'Dashboard',          desc: 'Agency analytics, revenue charts & KPI overview' },
+  { key: 'workspace',         label: 'Workspace & Tasks',  desc: 'Shift tracking, daily priorities, timeline & tasks' },
+  { key: 'contacts',          label: 'Contacts Directory', desc: 'Clients, prospects, families, KYC & medical records' },
+  { key: 'leads',             label: 'Leads Pipeline',     desc: 'Lead stages, quotation generation & follow-ups' },
+  { key: 'policies',          label: 'Policies Management',desc: 'Active policies, renewals, endorsements & documents' },
+  { key: 'claims',            label: 'Claims Assistance',  desc: 'Claim intimations, hospital cashless & settlements' },
+  { key: 'operations',        label: 'Operations & KYC',   desc: 'Document verification, underwriting & portal sync' },
+  { key: 'commissions',       label: 'Commissions',        desc: 'Payout structures, insurer reconciliations & rates' },
+  { key: 'employees',         label: 'Employees Directory',desc: 'Staff directory, targets, attendance & leaves' },
+  { key: 'deletion_requests', label: 'Delete Requests',    desc: 'Review & approve record purge / deletion requests' },
 ];
 
 export default function EmployeeDetail() {
@@ -114,19 +83,9 @@ export default function EmployeeDetail() {
   // Toggle for View Mode vs Edit Mode
   const [isEditMode, setIsEditMode] = useState(false);
 
-  const [activeTab, setActiveTab] = useState<'overview' | 'job_description' | 'performance' | 'attendance' | 'tasks' | 'commissions' | 'access'>('overview');
-  const [taskSubView, setTaskSubView] = useState<'LIST' | 'CALENDAR'>('LIST');
-
-  const [taskModal, setTaskModal]   = useState(false);
-  const [logModal, setLogModal]     = useState(false);
-  const [selectedLog, setSelectedLog] = useState<any>(null);
-  const [targetModal, setTargetModal] = useState(false);
+  const [activeTab, setActiveTab] = useState<'overview' | 'commissions' | 'access'>('overview');
+  const [activeProfileTab, setActiveProfileTab] = useState<'Personal' | 'Employment' | 'Bank Details'>('Personal');
   const [permModal, setPermModal]   = useState(false);
-
-  // Logs filters
-  const today = format(new Date(), 'yyyy-MM-dd');
-  const [startDate, setStartDate] = useState(format(startOfMonth(new Date()), 'yyyy-MM-dd'));
-  const [endDate, setEndDate]     = useState(today);
 
   const { data: employee, isLoading } = useQuery({
     queryKey: ['employee', id],
@@ -138,20 +97,6 @@ export default function EmployeeDetail() {
   const { data: stats } = useQuery({
     queryKey: ['employee-stats', id],
     queryFn: () => employeesService.stats(id!),
-    enabled: !!id,
-    retry: false,
-  });
-
-  const { data: tasks, refetch: refetchTasks } = useQuery({
-    queryKey: ['employee-tasks', id],
-    queryFn: () => employeesService.tasks(id!),
-    enabled: !!id,
-    retry: false,
-  });
-
-  const { data: logsRes, refetch: refetchLogs } = useQuery({
-    queryKey: ['employee-logs', id, startDate, endDate],
-    queryFn: () => employeesService.getEmployeeLogs(id!, { startDate: startDate || undefined, endDate: endDate || undefined }),
     enabled: !!id,
     retry: false,
   });
@@ -294,20 +239,6 @@ export default function EmployeeDetail() {
     }
   }, [employee]);
 
-  const taskForm = useForm<TaskForm>({
-    resolver: zodResolver(taskSchema),
-    defaultValues: { priority: 'MEDIUM', dueDate: '' },
-  });
-
-  const logForm = useForm<LogForm>({
-    resolver: zodResolver(logSchema),
-    defaultValues: { date: format(new Date(), 'yyyy-MM-dd') },
-  });
-
-  const targetForm = useForm<TargetForm>({
-    resolver: zodResolver(targetSchema),
-  });
-
   const permForm = useForm<PermissionForm>({
     resolver: zodResolver(permissionSchema),
     defaultValues: {
@@ -331,45 +262,7 @@ export default function EmployeeDetail() {
     }
   });
 
-  const addTask = useMutation({
-    mutationFn: (body: TaskForm) => employeesService.createEmployeeTask(id!, body),
-    onSuccess: () => {
-      refetchTasks();
-      setTaskModal(false);
-      taskForm.reset({ priority: 'MEDIUM' });
-      toast.success('Task added');
-    },
-    onError: () => toast.error('Task added (offline preview)'),
-  });
 
-  const addLog = useMutation({
-    mutationFn: (body: LogForm) => employeesService.dailyLog(id!, body),
-    onSuccess: () => {
-      refetchLogs();
-      setLogModal(false);
-      setSelectedLog(null);
-      logForm.reset({ date: format(new Date(), 'yyyy-MM-dd') });
-      toast.success('Log saved');
-    },
-    onError: () => {
-      setSelectedLog(null);
-      toast.success('Log recorded (offline preview)');
-      setLogModal(false);
-    },
-  });
-
-  const updateTargets = useMutation({
-    mutationFn: (body: TargetForm) => employeesService.updateEmployeeProfile(id!, body),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['employee', id] });
-      setTargetModal(false);
-      toast.success('Targets updated successfully');
-    },
-    onError: () => {
-      setTargetModal(false);
-      toast.success('Targets updated (offline preview)');
-    }
-  });
 
   const updatePermissions = useMutation({
     mutationFn: (body: { role: string; permissions: string[] }) => employeesService.updateRole(id!, body),
@@ -504,23 +397,7 @@ export default function EmployeeDetail() {
 
         {/* Quick Highlights */}
         <div className="flex items-center gap-3 border-t md:border-t-0 md:border-l border-gray-100 pt-4 md:pt-0 md:pl-6">
-          <div className="text-center px-3">
-            <span className="text-[10px] font-bold text-gray-400 uppercase">Target (Monthly)</span>
-            <p className="text-base font-black text-gray-900">
-              {emp.monthlyTarget && Number(emp.monthlyTarget) > 0 
-                ? `₹${Number(emp.monthlyTarget) >= 100000 ? (Number(emp.monthlyTarget) / 100000).toFixed(1) + 'L' : Number(emp.monthlyTarget).toLocaleString('en-IN')}` 
-                : '₹0'}
-            </p>
-          </div>
-          <div className="text-center px-3 border-l border-gray-100">
-            <span className="text-[10px] font-bold text-gray-400 uppercase">Achieved</span>
-            <p className="text-base font-black text-emerald-600">
-              {emp.monthlyTarget && Number(emp.monthlyTarget) > 0
-                ? `₹${((stats?.data?.premiumThisMonth || 0) / 100000).toFixed(1)}L (${Math.round(((stats?.data?.premiumThisMonth || 0) / Number(emp.monthlyTarget)) * 100)}%)`
-                : '₹0 (0%)'}
-            </p>
-          </div>
-          <div className="text-center px-3 border-l border-gray-100">
+          <div className="text-center px-4">
             <span className="text-[10px] font-bold text-gray-400 uppercase">Commissions</span>
             <p className="text-base font-black text-purple-600">
               {stats?.data?.totalCommission !== undefined ? `₹${Number(stats.data.totalCommission).toLocaleString('en-IN')}` : '₹0'}
@@ -529,200 +406,161 @@ export default function EmployeeDetail() {
         </div>
       </div>
 
-      {/* Navigation Tabs */}
-      <div className="flex p-1.5 bg-slate-100 rounded-2xl border border-slate-200/80 overflow-x-auto">
-        <button
-          onClick={() => setActiveTab('overview')}
-          className={`px-4 py-2 rounded-xl text-xs font-bold transition-all shrink-0 cursor-pointer ${
-            activeTab === 'overview' ? 'bg-white text-gray-900 shadow-xs' : 'text-gray-500 hover:text-gray-700'
-          }`}
-        >
-          👤 Overview &amp; Profile Details
-        </button>
-
-        <button
-          onClick={() => setActiveTab('job_description')}
-          className={`px-4 py-2 rounded-xl text-xs font-bold transition-all shrink-0 cursor-pointer ${
-            activeTab === 'job_description' ? 'bg-white text-blue-700 shadow-xs' : 'text-gray-500 hover:text-gray-700'
-          }`}
-        >
-          💼 Job Description &amp; Expectations
-        </button>
-
-        <button
-          onClick={() => setActiveTab('performance')}
-          className={`px-4 py-2 rounded-xl text-xs font-bold transition-all shrink-0 cursor-pointer ${
-            activeTab === 'performance' ? 'bg-white text-purple-700 shadow-xs' : 'text-gray-500 hover:text-gray-700'
-          }`}
-        >
-          📈 Targets &amp; Performance
-        </button>
-
-        <button
-          onClick={() => setActiveTab('attendance')}
-          className={`px-4 py-2 rounded-xl text-xs font-bold transition-all shrink-0 cursor-pointer ${
-            activeTab === 'attendance' ? 'bg-white text-emerald-700 shadow-xs' : 'text-gray-500 hover:text-gray-700'
-          }`}
-        >
-          ⏱️ Attendance &amp; Shift Logs
-        </button>
-
-        <button
-          onClick={() => setActiveTab('tasks')}
-          className={`px-4 py-2 rounded-xl text-xs font-bold transition-all shrink-0 cursor-pointer ${
-            activeTab === 'tasks' ? 'bg-white text-blue-700 shadow-xs' : 'text-gray-500 hover:text-gray-700'
-          }`}
-        >
-          ✅ Tasks &amp; Activities
-        </button>
-
-        <button
-          onClick={() => setActiveTab('commissions')}
-          className={`px-4 py-2 rounded-xl text-xs font-bold transition-all shrink-0 cursor-pointer ${
-            activeTab === 'commissions' ? 'bg-white text-amber-700 shadow-xs' : 'text-gray-500 hover:text-gray-700'
-          }`}
-        >
-          💰 Commissions &amp; Payouts
-        </button>
-
-        <button
-          onClick={() => setActiveTab('access')}
-          className={`px-4 py-2 rounded-xl text-xs font-bold transition-all shrink-0 cursor-pointer ${
-            activeTab === 'access' ? 'bg-white text-indigo-700 shadow-xs' : 'text-gray-500 hover:text-gray-700'
-          }`}
-        >
-          🔐 Access Control
-        </button>
+      {/* Navigation Tabs (Styled identical to Employees layout tabs) */}
+      <div className="flex items-center gap-2 border-b border-slate-200/80 pb-3 overflow-x-auto no-scrollbar flex-nowrap scroll-smooth">
+        {[
+          { id: 'overview', label: 'Overview & Profile Details', icon: User },
+          { id: 'commissions', label: 'Commissions & Payouts', icon: DollarSign },
+          { id: 'access', label: 'Access Control', icon: ShieldCheck },
+        ].map(tab => {
+          const isActive = activeTab === tab.id;
+          const Icon = tab.icon;
+          return (
+            <button
+              key={tab.id}
+              type="button"
+              onClick={() => setActiveTab(tab.id as any)}
+              className={clsx(
+                'shrink-0 whitespace-nowrap px-4 py-2 rounded-xl text-xs font-extrabold transition-all flex items-center gap-2 cursor-pointer select-none border',
+                isActive
+                  ? 'bg-blue-600 text-white border-blue-600 shadow-md shadow-blue-500/20'
+                  : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50 hover:text-slate-900'
+              )}
+            >
+              <Icon size={15} />
+              {tab.label}
+            </button>
+          );
+        })}
       </div>
 
-      {/* ── TAB 1: OVERVIEW & PROFILE (View Mode first, inline Edit mode) ────────────────────────────────────────── */}
+      {/* ── TAB 1: OVERVIEW & PROFILE (View & Edit Mode styled identical to Directory) ────────────────────── */}
       {activeTab === 'overview' && (
-        <form onSubmit={editForm.handleSubmit(data => updateEmployeeMutation.mutate(data))} className="space-y-6">
+        <form onSubmit={editForm.handleSubmit(data => updateEmployeeMutation.mutate(data))} className="space-y-4">
           
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            
-            {/* Card 1: Personal & Identity Information */}
-            <div className="bg-white p-6 rounded-3xl border border-gray-100 shadow-sm space-y-4">
-              <div className="flex items-center justify-between border-b border-gray-100 pb-3">
-                <h3 className="text-sm font-bold text-gray-900 flex items-center gap-2">
-                  <Users className="w-4 h-4 text-purple-600" /> Personal &amp; Identity Details
-                </h3>
-                {isEditMode && <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-purple-100 text-purple-700">Editing</span>}
+          {/* Sub-navigation tabs (Identical to Employee Directory Modal) */}
+          <div className="flex bg-slate-200/60 p-1.5 rounded-2xl gap-2 border border-slate-200/80 overflow-x-auto shadow-2xs">
+            {(['Personal', 'Employment', 'Bank Details'] as const).map(tab => (
+              <button
+                key={tab}
+                type="button"
+                onClick={() => setActiveProfileTab(tab)}
+                className={clsx(
+                  'px-5 py-2.5 rounded-xl text-xs font-extrabold tracking-wide transition-all cursor-pointer whitespace-nowrap',
+                  activeProfileTab === tab
+                    ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-md shadow-blue-500/25 scale-[1.02]'
+                    : 'text-slate-600 hover:text-slate-900 hover:bg-white/80'
+                )}
+              >
+                {tab}
+              </button>
+            ))}
+          </div>
+
+          {/* TAB 1.1: PERSONAL */}
+          {activeProfileTab === 'Personal' && (
+            <div className="bg-white p-6 sm:p-7 rounded-3xl border border-gray-100 shadow-sm space-y-4 animate-fadeIn">
+              <div className="flex items-center gap-2 px-3.5 py-2.5 bg-gradient-to-r from-blue-50 to-indigo-50/50 rounded-xl border border-blue-100 text-blue-900 font-extrabold text-xs uppercase tracking-wider mb-4">
+                <span className="w-5 h-5 rounded-full bg-blue-600 text-white flex items-center justify-center text-[10px]">1</span>
+                Personal &amp; Identity Details
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
-                <div>
-                  <span className="text-[10px] font-bold text-gray-400 uppercase">First Name *</span>
-                  {isEditMode ? (
-                    <input {...editForm.register('firstName')} className="input w-full p-2 mt-1 text-xs font-semibold" />
-                  ) : (
-                    <p className="font-bold text-gray-800 mt-1">{emp.firstName || '—'}</p>
-                  )}
-                </div>
+              <fieldset disabled={!isEditMode} className="min-w-0 border-0 p-0 m-0 w-full disabled:opacity-100">
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
+                  <div>
+                    <label className="label">First Name *</label>
+                    <input {...editForm.register('firstName')} className="input font-semibold" placeholder="e.g. Rahul" />
+                    {editForm.formState.errors.firstName && <p className="text-xs text-red-500 mt-1">{editForm.formState.errors.firstName.message}</p>}
+                  </div>
 
-                <div>
-                  <span className="text-[10px] font-bold text-gray-400 uppercase">Last Name *</span>
-                  {isEditMode ? (
-                    <input {...editForm.register('lastName')} className="input w-full p-2 mt-1 text-xs font-semibold" />
-                  ) : (
-                    <p className="font-bold text-gray-800 mt-1">{emp.lastName || '—'}</p>
-                  )}
-                </div>
+                  <div>
+                    <label className="label">Last Name *</label>
+                    <input {...editForm.register('lastName')} className="input font-semibold" placeholder="e.g. Sharma" />
+                    {editForm.formState.errors.lastName && <p className="text-xs text-red-500 mt-1">{editForm.formState.errors.lastName.message}</p>}
+                  </div>
 
-                <div>
-                  <span className="text-[10px] font-bold text-gray-400 uppercase">Primary Phone *</span>
-                  {isEditMode ? (
-                    <div>
-                      <input 
-                        {...editForm.register('phone')} 
-                        className="input w-full p-2 mt-1 text-xs font-semibold" 
-                        maxLength={10}
-                        placeholder="10-digit mobile"
-                        onInput={(e) => {
-                          e.currentTarget.value = e.currentTarget.value.replace(/\D/g, '').slice(0, 10);
-                        }}
-                      />
-                      {editForm.formState.errors.phone && (
-                        <p className="text-[10px] text-red-500 mt-0.5 font-medium">{editForm.formState.errors.phone.message}</p>
-                      )}
-                    </div>
-                  ) : (
-                    <p className="font-bold text-gray-800 mt-1">{emp.phone || '—'}</p>
-                  )}
-                </div>
+                  <div>
+                    <label className="label">Primary Phone *</label>
+                    <input 
+                      {...editForm.register('phone')} 
+                      className="input font-semibold" 
+                      maxLength={10}
+                      placeholder="10-digit mobile number"
+                      onInput={(e) => {
+                        e.currentTarget.value = e.currentTarget.value.replace(/\D/g, '').slice(0, 10);
+                      }}
+                    />
+                    {editForm.formState.errors.phone && <p className="text-xs text-red-500 mt-1">{editForm.formState.errors.phone.message}</p>}
+                  </div>
 
-                <div>
-                  <span className="text-[10px] font-bold text-gray-400 uppercase">Alternate Phone</span>
-                  {isEditMode ? (
-                    <div>
-                      <input 
-                        {...editForm.register('alternatePhone')} 
-                        className="input w-full p-2 mt-1 text-xs font-semibold" 
-                        maxLength={10}
-                        placeholder="10-digit mobile"
-                        onInput={(e) => {
-                          e.currentTarget.value = e.currentTarget.value.replace(/\D/g, '').slice(0, 10);
-                        }}
-                      />
-                      {editForm.formState.errors.alternatePhone && (
-                        <p className="text-[10px] text-red-500 mt-0.5 font-medium">{editForm.formState.errors.alternatePhone.message}</p>
-                      )}
-                    </div>
-                  ) : (
-                    <p className="font-bold text-gray-800 mt-1">{emp.alternatePhone || '—'}</p>
-                  )}
-                </div>
+                  <div>
+                    <label className="label">Alternate Phone</label>
+                    <input 
+                      {...editForm.register('alternatePhone')} 
+                      className="input font-semibold" 
+                      maxLength={10}
+                      placeholder="10-digit mobile number"
+                      onInput={(e) => {
+                        e.currentTarget.value = e.currentTarget.value.replace(/\D/g, '').slice(0, 10);
+                      }}
+                    />
+                    {editForm.formState.errors.alternatePhone && <p className="text-xs text-red-500 mt-1">{editForm.formState.errors.alternatePhone.message}</p>}
+                  </div>
 
-                <div>
-                  <span className="text-[10px] font-bold text-gray-400 uppercase">Date of Birth</span>
-                  {isEditMode ? (
-                    <DatePicker {...editForm.register('dateOfBirth')} className="input w-full p-2 mt-1 text-xs font-semibold" />
-                  ) : (
-                    <p className="font-bold text-gray-800 mt-1">{emp.dateOfBirth ? format(new Date(emp.dateOfBirth), 'dd MMM yyyy') : '—'}</p>
-                  )}
-                </div>
-
-                <div>
-                  <span className="text-[10px] font-bold text-gray-400 uppercase">Gender</span>
-                  {isEditMode ? (
-                    <select {...editForm.register('gender')} className="input w-full p-2 mt-1 text-xs font-semibold">
+                  <div>
+                    <label className="label">Gender</label>
+                    <select {...editForm.register('gender')} className="input font-semibold">
                       <option value="">Select Gender</option>
                       <option value="MALE">Male</option>
                       <option value="FEMALE">Female</option>
                       <option value="OTHER">Other</option>
                     </select>
-                  ) : (
-                    <p className="font-bold text-gray-800 mt-1">{emp.gender || '—'}</p>
-                  )}
-                </div>
+                  </div>
 
-                <div>
-                  <span className="text-[10px] font-bold text-gray-400 uppercase">Aadhaar Number</span>
-                  {isEditMode ? (
-                    <input {...editForm.register('aadhaarNumber')} className="input w-full p-2 mt-1 text-xs font-semibold" placeholder="12-digit Aadhaar" maxLength={12} />
-                  ) : (
-                    <p className="font-bold font-mono text-gray-800 mt-1">{emp.aadhaarNumber || '—'}</p>
-                  )}
-                </div>
+                  <div>
+                    <label className="label">Date of Birth</label>
+                    <DatePicker {...editForm.register('dateOfBirth')} className="input font-semibold" />
+                  </div>
 
-                <div>
-                  <span className="text-[10px] font-bold text-gray-400 uppercase">PAN Number</span>
-                  {isEditMode ? (
-                    <input {...editForm.register('panNumber')} className="input w-full p-2 mt-1 text-xs font-semibold uppercase" placeholder="e.g. ABCPS1234F" />
-                  ) : (
-                    <p className="font-bold font-mono text-gray-800 mt-1">{emp.panNumber || '—'}</p>
-                  )}
-                </div>
+                  <div>
+                    <label className="label">Aadhaar Number</label>
+                    <input 
+                      {...editForm.register('aadhaarNumber')} 
+                      className="input font-semibold font-mono" 
+                      maxLength={12}
+                      placeholder="12-digit Aadhaar"
+                      onInput={(e) => {
+                        e.currentTarget.value = e.currentTarget.value.replace(/\D/g, '').slice(0, 12);
+                      }}
+                    />
+                  </div>
 
-                <div className="sm:col-span-2">
-                  <span className="text-[10px] font-bold text-gray-400 uppercase">Emergency Contact &amp; Relation</span>
-                  {isEditMode ? (
-                    <div className="grid grid-cols-2 gap-2 mt-1">
-                      <input {...editForm.register('emergencyContactName')} className="input p-2 text-xs" placeholder="Name (Relation)" />
+                  <div>
+                    <label className="label">PAN Number</label>
+                    <input 
+                      {...editForm.register('panNumber')} 
+                      className="input font-semibold uppercase font-mono" 
+                      placeholder="e.g. ABCPS1234F"
+                      maxLength={10} 
+                    />
+                  </div>
+
+                  <div>
+                    <label className="label">Account Status</label>
+                    <div className="input flex items-center gap-2 bg-slate-50 font-semibold">
+                      <span className={clsx("w-2 h-2 rounded-full", emp?.isActive ? "bg-emerald-500" : "bg-rose-500")} />
+                      <span className="font-bold text-xs">{emp?.isActive ? 'Active Employee' : 'Inactive'}</span>
+                    </div>
+                  </div>
+
+                  <div className="sm:col-span-2 md:col-span-3">
+                    <label className="label">Emergency Contact &amp; Relation</label>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <input {...editForm.register('emergencyContactName')} className="input font-semibold" placeholder="Name &amp; Relation (e.g. Spouse, Father)" />
                       <div>
                         <input 
                           {...editForm.register('emergencyContactPhone')} 
-                          className="input p-2 text-xs w-full" 
+                          className="input font-semibold" 
                           placeholder="10-digit Phone" 
                           maxLength={10}
                           onInput={(e) => {
@@ -730,232 +568,132 @@ export default function EmployeeDetail() {
                           }}
                         />
                         {editForm.formState.errors.emergencyContactPhone && (
-                          <p className="text-[10px] text-red-500 mt-0.5 font-medium">{editForm.formState.errors.emergencyContactPhone.message}</p>
+                          <p className="text-xs text-red-500 mt-1">{editForm.formState.errors.emergencyContactPhone.message}</p>
                         )}
                       </div>
                     </div>
-                  ) : (
-                    <p className="font-bold text-gray-800 mt-1">
-                      {emp.emergencyContactName || emp.emergencyContactPhone 
-                        ? `${emp.emergencyContactName || ''}${emp.emergencyContactName && emp.emergencyContactPhone ? ' • ' : ''}${emp.emergencyContactPhone || ''}` 
-                        : '—'}
-                    </p>
-                  )}
+                  </div>
                 </div>
-              </div>
+              </fieldset>
             </div>
+          )}
 
-            {/* Card 2: Employment & Hierarchy */}
-            <div className="bg-white p-6 rounded-3xl border border-gray-100 shadow-sm space-y-4">
-              <div className="flex items-center justify-between border-b border-gray-100 pb-3">
-                <h3 className="text-sm font-bold text-gray-900 flex items-center gap-2">
-                  <Briefcase className="w-4 h-4 text-primary-600" /> Employment &amp; Role Setup
-                </h3>
+          {/* TAB 1.2: EMPLOYMENT */}
+          {activeProfileTab === 'Employment' && (
+            <div className="bg-white p-6 sm:p-7 rounded-3xl border border-gray-100 shadow-sm space-y-4 animate-fadeIn">
+              <div className="flex items-center gap-2 px-3.5 py-2.5 bg-gradient-to-r from-blue-50 to-indigo-50/50 rounded-xl border border-blue-100 text-blue-900 font-extrabold text-xs uppercase tracking-wider mb-4">
+                <span className="w-5 h-5 rounded-full bg-blue-600 text-white flex items-center justify-center text-[10px]">2</span>
+                Employment &amp; Role Setup
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
-                <div>
-                  <span className="text-[10px] font-bold text-gray-400 uppercase">Designation</span>
-                  {isEditMode ? (
-                    <input {...editForm.register('designation')} className="input w-full p-2 mt-1 text-xs font-semibold" />
-                  ) : (
-                    <p className="font-bold text-gray-800 mt-1">{emp.designation || '—'}</p>
-                  )}
-                </div>
+              <fieldset disabled={!isEditMode} className="min-w-0 border-0 p-0 m-0 w-full disabled:opacity-100">
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
+                  <div>
+                    <label className="label">Designation</label>
+                    <input {...editForm.register('designation')} className="input font-semibold" placeholder="e.g. Insurance Specialist" />
+                  </div>
 
-                <div>
-                  <span className="text-[10px] font-bold text-gray-400 uppercase">Department</span>
-                  {isEditMode ? (
-                    <input {...editForm.register('department')} className="input w-full p-2 mt-1 text-xs font-semibold" />
-                  ) : (
-                    <p className="font-bold text-gray-800 mt-1">{emp.department || '—'}</p>
-                  )}
-                </div>
+                  <div>
+                    <label className="label">Department</label>
+                    <input {...editForm.register('department')} className="input font-semibold" placeholder="e.g. Sales &amp; Advisory" />
+                  </div>
 
-                <div>
-                  <span className="text-[10px] font-bold text-gray-400 uppercase">Reporting Manager</span>
-                  {isEditMode ? (
-                    <input {...editForm.register('reportingManager')} className="input w-full p-2 mt-1 text-xs font-semibold" />
-                  ) : (
-                    <p className="font-bold text-gray-800 mt-1">{emp.reportingManager || '—'}</p>
-                  )}
-                </div>
+                  <div>
+                    <label className="label">Reporting Manager</label>
+                    <input {...editForm.register('reportingManager')} className="input font-semibold" placeholder="e.g. Agency Manager" />
+                  </div>
 
-                <div>
-                  <span className="text-[10px] font-bold text-gray-400 uppercase">Date of Joining</span>
-                  {isEditMode ? (
-                    <DatePicker {...editForm.register('dateOfJoining')} className="input w-full p-2 mt-1 text-xs font-semibold" />
-                  ) : (
-                    <p className="font-bold text-gray-800 mt-1">{emp.dateOfJoining ? format(new Date(emp.dateOfJoining), 'dd MMM yyyy') : '—'}</p>
-                  )}
-                </div>
+                  <div>
+                    <label className="label">Date of Joining</label>
+                    <DatePicker {...editForm.register('dateOfJoining')} className="input font-semibold" />
+                  </div>
 
-                <div>
-                  <span className="text-[10px] font-bold text-gray-400 uppercase">Login Email (Read-Only)</span>
-                  <p className="font-bold font-mono text-gray-700 mt-1 bg-slate-50 p-2 rounded-xl border border-slate-200">
-                    {emp.user?.email || '—'}
-                  </p>
-                </div>
+                  <div>
+                    <label className="label">Login Email (Read-Only)</label>
+                    <input 
+                      type="email" 
+                      className="input bg-slate-50 text-slate-500 cursor-not-allowed font-mono text-xs font-semibold" 
+                      value={emp?.user?.email ?? ''} 
+                      disabled 
+                      readOnly 
+                    />
+                  </div>
 
-                <div>
-                  <span className="text-[10px] font-bold text-gray-400 uppercase">Account Role</span>
-                  <p className="font-bold text-primary-700 mt-1 bg-primary-50 p-2 rounded-xl border border-primary-200 uppercase text-[11px]">
-                    {emp.user?.role || 'EMPLOYEE'}
-                  </p>
-                </div>
+                  <div>
+                    <label className="label">Account Role</label>
+                    <div className="input bg-slate-50 flex items-center">
+                      <span className="px-2.5 py-0.5 rounded-md text-[11px] font-extrabold bg-blue-50 text-blue-700 border border-blue-200 uppercase">
+                        {emp?.user?.role || 'EMPLOYEE'}
+                      </span>
+                    </div>
+                  </div>
 
-                <div className="sm:col-span-2">
-                  <span className="text-[10px] font-bold text-gray-400 uppercase">Residential Address</span>
-                  {isEditMode ? (
-                    <textarea {...editForm.register('address')} rows={2} className="input w-full p-2 mt-1 text-xs font-medium" />
-                  ) : (
-                    <p className="font-bold text-gray-800 mt-1">{emp.address || '—'}</p>
-                  )}
+                  <div>
+                    <label className="label">Approval Status</label>
+                    <div className="input bg-slate-50 flex items-center">
+                      <span className={clsx(
+                        "px-2.5 py-0.5 rounded-md text-[11px] font-extrabold uppercase",
+                        emp?.approvalStatus === 'PENDING' ? "bg-amber-50 text-amber-700 border border-amber-200" :
+                        emp?.approvalStatus === 'REJECTED' ? "bg-rose-50 text-rose-700 border border-rose-200" :
+                        "bg-emerald-50 text-emerald-700 border border-emerald-200"
+                      )}>
+                        {emp?.approvalStatus || 'APPROVED'}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="sm:col-span-2 md:col-span-3">
+                    <label className="label">Residential Address</label>
+                    <textarea {...editForm.register('address')} rows={2} className="input w-full font-medium" placeholder="Enter complete residential address..." />
+                  </div>
                 </div>
-              </div>
+              </fieldset>
             </div>
+          )}
 
-            {/* Card 3: Compensation & Targets Framework */}
-            <div className="bg-white p-6 rounded-3xl border border-gray-100 shadow-sm space-y-4">
-              <div className="flex items-center justify-between border-b border-gray-100 pb-3">
-                <h3 className="text-sm font-bold text-gray-900 flex items-center gap-2">
-                  <DollarSign className="w-4 h-4 text-emerald-600" /> Compensation &amp; Performance Targets
-                </h3>
+          {/* TAB 1.3: BANK DETAILS */}
+          {activeProfileTab === 'Bank Details' && (
+            <div className="bg-white p-6 sm:p-7 rounded-3xl border border-gray-100 shadow-sm space-y-4 animate-fadeIn">
+              <div className="flex items-center gap-2 px-3.5 py-2.5 bg-gradient-to-r from-blue-50 to-indigo-50/50 rounded-xl border border-blue-100 text-blue-900 font-extrabold text-xs uppercase tracking-wider mb-4">
+                <span className="w-5 h-5 rounded-full bg-blue-600 text-white flex items-center justify-center text-[10px]">3</span>
+                Bank &amp; Settlement Account
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
-                <div>
-                  <span className="text-[10px] font-bold text-gray-400 uppercase">Base Monthly Salary (₹)</span>
-                  {isEditMode ? (
-                    <input type="number" {...editForm.register('baseSalary')} className="input w-full p-2 mt-1 text-xs font-semibold" />
-                  ) : (
-                    <p className="font-black text-gray-900 text-sm mt-1">
-                      {emp.baseSalary && Number(emp.baseSalary) > 0 ? `₹${Number(emp.baseSalary).toLocaleString('en-IN')}` : '—'}
-                    </p>
-                  )}
-                </div>
+              <fieldset disabled={!isEditMode} className="min-w-0 border-0 p-0 m-0 w-full disabled:opacity-100">
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
+                  <div>
+                    <label className="label">Bank Name</label>
+                    <input {...editForm.register('bankName')} className="input font-semibold" placeholder="e.g. HDFC Bank" />
+                  </div>
 
-                <div>
-                  <span className="text-[10px] font-bold text-gray-400 uppercase">Target Bonus (₹)</span>
-                  {isEditMode ? (
-                    <input type="number" {...editForm.register('bonusPlanned')} className="input w-full p-2 mt-1 text-xs font-semibold" />
-                  ) : (
-                    <p className="font-black text-emerald-600 text-sm mt-1">
-                      {emp.bonusPlanned && Number(emp.bonusPlanned) > 0 ? `₹${Number(emp.bonusPlanned).toLocaleString('en-IN')}` : '—'}
-                    </p>
-                  )}
-                </div>
+                  <div>
+                    <label className="label">Account Number</label>
+                    <input {...editForm.register('bankAccountNumber')} className="input font-mono font-semibold" placeholder="e.g. 501002345678" />
+                  </div>
 
-                <div>
-                  <span className="text-[10px] font-bold text-gray-400 uppercase">Monthly Premium Target (₹)</span>
-                  {isEditMode ? (
-                    <input type="number" {...editForm.register('monthlyTarget')} className="input w-full p-2 mt-1 text-xs font-semibold" />
-                  ) : (
-                    <p className="font-black text-purple-700 text-sm mt-1">
-                      {emp.monthlyTarget && Number(emp.monthlyTarget) > 0 ? `₹${Number(emp.monthlyTarget).toLocaleString('en-IN')}` : '—'}
-                    </p>
-                  )}
-                </div>
+                  <div>
+                    <label className="label">IFSC Code</label>
+                    <input {...editForm.register('bankIfscCode')} className="input font-mono font-semibold uppercase" placeholder="e.g. HDFC0001234" />
+                  </div>
 
-                <div>
-                  <span className="text-[10px] font-bold text-gray-400 uppercase">Commission Rate (%)</span>
-                  {isEditMode ? (
-                    <input type="number" step="0.5" {...editForm.register('commissionRate')} className="input w-full p-2 mt-1 text-xs font-semibold" />
-                  ) : (
-                    <p className="font-black text-blue-700 text-sm mt-1">
-                      {emp.commissionRate !== undefined && emp.commissionRate !== null && emp.commissionRate !== '' ? `${emp.commissionRate}%` : '—'}
-                    </p>
-                  )}
-                </div>
+                  <div>
+                    <label className="label">Branch Name</label>
+                    <input {...editForm.register('bankBranch')} className="input font-semibold" placeholder="e.g. Kothrud Branch" />
+                  </div>
 
-                <div>
-                  <span className="text-[10px] font-bold text-gray-400 uppercase">Daily Calls Target</span>
-                  {isEditMode ? (
-                    <input type="number" {...editForm.register('callsTarget')} className="input w-full p-2 mt-1 text-xs font-semibold" />
-                  ) : (
-                    <p className="font-bold text-gray-800 mt-1">
-                      {emp.callsTarget !== undefined && emp.callsTarget !== null && emp.callsTarget !== '' ? `${emp.callsTarget} Calls/day` : '—'}
-                    </p>
-                  )}
-                </div>
-
-                <div>
-                  <span className="text-[10px] font-bold text-gray-400 uppercase">Daily Proposal Target</span>
-                  {isEditMode ? (
-                    <input type="number" {...editForm.register('visitsTarget')} className="input w-full p-2 mt-1 text-xs font-semibold" />
-                  ) : (
-                    <p className="font-bold text-gray-800 mt-1">
-                      {emp.visitsTarget !== undefined && emp.visitsTarget !== null && emp.visitsTarget !== '' ? `${emp.visitsTarget} Proposals/day` : '—'}
-                    </p>
-                  )}
-                </div>
-              </div>
-            </div>
-
-            {/* Card 4: Bank & Settlement Details */}
-            <div className="bg-white p-6 rounded-3xl border border-gray-100 shadow-sm space-y-4">
-              <div className="flex items-center justify-between border-b border-gray-100 pb-3">
-                <h3 className="text-sm font-bold text-gray-900 flex items-center gap-2">
-                  <Building className="w-4 h-4 text-amber-600" /> Bank &amp; Settlement Account
-                </h3>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
-                <div>
-                  <span className="text-[10px] font-bold text-gray-400 uppercase">Bank Name</span>
-                  {isEditMode ? (
-                    <input {...editForm.register('bankName')} className="input w-full p-2 mt-1 text-xs font-semibold" />
-                  ) : (
-                    <p className="font-bold text-gray-800 mt-1">{emp.bankName || '—'}</p>
-                  )}
-                </div>
-
-                <div>
-                  <span className="text-[10px] font-bold text-gray-400 uppercase">Account Number</span>
-                  {isEditMode ? (
-                    <input {...editForm.register('bankAccountNumber')} className="input w-full p-2 mt-1 text-xs font-semibold" />
-                  ) : (
-                    <p className="font-bold font-mono text-gray-800 mt-1">
-                      {emp.bankAccountNumber ? (emp.bankAccountNumber.length > 4 ? `•••••••• ${emp.bankAccountNumber.slice(-4)}` : emp.bankAccountNumber) : '—'}
-                    </p>
-                  )}
-                </div>
-
-                <div>
-                  <span className="text-[10px] font-bold text-gray-400 uppercase">IFSC Code</span>
-                  {isEditMode ? (
-                    <input {...editForm.register('bankIfscCode')} className="input w-full p-2 mt-1 text-xs font-semibold uppercase" />
-                  ) : (
-                    <p className="font-bold font-mono text-gray-800 mt-1">{emp.bankIfscCode || '—'}</p>
-                  )}
-                </div>
-
-                <div>
-                  <span className="text-[10px] font-bold text-gray-400 uppercase">Branch Name</span>
-                  {isEditMode ? (
-                    <input {...editForm.register('bankBranch')} className="input w-full p-2 mt-1 text-xs font-semibold" />
-                  ) : (
-                    <p className="font-bold text-gray-800 mt-1">{emp.bankBranch || '—'}</p>
-                  )}
-                </div>
-
-                <div>
-                  <span className="text-[10px] font-bold text-gray-400 uppercase">Account Type</span>
-                  {isEditMode ? (
-                    <select {...editForm.register('bankAccountType')} className="input w-full p-2 mt-1 text-xs font-semibold">
+                  <div>
+                    <label className="label">Account Type</label>
+                    <select {...editForm.register('bankAccountType')} className="input font-semibold">
                       <option value="">Select Account Type</option>
                       <option value="Savings">Savings</option>
                       <option value="Current">Current</option>
                       <option value="Salary">Salary Account</option>
                     </select>
-                  ) : (
-                    <p className="font-bold text-gray-800 mt-1">{emp.bankAccountType || '—'}</p>
-                  )}
+                  </div>
                 </div>
-              </div>
+              </fieldset>
             </div>
-
-          </div>
+          )}
 
           {/* Bottom Save Bar when in Edit Mode */}
           {isEditMode && (
@@ -988,245 +726,145 @@ export default function EmployeeDetail() {
         </form>
       )}
 
-      {/* ── TAB: JOB DESCRIPTION & ROLE SETUP ──────────────────────── */}
-      {activeTab === 'job_description' && (
-        <JobDescriptionPanel
-          employeeId={emp.userId || emp.id}
-          employeeName={`${emp.firstName} ${emp.lastName}`}
-          isViewOnly={false}
-        />
-      )}
-
-      {/* ── TAB 2: PERFORMANCE ──────────────────────────────────────── */}
-      {activeTab === 'performance' && (
-        <div className="space-y-6">
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-            <div className="bg-white p-5 rounded-2xl border border-gray-100 shadow-sm">
-              <span className="text-[11px] font-bold text-gray-500 uppercase">Monthly Target</span>
-              <p className="text-2xl font-black text-gray-900 mt-1">
-                {emp.monthlyTarget && Number(emp.monthlyTarget) > 0 ? `₹${Number(emp.monthlyTarget).toLocaleString('en-IN')}` : '₹0'}
-              </p>
-              <span className="text-[10px] font-semibold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full mt-1 inline-block">
-                {emp.monthlyTarget && Number(emp.monthlyTarget) > 0 
-                  ? `₹${(stats?.data?.premiumThisMonth || 0).toLocaleString('en-IN')} Achieved (${Math.round(((stats?.data?.premiumThisMonth || 0) / Number(emp.monthlyTarget)) * 100)}%)` 
-                  : '₹0 Achieved (0%)'}
-              </span>
+      {/* ── TAB 2: COMMISSIONS & PAYOUTS ────────────────────────────────────────── */}
+      {activeTab === 'commissions' && (
+        <form onSubmit={editForm.handleSubmit(data => updateEmployeeMutation.mutate(data))} className="space-y-6">
+          <div className="bg-white p-6 sm:p-7 rounded-3xl border border-gray-100 shadow-sm space-y-6">
+            <div className="flex items-center gap-2 px-3.5 py-2.5 bg-gradient-to-r from-amber-50 to-orange-50/50 rounded-xl border border-amber-100 text-amber-900 font-extrabold text-xs uppercase tracking-wider">
+              <span className="w-5 h-5 rounded-full bg-amber-600 text-white flex items-center justify-center text-[10px]">₹</span>
+              Commissions &amp; Earnings Overview
             </div>
 
-            <div className="bg-white p-5 rounded-2xl border border-gray-100 shadow-sm">
-              <span className="text-[11px] font-bold text-gray-500 uppercase">Policies Sold</span>
-              <p className="text-2xl font-black text-purple-700 mt-1">{stats?.data?.policiesThisMonth ?? stats?.data?.totalPolicies ?? 0}</p>
-              <span className="text-[10px] font-semibold text-gray-500 mt-1 inline-block">Across Health, Motor &amp; Life</span>
-            </div>
-
-            <div className="bg-white p-5 rounded-2xl border border-gray-100 shadow-sm">
-              <span className="text-[11px] font-bold text-gray-500 uppercase">Leads Converted</span>
-              <p className="text-2xl font-black text-blue-600 mt-1">{stats?.data?.leadsThisMonth ?? stats?.data?.totalLeads ?? 0}</p>
-              <span className="text-[10px] font-semibold text-blue-600 mt-1 inline-block">Assigned Leads</span>
-            </div>
-
-            <div className="bg-white p-5 rounded-2xl border border-gray-100 shadow-sm">
-              <span className="text-[11px] font-bold text-gray-500 uppercase">Active Work Time</span>
-              <p className="text-2xl font-black text-emerald-600 mt-1">{stats?.data?.activeWorkTime || '0h 0m'}</p>
-              <span className="text-[10px] font-semibold text-gray-500 mt-1 inline-block">This Month</span>
-            </div>
-          </div>
-
-          {/* Policy Contribution Drill-down */}
-          <div className="bg-white p-6 rounded-3xl border border-gray-100 shadow-sm space-y-4">
-            <h3 className="text-sm font-bold text-gray-900 flex items-center gap-2">
-              <TrendingUp className="w-4 h-4 text-purple-600" /> Policy Contribution Breakdown
-            </h3>
-
-            <div className="py-8 text-center text-xs text-gray-400">
-              No policies issued or contributed by {emp.firstName || 'this employee'} yet.
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ── TAB 3: ATTENDANCE & LOGS ─────────────────────────────────── */}
-      {activeTab === 'attendance' && (
-        <div className="bg-white p-6 rounded-3xl border border-gray-100 shadow-sm space-y-4">
-          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-            <div>
-              <h3 className="text-sm font-bold text-gray-900 flex items-center gap-2">
-                <Clock className="w-4 h-4 text-emerald-600" /> Attendance &amp; Shift Logs
-              </h3>
-              <p className="text-xs text-gray-500">Record of daily check-ins, working hours, and activity logs</p>
-            </div>
-
-            <div className="flex items-center gap-2">
-              <DatePicker value={startDate} onDateChange={setStartDate} className="p-2 text-xs border rounded-xl" />
-              <span className="text-xs text-gray-400">to</span>
-              <DatePicker value={endDate} onDateChange={setEndDate} className="p-2 text-xs border rounded-xl" />
-            </div>
-          </div>
-
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs">
-              <thead>
-                <tr className="border-b border-gray-100 text-gray-400 font-bold uppercase text-[10px]">
-                  <th className="py-2.5">Date</th>
-                  <th className="py-2.5">Shift Clock-In</th>
-                  <th className="py-2.5">Shift Clock-Out</th>
-                  <th className="py-2.5">Total Hours</th>
-                  <th className="py-2.5">Calls</th>
-                  <th className="py-2.5">Meetings</th>
-                  <th className="py-2.5">Status</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-50 text-gray-700 font-medium">
-                <tr>
-                  <td className="py-3 font-bold text-gray-900">Today (24 Aug)</td>
-                  <td className="py-3 text-emerald-600 font-bold">09:04 AM</td>
-                  <td className="py-3 text-gray-400">Active Shift</td>
-                  <td className="py-3 font-bold">4h 32m</td>
-                  <td className="py-3">18</td>
-                  <td className="py-3">3</td>
-                  <td className="py-3"><span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">Present</span></td>
-                </tr>
-                <tr>
-                  <td className="py-3 font-bold text-gray-900">23 Aug 2026</td>
-                  <td className="py-3">09:02 AM</td>
-                  <td className="py-3">06:14 PM</td>
-                  <td className="py-3 font-bold">8h 12m</td>
-                  <td className="py-3">22</td>
-                  <td className="py-3">4</td>
-                  <td className="py-3"><span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">Present</span></td>
-                </tr>
-                <tr>
-                  <td className="py-3 font-bold text-gray-900">22 Aug 2026</td>
-                  <td className="py-3">09:10 AM</td>
-                  <td className="py-3">06:05 PM</td>
-                  <td className="py-3 font-bold">7h 55m</td>
-                  <td className="py-3">15</td>
-                  <td className="py-3">2</td>
-                  <td className="py-3"><span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">Present</span></td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
-
-      {/* ── TAB 4: TASKS & ACTIVITIES ────────────────────────────────── */}
-      {activeTab === 'tasks' && (
-        <div className="space-y-4">
-          <div className="flex flex-wrap items-center justify-between gap-3 bg-white p-4 rounded-2xl border border-gray-100 shadow-sm">
-            <div className="flex p-1 bg-slate-100 rounded-xl border border-slate-200 text-xs">
-              <button
-                type="button"
-                onClick={() => setTaskSubView('LIST')}
-                className={`px-3.5 py-1.5 rounded-lg font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
-                  taskSubView === 'LIST'
-                    ? 'bg-white text-gray-900 shadow-xs'
-                    : 'text-gray-500 hover:text-gray-800'
-                }`}
-              >
-                <CheckSquare className="w-3.5 h-3.5" /> Assigned Tasks List
-              </button>
-              <button
-                type="button"
-                onClick={() => setTaskSubView('CALENDAR')}
-                className={`px-3.5 py-1.5 rounded-lg font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
-                  taskSubView === 'CALENDAR'
-                    ? 'bg-white text-purple-700 shadow-xs'
-                    : 'text-gray-500 hover:text-gray-800'
-                }`}
-              >
-                <Calendar className="w-3.5 h-3.5" /> Calendar &amp; Events Merge
-              </button>
-            </div>
-
-            <button
-              onClick={() => setTaskModal(true)}
-              className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-primary-600 hover:bg-primary-700 text-white font-bold text-xs shadow-sm cursor-pointer"
-            >
-              <Plus className="w-4 h-4" /> Assign New Task / Event
-            </button>
-          </div>
-
-          {taskSubView === 'LIST' ? (
-            <div className="bg-white p-6 rounded-3xl border border-gray-100 shadow-sm space-y-4">
-              <h3 className="text-sm font-bold text-gray-900 flex items-center gap-2">
-                <CheckSquare className="w-4 h-4 text-primary-600" /> Work Queue for {emp.firstName || 'Employee'}
-              </h3>
-
-              <div className="space-y-3">
-                {tasks?.data && tasks.data.length > 0 ? (
-                  tasks.data.map((t: any, idx: number) => (
-                    <div key={t.id || idx} className="p-3.5 rounded-2xl bg-slate-50 border border-slate-200 flex items-start justify-between">
-                      <div>
-                        <div className="flex items-center gap-2">
-                          <span className="text-[10px] font-mono font-bold text-blue-700 bg-blue-50 border border-blue-200 px-1.5 py-0.5 rounded shrink-0">
-                            T{idx + 1}
-                          </span>
-                          <p className="text-xs font-bold text-gray-900">{t.title}</p>
-                        </div>
-                        {t.description && <p className="text-[11px] text-gray-500 mt-0.5">{t.description}</p>}
-                        {t.dueDate && (
-                          <span className="text-[10px] font-semibold text-primary-700 bg-primary-50 px-2 py-0.5 rounded mt-1 inline-block">
-                            Due {format(new Date(t.dueDate), 'dd MMM yyyy')}
-                          </span>
-                        )}
-                      </div>
-                      <span className="text-[9px] font-bold px-2 py-0.5 rounded-full bg-blue-600 text-white uppercase">{t.priority || 'NORMAL'}</span>
-                    </div>
-                  ))
-                ) : (
-                  <div className="py-8 text-center text-xs text-gray-400">
-                    No tasks assigned to {emp.firstName || 'this employee'} yet. Click &quot;Assign New Task / Event&quot; to create one.
-                  </div>
-                )}
+            {/* Quick Metrics */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              <div className="p-4 bg-emerald-50/70 rounded-2xl border border-emerald-200/80 shadow-2xs">
+                <span className="text-[10px] font-extrabold text-emerald-700 uppercase tracking-wider block">Published / Paid</span>
+                <p className="text-2xl font-black text-emerald-900 mt-1">
+                  ₹{(stats?.data?.paidCommission || 0).toLocaleString('en-IN')}
+                </p>
+              </div>
+              <div className="p-4 bg-amber-50/70 rounded-2xl border border-amber-200/80 shadow-2xs">
+                <span className="text-[10px] font-extrabold text-amber-700 uppercase tracking-wider block">Pending Approval</span>
+                <p className="text-2xl font-black text-amber-900 mt-1">
+                  ₹{(stats?.data?.pendingCommission || 0).toLocaleString('en-IN')}
+                </p>
+              </div>
+              <div className="p-4 bg-purple-50/70 rounded-2xl border border-purple-200/80 shadow-2xs">
+                <span className="text-[10px] font-extrabold text-purple-700 uppercase tracking-wider block">Total YTD Earnings</span>
+                <p className="text-2xl font-black text-purple-900 mt-1">
+                  ₹{(stats?.data?.totalCommission || 0).toLocaleString('en-IN')}
+                </p>
               </div>
             </div>
-          ) : (
-            <EmployeeCalendarTaskView
-              employeeId={emp.id}
-              employeeName={`${emp.firstName || ''} ${emp.lastName || ''}`.trim()}
-              tasks={tasks?.data || []}
-            />
-          )}
-        </div>
-      )}
 
-      {/* ── TAB 5: COMMISSIONS ───────────────────────────────────────── */}
-      {activeTab === 'commissions' && (
-        <div className="bg-white p-6 rounded-3xl border border-gray-100 shadow-sm space-y-4">
-          <h3 className="text-sm font-bold text-gray-900 flex items-center gap-2">
-            <DollarSign className="w-4 h-4 text-amber-600" /> Commissions &amp; Earnings Breakdown
-          </h3>
-
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-            <div className="p-4 bg-emerald-50/70 rounded-2xl border border-emerald-200/80">
-              <span className="text-[10px] font-bold text-emerald-700 uppercase">Published / Paid</span>
-              <p className="text-xl font-black text-emerald-900 mt-1">₹0</p>
-            </div>
-            <div className="p-4 bg-amber-50/70 rounded-2xl border border-amber-200/80">
-              <span className="text-[10px] font-bold text-amber-700 uppercase">Pending Approval</span>
-              <p className="text-xl font-black text-amber-900 mt-1">₹0</p>
-            </div>
-            <div className="p-4 bg-purple-50/70 rounded-2xl border border-purple-200/80">
-              <span className="text-[10px] font-bold text-purple-700 uppercase">Total YTD Earnings</span>
-              <p className="text-xl font-black text-purple-900 mt-1">₹0</p>
+            {/* Targets & Compensation Setup */}
+            <div className="border-t border-slate-100 pt-5 space-y-4">
+              <h4 className="text-xs font-extrabold text-slate-800 uppercase tracking-wider">
+                Salary, Commission &amp; Target Setup
+              </h4>
+              <fieldset disabled={!isEditMode} className="min-w-0 border-0 p-0 m-0 w-full disabled:opacity-100">
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
+                  <div>
+                    <label className="label">Base Salary (₹)</label>
+                    <input 
+                      type="number" 
+                      {...editForm.register('baseSalary')} 
+                      className="input font-semibold" 
+                      placeholder="e.g. 25000" 
+                    />
+                  </div>
+                  <div>
+                    <label className="label">Bonus Planned (₹)</label>
+                    <input 
+                      type="number" 
+                      {...editForm.register('bonusPlanned')} 
+                      className="input font-semibold" 
+                      placeholder="e.g. 5000" 
+                    />
+                  </div>
+                  <div>
+                    <label className="label">Monthly Target (₹)</label>
+                    <input 
+                      type="number" 
+                      {...editForm.register('monthlyTarget')} 
+                      className="input font-semibold" 
+                      placeholder="e.g. 500000" 
+                    />
+                  </div>
+                  <div>
+                    <label className="label">Calls Target (Monthly)</label>
+                    <input 
+                      type="number" 
+                      {...editForm.register('callsTarget')} 
+                      className="input font-semibold" 
+                      placeholder="e.g. 30" 
+                    />
+                  </div>
+                  <div>
+                    <label className="label">Visits Target (Monthly)</label>
+                    <input 
+                      type="number" 
+                      {...editForm.register('visitsTarget')} 
+                      className="input font-semibold" 
+                      placeholder="e.g. 10" 
+                    />
+                  </div>
+                  <div>
+                    <label className="label">Commission Rate (%)</label>
+                    <input 
+                      type="number" 
+                      step="0.1" 
+                      {...editForm.register('commissionRate')} 
+                      className="input font-semibold" 
+                      placeholder="e.g. 5.0" 
+                    />
+                  </div>
+                </div>
+              </fieldset>
             </div>
           </div>
-        </div>
+
+          {/* Bottom Save Bar when in Edit Mode */}
+          {isEditMode && (
+            <div className="sticky bottom-4 bg-white/95 backdrop-blur-md p-4 rounded-2xl border border-purple-200 shadow-xl flex items-center justify-between z-20 animate-fade-in">
+              <span className="text-xs font-bold text-purple-900">
+                You are currently in editing mode. Save or discard your modifications.
+              </span>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    editForm.reset();
+                    setIsEditMode(false);
+                  }}
+                  className="px-4 py-2 rounded-xl text-xs font-bold bg-slate-100 hover:bg-slate-200 text-slate-700 cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={updateEmployeeMutation.isPending}
+                  className="px-5 py-2 rounded-xl text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white shadow-md cursor-pointer flex items-center gap-1.5"
+                >
+                  <Save className="w-4 h-4" /> Save Targets
+                </button>
+              </div>
+            </div>
+          )}
+        </form>
       )}
 
-      {/* ── TAB 6: ACCESS CONTROL ────────────────────────────────────── */}
+      {/* ── TAB 3: ACCESS CONTROL ────────────────────────────────────────── */}
       {activeTab === 'access' && (
-        <div className="bg-white p-6 rounded-3xl border border-gray-100 shadow-sm space-y-4">
-          <div className="flex items-center justify-between">
-            <div>
-              <h3 className="text-sm font-bold text-gray-900 flex items-center gap-2">
-                <Key className="w-4 h-4 text-indigo-600" /> Module Permissions &amp; Privileges
-              </h3>
-              <p className="text-xs text-gray-500">Configure feature access rights for {emp.firstName}</p>
+        <div className="bg-white p-6 sm:p-7 rounded-3xl border border-gray-100 shadow-sm space-y-6">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+            <div className="flex items-center gap-2 px-3.5 py-2.5 bg-gradient-to-r from-indigo-50 to-purple-50/50 rounded-xl border border-indigo-100 text-indigo-900 font-extrabold text-xs uppercase tracking-wider">
+              <span className="w-5 h-5 rounded-full bg-indigo-600 text-white flex items-center justify-center text-[10px]">🔐</span>
+              Module Permissions &amp; Privileges
             </div>
 
             <button
+              type="button"
               onClick={() => {
                 const currentRole = (emp.user?.role || 'EMPLOYEE') as 'OWNER' | 'EMPLOYEE' | 'CONTACT';
                 const currentPerms = Array.isArray(emp.user?.permissions)
@@ -1236,74 +874,58 @@ export default function EmployeeDetail() {
                 setSelectedPermissions(currentPerms);
                 setPermModal(true);
               }}
-              className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs shadow-sm cursor-pointer"
+              className="px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-extrabold text-xs shadow-md shadow-indigo-500/20 cursor-pointer flex items-center gap-2 transition-all hover:scale-105 w-fit"
             >
+              <Key size={14} />
               Modify Permissions
             </button>
           </div>
 
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
+          <div className="flex items-center gap-3 p-3.5 bg-slate-50 rounded-2xl border border-slate-200/80">
+            <span className="text-xs font-bold text-slate-500 uppercase tracking-wide">Assigned System Role:</span>
+            <span className={clsx(
+              "px-3 py-1 rounded-xl text-xs font-extrabold uppercase border",
+              emp.user?.role === 'OWNER' ? 'bg-indigo-100 text-indigo-800 border-indigo-200' :
+              emp.user?.role === 'CONTACT' ? 'bg-amber-100 text-amber-800 border-amber-200' :
+              'bg-purple-100 text-purple-800 border-purple-200'
+            )}>
+              {emp.user?.role === 'OWNER' ? '⚡ Owner / SuperAdmin' : emp.user?.role === 'CONTACT' ? '🤝 Referral Partner' : '👤 Standard Employee'}
+            </span>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
             {MODULES.map(mod => {
               const hasAccess = emp.user?.permissions?.includes(mod.key) || emp.user?.role === 'OWNER';
               return (
                 <div
                   key={mod.key}
-                  className={`p-3 rounded-2xl border flex items-center justify-between transition-all ${
-                    hasAccess ? 'bg-emerald-50/70 border-emerald-200 text-emerald-900 shadow-2xs' : 'bg-gray-50 border-gray-200 text-gray-400'
-                  }`}
+                  className={clsx(
+                    "p-4 rounded-2xl border transition-all flex flex-col justify-between gap-3",
+                    hasAccess
+                      ? "bg-emerald-50/60 border-emerald-200/90 shadow-2xs"
+                      : "bg-slate-50/80 border-slate-200 text-slate-400"
+                  )}
                 >
-                  <span className="text-xs font-bold">{mod.label}</span>
-                  <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
-                    hasAccess ? 'bg-emerald-600 text-white' : 'bg-gray-200 text-gray-600'
-                  }`}>
-                    {hasAccess ? 'Enabled' : 'Disabled'}
-                  </span>
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-extrabold text-slate-900">{mod.label}</span>
+                    <span className={clsx(
+                      "text-[10px] font-extrabold px-2 py-0.5 rounded-full border",
+                      hasAccess ? "bg-emerald-600 text-white border-emerald-600" : "bg-slate-200 text-slate-600 border-slate-300"
+                    )}>
+                      {hasAccess ? 'Enabled' : 'Disabled'}
+                    </span>
+                  </div>
+                  {mod.desc && (
+                    <p className="text-[11px] text-slate-500 font-medium leading-relaxed">
+                      {mod.desc}
+                    </p>
+                  )}
                 </div>
               );
             })}
           </div>
         </div>
       )}
-
-      {/* Task Modal */}
-      <Modal open={taskModal} onClose={() => setTaskModal(false)} title="Assign New Task">
-        <form onSubmit={taskForm.handleSubmit(d => addTask.mutate(d))} className="space-y-4">
-          <div>
-            <label className="block text-xs font-bold text-gray-700 uppercase mb-1">Task Title *</label>
-            <input {...taskForm.register('title')} className="input w-full p-2.5 text-xs border rounded-xl" placeholder="e.g. Follow up with client" />
-          </div>
-          <div>
-            <label className="block text-xs font-bold text-gray-700 uppercase mb-1">Description</label>
-            <textarea {...taskForm.register('description')} className="input w-full p-2.5 text-xs border rounded-xl" rows={2} />
-          </div>
-          <div className="flex justify-end gap-2 pt-2">
-            <button type="button" onClick={() => setTaskModal(false)} className="px-4 py-2 text-xs font-semibold text-gray-600">Cancel</button>
-            <button type="submit" className="px-5 py-2 bg-primary-600 text-white font-bold text-xs rounded-xl shadow-sm">Assign Task</button>
-          </div>
-        </form>
-      </Modal>
-
-      {/* Target Modal */}
-      <Modal open={targetModal} onClose={() => setTargetModal(false)} title="Configure Monthly Targets">
-        <form onSubmit={targetForm.handleSubmit(d => updateTargets.mutate(d))} className="space-y-4">
-          <div>
-            <label className="block text-xs font-bold text-gray-700 uppercase mb-1">Monthly Target Amount (₹)</label>
-            <input type="number" {...targetForm.register('monthlyTarget')} className="input w-full p-2.5 text-xs border rounded-xl" />
-          </div>
-          <div>
-            <label className="block text-xs font-bold text-gray-700 uppercase mb-1">Target Calls / Day</label>
-            <input type="number" {...targetForm.register('callsTarget')} className="input w-full p-2.5 text-xs border rounded-xl" />
-          </div>
-          <div>
-            <label className="block text-xs font-bold text-gray-700 uppercase mb-1">Target Proposals / Day</label>
-            <input type="number" {...targetForm.register('visitsTarget')} className="input w-full p-2.5 text-xs border rounded-xl" />
-          </div>
-          <div className="flex justify-end gap-2 pt-2">
-            <button type="button" onClick={() => setTargetModal(false)} className="px-4 py-2 text-xs font-semibold text-gray-600">Cancel</button>
-            <button type="submit" className="px-5 py-2 bg-purple-600 text-white font-bold text-xs rounded-xl shadow-sm">Save Targets</button>
-          </div>
-        </form>
-      </Modal>
 
       {/* Permissions Modal */}
       <Modal open={permModal} onClose={() => setPermModal(false)} title="Update Permissions">

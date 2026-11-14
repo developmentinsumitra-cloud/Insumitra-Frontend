@@ -15,7 +15,15 @@ export function useTableColumnVisibility(pageId: string) {
   const rules: any[] = visibilityRulesRes?.data ?? [];
 
   // Helper to normalize column names for robust case-insensitive comparison
-  const norm = (s: string) => (s || '').replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
+  const norm = (s: string) => {
+    const raw = (s || '').replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
+    if (pageId === 'claims') {
+      if (raw === 'claimid' || raw === 'claimno' || raw === 'claimnumber') return 'claimid';
+      if (raw === 'claimedamt' || raw === 'claimamount' || raw === 'amount') return 'claimedamt';
+      if (raw === 'datefiled' || raw === 'intimatedat') return 'datefiled';
+    }
+    return raw;
+  };
 
   // Custom user-defined columns stored locally & synced with DB rules
   const customColumns = useMemo(() => {

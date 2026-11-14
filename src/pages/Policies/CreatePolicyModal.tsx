@@ -352,6 +352,8 @@ export default function CreatePolicyModal({
         setLoanProvider(extra.loanProvider || '');
         setLoanSanctionNo(extra.loanSanctionNo || '');
         setLoanEmi(extra.loanEmi ? String(extra.loanEmi) : '');
+        setPaymentComment(extra.paymentComment || '');
+        setLoanComment(extra.loanComment || '');
 
         setBankName(extra.bankName || '');
         setIfscCode(extra.ifscCode || '');
@@ -748,6 +750,8 @@ export default function CreatePolicyModal({
         setLoanProvider('');
         setLoanSanctionNo('');
         setLoanEmi('');
+        setPaymentComment('');
+        setLoanComment('');
         setBankName('');
         setIfscCode('');
         setBranch('');
@@ -955,11 +959,15 @@ export default function CreatePolicyModal({
   const [lastInstallmentDate, setLastInstallmentDate] = useState('');
 
   const isLifeCategory = Boolean(
-    selectedCategory && (
-      ['LIFE', 'TERM'].includes(selectedCategory.toUpperCase()) ||
-      selectedCategory.toUpperCase().includes('LIFE') ||
-      selectedCategory.toUpperCase().includes('TERM')
-    )
+    [
+      selectedCategory,
+      selectedCompanyCategory,
+      selectedPlanCategory,
+    ].some(cat => {
+      if (!cat) return false;
+      const upper = String(cat).toUpperCase();
+      return upper.includes('LIFE') || upper.includes('TERM');
+    })
   );
 
   // Auto-update policy term when duration years change
@@ -1050,7 +1058,7 @@ export default function CreatePolicyModal({
   const [firstInstallmentDate, setFirstInstallmentDate] = useState('');
   const [emiComment, setEmiComment] = useState('');
   const showLifeTermInstallmentFields = isLifeCategory && Boolean(emiCase);
-  const showInstallmentAndYearlyFields = isLifeCategory || Boolean(emiCase);
+  const showInstallmentAndYearlyFields = isLifeCategory && Boolean(emiCase);
 
   const recalculateLastInstallment = useCallback((overrides?: {
     baseDate?: string;
@@ -1090,6 +1098,8 @@ export default function CreatePolicyModal({
   const [loanProvider, setLoanProvider] = useState('');
   const [loanSanctionNo, setLoanSanctionNo] = useState('');
   const [loanEmi, setLoanEmi] = useState('');
+  const [paymentComment, setPaymentComment] = useState('');
+  const [loanComment, setLoanComment] = useState('');
 
   // Section 5: Payment Account Details
   const [bankName, setBankName] = useState('');
@@ -1843,6 +1853,9 @@ export default function CreatePolicyModal({
         if (transactionRef && transactionRef !== 'N/A') pStr += `, Ref: ${transactionRef}`;
         cleanNotes += `\nPayment Mode: ${pStr}`;
       }
+      if (paymentComment) {
+        cleanNotes += `\nPayment Comment: ${paymentComment}`;
+      }
       if (isLoanCase) {
         const parts = [
           loanAmount ? `Amount: ₹${loanAmount}` : null,
@@ -1851,6 +1864,9 @@ export default function CreatePolicyModal({
           loanEmi ? `EMI: ₹${loanEmi}` : null,
         ].filter(Boolean);
         if (parts.length > 0) cleanNotes += `\nLoan Case: ${parts.join(', ')}`;
+        if (loanComment) {
+          cleanNotes += `\nLoan Comment: ${loanComment}`;
+        }
       }
       if (bankName || ifscCode || accountNumber) {
         const parts = [
@@ -2477,19 +2493,6 @@ export default function CreatePolicyModal({
                       />
                     </div>
 
-                    {/* Policy Status */}
-                    <div>
-                      <label className="label text-[10px] font-extrabold text-slate-900 uppercase tracking-wider block mb-1">
-                        Policy Status <span className="text-red-600 font-black text-sm ml-0.5" style={{ color: '#dc2626' }}>*</span>
-                      </label>
-                      <CustomSelect
-                        value={normalizeStatusVal(status)}
-                        onChange={val => setStatus(normalizeStatusVal(val))}
-                        placeholder="Select Policy Status"
-                        options={policyStatusOptions}
-                      />
-                    </div>
-
                     {/* Custom Dropdown Menus configured in Operations */}
                     {customPolicyDropdowns.map(customDrop => {
                       const currentVal = extraPolicyNotes[customDrop.name] || '';
@@ -2830,7 +2833,7 @@ export default function CreatePolicyModal({
 
                 {!isPremiumBreakdownCollapsed && (
                   <div className="p-4 grid grid-cols-1 md:grid-cols-3 gap-3.5 animate-fadeIn">
-                    {!isLifeCategory && (
+                    {(!isLifeCategory || !showInstallmentAndYearlyFields) && (
                       <div>
                         <label className="label text-[10px] font-extrabold text-slate-900 uppercase tracking-wider block mb-1">
                           Premium Amount (₹) <span className="text-red-600 font-black text-sm ml-0.5" style={{ color: '#dc2626' }}>*</span>
@@ -3112,6 +3115,14 @@ export default function CreatePolicyModal({
                             setEmiCase(isYes);
                             if (!isYes) {
                               setPaymentFrequency('YEARLY');
+                              setLastInstallmentDate('');
+                              setFirstInstallmentDate('');
+                              setNoOfInstallments('');
+                              setInstallmentAmount('');
+                              setEmiDate('');
+                              setEmiGateway('');
+                              setDownpaymentAmount('');
+                              setProcessingFee('');
                             }
                           }}
                           options={[
@@ -3464,6 +3475,19 @@ export default function CreatePolicyModal({
                           ]}
                         />
                       </div>
+
+                      <div className="col-span-1 md:col-span-2">
+                        <label className="label text-[10px] font-extrabold text-slate-900 uppercase tracking-wider block mb-1">
+                          Comment
+                        </label>
+                        <input
+                          type="text"
+                          value={paymentComment}
+                          onChange={e => setPaymentComment(e.target.value)}
+                          className="input w-full h-10 text-xs rounded-xl bg-white border border-slate-200 focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
+                          placeholder="Payment comment / remarks"
+                        />
+                      </div>
                     </div>
 
                     {isLoanCase && (
@@ -3506,6 +3530,18 @@ export default function CreatePolicyModal({
                             onChange={e => setLoanEmi(e.target.value)}
                             className="input w-full h-10 text-xs rounded-xl bg-white border border-purple-200"
                             placeholder="EMI Amount"
+                          />
+                        </div>
+                        <div className="col-span-1 md:col-span-4">
+                          <label className="label text-[10px] font-extrabold text-purple-800 uppercase tracking-wider block mb-1">
+                            Comment
+                          </label>
+                          <input
+                            type="text"
+                            value={loanComment}
+                            onChange={e => setLoanComment(e.target.value)}
+                            className="input w-full h-10 text-xs rounded-xl bg-white border border-purple-200"
+                            placeholder="Loan comment / remarks"
                           />
                         </div>
                       </div>

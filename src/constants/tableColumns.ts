@@ -158,13 +158,8 @@ export const TABLE_COLUMNS_CONFIG = [
       "Settled Amt",
       "Date Filed",
       "Status",
-      "Actions",
-      "Claim No",
-      "Client Name",
-      "Policy No",
       "Hospital",
-      "Amount",
-      "Intimated At"
+      "Actions"
     ]
   },
   {

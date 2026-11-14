@@ -272,7 +272,15 @@ export interface FamilyMemberModalProps {
   onSave: (member: Record<string, any>) => void;
 }
 
+const sanitizeLocalPhone = (p: string) => {
+  if (!p) return '';
+  const digits = p.replace(/\D/g, '');
+  if (digits.startsWith('00') || digits === '0000000000') return '';
+  return digits.length > 10 ? digits.slice(-10) : digits;
+};
+
 const buildInitialFormData = (initialData: any, primaryContact: any) => {
+  const mainPhone = sanitizeLocalPhone(primaryContact?.phone || primaryContact?.whatsappNumber || '');
   if (initialData) {
     const rawDob = initialData.dob || initialData.dateOfBirth || '';
     const computedAge = rawDob ? String(calculateAge(rawDob)) : (initialData.age || '');
@@ -282,6 +290,17 @@ const buildInitialFormData = (initialData: any, primaryContact: any) => {
       if (g === 'FEMALE') initialRel = 'WIFE';
       else if (g === 'MALE') initialRel = 'HUSBAND';
     }
+    const isDep = !!(initialData.isDependent ?? false);
+    const rawExistingPhone = initialData.whatsapp || initialData.whatsappNumber || initialData.phone || initialData.contactNo || '';
+    const cleanExisting = sanitizeLocalPhone(rawExistingPhone);
+    const cleanGuardian = sanitizeLocalPhone(initialData.guardianWhatsapp || initialData.dependentNo || '');
+    const phoneToUse = (isDep && !cleanExisting)
+      ? (cleanGuardian || mainPhone)
+      : cleanExisting;
+    const depNoToUse = (isDep && !cleanGuardian)
+      ? (phoneToUse || mainPhone)
+      : (cleanGuardian || '');
+
     return {
       ...initialData,
       relation: initialRel,
@@ -289,9 +308,9 @@ const buildInitialFormData = (initialData: any, primaryContact: any) => {
       middleName: initialData.middleName || '',
       lastName: initialData.lastName || (initialData.name ? initialData.name.split(' ').slice(1).join(' ') : ''),
       gender: initialData.gender || '',
-      isDependent: !!(initialData.isDependent ?? false),
-      guardianWhatsapp: initialData.guardianWhatsapp || initialData.dependentNo || '',
-      dependentNo: initialData.dependentNo || initialData.guardianWhatsapp || '',
+      isDependent: isDep,
+      guardianWhatsapp: depNoToUse,
+      dependentNo: depNoToUse,
       motherName: initialData.motherName || '',
       maritalStatus: initialData.maritalStatus || '',
       weddingAnniversary: initialData.weddingAnniversary || initialData.weddingAnniversaryDate || '',
@@ -308,10 +327,13 @@ const buildInitialFormData = (initialData: any, primaryContact: any) => {
       assignedEmployeeId: initialData.assignedEmployeeId || '',
       email: initialData.email || '',
       aadhaarNumber: initialData.aadhaarNumber || '',
-      whatsapp: initialData.whatsapp || initialData.whatsappNumber || initialData.phone || initialData.contactNo || '',
-      whatsappNumber: initialData.whatsappNumber || initialData.whatsapp || initialData.phone || initialData.contactNo || '',
+      whatsapp: phoneToUse,
+      whatsappNumber: phoneToUse,
+      phone: phoneToUse,
+      contactNo: phoneToUse,
       sameAsWhatsapp: !!initialData.sameAsWhatsapp,
-      callingNumber: initialData.callingNumber || initialData.alternatePhone || '',
+      callingNumber: initialData.callingNumber || initialData.alternatePhone || (isDep ? phoneToUse : ''),
+      alternatePhone: initialData.alternatePhone || initialData.callingNumber || (isDep ? phoneToUse : ''),
       contactStatus: initialData.contactStatus || 'Active',
       education: initialData.education || '',
       annualIncome: initialData.annualIncome || '',
@@ -447,13 +469,24 @@ export default function FamilyMemberModal({
     }
 
     const isChild = ['SON', 'DAUGHTER', 'CHILD'].includes(relUpper);
+    const mainPhone = (primaryContact?.phone || primaryContact?.whatsappNumber || '').trim();
+    const willBeDependent = Boolean(formData.isDependent || isChild);
 
     setFormData(prev => ({
       ...prev,
       relation: val,
       gender: inferredGender || prev.gender,
-      isDependent: prev.isDependent || isChild,
-      guardianWhatsapp: prev.guardianWhatsapp || '',
+      isDependent: willBeDependent,
+      ...(willBeDependent && mainPhone ? {
+        guardianWhatsapp: prev.guardianWhatsapp || mainPhone,
+        dependentNo: prev.dependentNo || mainPhone,
+        whatsapp: prev.whatsapp || mainPhone,
+        whatsappNumber: prev.whatsappNumber || mainPhone,
+        phone: prev.phone || mainPhone,
+        callingNumber: prev.callingNumber || mainPhone,
+      } : {
+        guardianWhatsapp: prev.guardianWhatsapp || '',
+      }),
     }));
   };
 
@@ -494,8 +527,15 @@ export default function FamilyMemberModal({
     }
 
     const fullName = [formData.firstName, formData.middleName, formData.lastName].filter(Boolean).join(' ').trim();
-    const famPhone = formData.whatsappNumber || formData.whatsapp || formData.phone || formData.contactNo || '';
-    const famCall = formData.sameAsWhatsapp ? famPhone : (formData.callingNumber || formData.alternatePhone || '');
+    const mainPhone = sanitizeLocalPhone(primaryContact?.phone || primaryContact?.whatsappNumber || '');
+    let famPhone = sanitizeLocalPhone(formData.whatsappNumber || formData.whatsapp || formData.phone || formData.contactNo || '');
+    if (formData.isDependent && !famPhone) {
+      famPhone = sanitizeLocalPhone(formData.guardianWhatsapp || formData.dependentNo || mainPhone);
+    }
+    const rawCall = formData.sameAsWhatsapp ? famPhone : (formData.callingNumber || formData.alternatePhone || (formData.isDependent ? famPhone : ''));
+    const famCall = sanitizeLocalPhone(rawCall);
+    const finalDependentNo = sanitizeLocalPhone(formData.guardianWhatsapp || formData.dependentNo || (formData.isDependent ? (famPhone || mainPhone) : ''));
+
     const finalData = {
       ...formData,
       name: fullName,
@@ -506,6 +546,8 @@ export default function FamilyMemberModal({
       contactNo: famPhone,
       callingNumber: famCall,
       alternatePhone: famCall,
+      guardianWhatsapp: finalDependentNo,
+      dependentNo: finalDependentNo,
       pan: (formData.pan || formData.panNumber || '').toUpperCase(),
       panNumber: (formData.panNumber || formData.pan || '').toUpperCase(),
       dob: formData.dob || formData.dateOfBirth || '',
@@ -514,7 +556,6 @@ export default function FamilyMemberModal({
       weddingAnniversaryDate: formData.weddingAnniversaryDate || formData.weddingAnniversary || '',
       occupation: formData.occupationType || formData.occupation || '',
       occupationType: formData.occupationType || formData.occupation || '',
-      dependentNo: formData.guardianWhatsapp || formData.dependentNo || '',
     };
 
     onSave(finalData);
@@ -688,7 +729,24 @@ export default function FamilyMemberModal({
                     <select
                       className="input w-full focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 rounded-xl transition-all font-semibold"
                       value={formData.isDependent ? 'YES' : 'NO'}
-                      onChange={e => setFormData(p => ({ ...p, isDependent: e.target.value === 'YES' }))}
+                      onChange={e => {
+                        const isDep = e.target.value === 'YES';
+                        const mainPhone = (primaryContact?.phone || primaryContact?.whatsappNumber || '').trim();
+                        setFormData(p => ({
+                          ...p,
+                          isDependent: isDep,
+                          ...(isDep && mainPhone ? {
+                            guardianWhatsapp: (p.guardianWhatsapp && !p.guardianWhatsapp.startsWith('00') && p.guardianWhatsapp !== '0000000000') ? p.guardianWhatsapp : mainPhone,
+                            dependentNo: (p.dependentNo && !p.dependentNo.startsWith('00') && p.dependentNo !== '0000000000') ? p.dependentNo : mainPhone,
+                            whatsapp: (p.whatsapp && !p.whatsapp.startsWith('00') && p.whatsapp !== '0000000000') ? p.whatsapp : mainPhone,
+                            whatsappNumber: (p.whatsappNumber && !p.whatsappNumber.startsWith('00') && p.whatsappNumber !== '0000000000') ? p.whatsappNumber : mainPhone,
+                            phone: (p.phone && !p.phone.startsWith('00') && p.phone !== '0000000000') ? p.phone : mainPhone,
+                            contactNo: (p.contactNo && !p.contactNo.startsWith('00') && p.contactNo !== '0000000000') ? p.contactNo : mainPhone,
+                            callingNumber: (p.callingNumber && !p.callingNumber.startsWith('00') && p.callingNumber !== '0000000000') ? p.callingNumber : mainPhone,
+                            alternatePhone: (p.alternatePhone && !p.alternatePhone.startsWith('00') && p.alternatePhone !== '0000000000') ? p.alternatePhone : mainPhone,
+                          } : {}),
+                        }));
+                      }}
                     >
                       <option value="NO">No</option>
                       <option value="YES">Yes</option>

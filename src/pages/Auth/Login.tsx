@@ -5,25 +5,89 @@ import { z } from 'zod';
 import { useNavigate } from 'react-router-dom';
 import { authService } from '@api/auth.service';
 import toast from 'react-hot-toast';
+import clsx from 'clsx';
 import { 
-  Mail, Lock, Eye, EyeOff, ShieldCheck, Sparkles, 
-  ArrowRight, Users, Layers, User
+  Mail, Lock, Eye, EyeOff, ShieldCheck, 
+  ArrowRight, Users, Layers, User, Phone, CheckCircle2, AlertCircle, ArrowLeft, KeyRound
 } from 'lucide-react';
 
-const schema = z.object({
+const loginSchema = z.object({
   email: z.string().email('Please enter a valid email address'),
   password: z.string().min(1, 'Password is required'),
 });
-type Form = z.infer<typeof schema>;
+type LoginForm = z.infer<typeof loginSchema>;
+
+const registerSchema = z.object({
+  firstName: z.string().min(1, 'First name is required'),
+  lastName: z.string().min(1, 'Last name is required'),
+  email: z.string().email('Please enter a valid email address'),
+  phone: z.string().min(10, 'Valid 10-digit phone number is required'),
+  password: z.string().min(6, 'Password must be at least 6 characters'),
+  confirmPassword: z.string().min(1, 'Please confirm your password'),
+}).refine((data) => data.password === data.confirmPassword, {
+  message: "Passwords do not match",
+  path: ["confirmPassword"],
+});
+type RegisterForm = z.infer<typeof registerSchema>;
+
+const resetSchema = z.object({
+  email: z.string().email('Please enter a valid email address'),
+  phone: z.string().optional(),
+  newPassword: z.string().min(6, 'Password must be at least 6 characters'),
+  confirmPassword: z.string().min(1, 'Please confirm your new password'),
+}).refine((data) => data.newPassword === data.confirmPassword, {
+  message: "Passwords do not match",
+  path: ["confirmPassword"],
+});
+type ResetForm = z.infer<typeof resetSchema>;
 
 export default function Login() {
   const navigate = useNavigate();
   const [loading, setLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
-  const { register, handleSubmit, setValue, reset, formState: { errors } } = useForm<Form>({ resolver: zodResolver(schema) });
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+  const [showResetNewPassword, setShowResetNewPassword] = useState(false);
+  const [showResetConfirmPassword, setShowResetConfirmPassword] = useState(false);
+  const [selectedRole, setSelectedRole] = useState<'OWNER' | 'EMPLOYEE'>('OWNER');
+  const [isRegistering, setIsRegistering] = useState(false);
+  const [isResetting, setIsResetting] = useState(false);
+  const [pendingApprovalMsg, setPendingApprovalMsg] = useState<string | null>(null);
 
-  const onSubmit = async (data: Form) => {
+  const { 
+    register: registerLogin, 
+    handleSubmit: handleLoginSubmit, 
+    setValue: setLoginValue, 
+    reset: resetLogin, 
+    formState: { errors: loginErrors } 
+  } = useForm<LoginForm>({ 
+    resolver: zodResolver(loginSchema),
+    defaultValues: {
+      email: '',
+      password: '',
+    },
+  });
+
+  const {
+    register: registerReg,
+    handleSubmit: handleRegSubmit,
+    reset: resetReg,
+    formState: { errors: regErrors }
+  } = useForm<RegisterForm>({
+    resolver: zodResolver(registerSchema)
+  });
+
+  const {
+    register: registerReset,
+    handleSubmit: handleResetSubmit,
+    reset: resetResetForm,
+    formState: { errors: resetErrors }
+  } = useForm<ResetForm>({
+    resolver: zodResolver(resetSchema)
+  });
+
+  const onLoginSubmit = async (data: LoginForm) => {
     setLoading(true);
+    setPendingApprovalMsg(null);
     try {
       const res = await authService.login(data);
       if (res?.user?.role === 'CONTACT') {
@@ -32,23 +96,61 @@ export default function Login() {
         navigate('/', { replace: true });
       }
     } catch (e: any) {
-      toast.error(e.response?.data?.message ?? 'Login failed');
+      const msg = e.response?.data?.message ?? 'Login failed';
+      if (typeof msg === 'string' && (msg.toLowerCase().includes('pending') || msg.toLowerCase().includes('reject'))) {
+        setPendingApprovalMsg(msg);
+      }
+      toast.error(msg);
     } finally {
       setLoading(false);
     }
   };
 
-  const handleQuickFill = (roleEmail: string) => {
-    let pwd = 'Password@123!';
-    if (roleEmail.includes('owner')) pwd = 'Owner@1234!';
-    else if (roleEmail.includes('contact') || roleEmail.includes('client')) pwd = 'Client@1234!';
-    setValue('email', roleEmail, { shouldValidate: true });
-    setValue('password', pwd, { shouldValidate: true });
-    toast.success(`Demo credentials loaded for ${roleEmail.split('@')[0]}`);
+  const onRegisterSubmit = async (data: RegisterForm) => {
+    setLoading(true);
+    try {
+      await authService.registerEmployee({
+        firstName: data.firstName.trim(),
+        lastName: data.lastName.trim(),
+        email: data.email.trim().toLowerCase(),
+        phone: data.phone.trim(),
+        password: data.password,
+      });
+      toast.success('Registration request submitted! Awaiting admin approval.');
+      setPendingApprovalMsg('Your registration request has been submitted to the Admin for approval. You will be able to log in once approved.');
+      setIsRegistering(false);
+      resetReg();
+      setLoginValue('email', data.email.trim().toLowerCase(), { shouldValidate: true });
+      setLoginValue('password', '');
+    } catch (e: any) {
+      toast.error(e.response?.data?.message ?? 'Registration failed. Please try again.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const onResetSubmit = async (data: ResetForm) => {
+    setLoading(true);
+    try {
+      const res = await authService.resetPasswordDirect({
+        email: data.email.trim().toLowerCase(),
+        phone: data.phone?.trim() || undefined,
+        newPassword: data.newPassword,
+      });
+      toast.success(res?.message ?? 'Password reset successfully!');
+      setIsResetting(false);
+      resetResetForm();
+      setLoginValue('email', data.email.trim().toLowerCase(), { shouldValidate: true });
+      setLoginValue('password', '');
+    } catch (e: any) {
+      toast.error(e.response?.data?.message ?? 'Failed to reset password. Please check your details.');
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
-    <div className="h-screen w-full bg-slate-50 relative overflow-hidden flex flex-col items-center justify-center p-3 md:p-4 select-none">
+    <div className="min-h-screen w-full bg-slate-50 relative overflow-y-auto flex flex-col items-center justify-center p-3 md:p-6 select-none">
       
       {/* Soft Pastel Floating Ambient Blobs */}
       <div className="absolute -top-32 -left-32 w-96 h-96 bg-teal-200/50 rounded-full blur-3xl pointer-events-none animate-pulse" />
@@ -58,7 +160,7 @@ export default function Login() {
       {/* Subtle Background Pattern */}
       <div className="absolute inset-0 bg-[radial-gradient(#cbd5e1_1px,transparent_1px)] [background-size:28px_28px] opacity-35 pointer-events-none" />
 
-      <div className="relative z-10 w-full max-w-md my-auto flex flex-col items-center">
+      <div className="relative z-10 w-full max-w-md my-auto flex flex-col items-center py-6">
 
         {/* Top Centered Portal Switcher Tabs */}
         <div className="inline-flex flex-wrap items-center gap-1 p-1 bg-white/90 backdrop-blur-xl border border-white rounded-full shadow-md shadow-teal-900/5 mb-3 text-[11px] font-semibold">
@@ -68,115 +170,531 @@ export default function Login() {
         </div>
 
         {/* Centered Glassmorphic Login Form Card */}
-        <div className="w-full bg-white/90 backdrop-blur-2xl border border-white rounded-3xl p-5 md:p-6 shadow-xl shadow-slate-300/50 space-y-3">
+        <div className="w-full bg-white/90 backdrop-blur-2xl border border-white rounded-3xl p-5 md:p-6 shadow-xl shadow-slate-300/50 space-y-4">
           
           {/* Logo & Header */}
           <div className="text-center space-y-1">
-            <img src="/InsumitraLogo.png" alt="Insumitra" className="h-24 md:h-28 max-w-[260px] w-auto object-contain mx-auto" />
+            <img src="/InsumitraLogo.png" alt="Insumitra" className="h-20 md:h-24 max-w-[240px] w-auto object-contain mx-auto" />
 
-            <div>
-              <h1 className="text-xl font-black text-slate-800 tracking-tight">Welcome Back</h1>
-              <p className="text-[11px] text-slate-500 font-medium">Sign in to access your agency workspace</p>
-            </div>
-          </div>
-
-          {/* Quick Fill Demo Roles */}
-          <div className="space-y-1">
-            <div className="flex items-center justify-center gap-2">
-              <button
-                type="button"
-                onClick={() => handleQuickFill('owner@demo-agency.com')}
-                className="px-3 py-1 rounded-xl bg-teal-50 hover:bg-teal-100 border border-teal-200/80 text-teal-800 text-[11px] font-semibold transition-all flex flex-wrap items-center gap-1 cursor-pointer shadow-2xs"
-              >
-                <Users className="w-3 h-3 text-teal-600" /> Owner
-              </button>
-              <button
-                type="button"
-                onClick={() => reset({ email: '', password: '' })}
-                className="px-3 py-1 rounded-xl bg-indigo-50 hover:bg-indigo-100 border border-indigo-200/80 text-indigo-800 text-[11px] font-semibold transition-all flex flex-wrap items-center gap-1 cursor-pointer shadow-2xs"
-              >
-                <Layers className="w-3 h-3 text-indigo-600" /> Employee
-              </button>
-            </div>
-          </div>
-
-          {/* Form */}
-          <form onSubmit={handleSubmit(onSubmit)} className="space-y-2.5">
-            
-            {/* Email Field */}
-            <div>
-              <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-600 mb-1">
-                Email Address
-              </label>
-              <div className="relative">
-                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-400">
-                  <Mail className="w-3.5 h-3.5" />
-                </div>
-                <input
-                  {...register('email')}
-                  type="email"
-                  placeholder="you@agency.com"
-                  className="w-full pl-9 pr-3 py-2.5 bg-slate-50/80 border border-slate-200 rounded-xl text-xs font-medium text-slate-800 placeholder-slate-400 focus:outline-none focus:bg-white focus:border-teal-500 focus:ring-2 focus:ring-teal-500/10 transition-all"
-                />
+            {isRegistering ? (
+              <div>
+                <h1 className="text-xl font-black text-slate-800 tracking-tight">Employee Registration</h1>
+                <p className="text-[11px] text-slate-500 font-medium">Submit request for Admin approval to access workspace</p>
               </div>
-              {errors.email && (
-                <p className="text-[10px] text-rose-500 font-semibold mt-1 flex flex-wrap items-center gap-1">
-                  <span>•</span> {errors.email.message}
-                </p>
-              )}
-            </div>
+            ) : isResetting ? (
+              <div>
+                <h1 className="text-xl font-black text-slate-800 tracking-tight">Reset Password</h1>
+                <p className="text-[11px] text-slate-500 font-medium">Enter your details to create a new password</p>
+              </div>
+            ) : (
+              <div>
+                <h1 className="text-xl font-black text-slate-800 tracking-tight">Welcome Back</h1>
+                <p className="text-[11px] text-slate-500 font-medium">Sign in to access your agency workspace</p>
+              </div>
+            )}
+          </div>
 
-            {/* Password Field */}
-            <div>
-              <div className="flex items-center justify-between mb-1">
-                <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-600">
-                  Password
+          {/* Pending / Rejection Approval Message Notice */}
+          {pendingApprovalMsg && !isRegistering && !isResetting && (
+            <div className="p-3 bg-amber-50 border border-amber-200/90 rounded-2xl flex items-start gap-2.5 text-amber-800 text-xs shadow-xs animate-in fade-in duration-300">
+              <AlertCircle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+              <div className="flex-1">
+                <p className="font-semibold text-amber-900">Registration Notice</p>
+                <p className="text-[11px] text-amber-800 mt-0.5 leading-relaxed">{pendingApprovalMsg}</p>
+              </div>
+            </div>
+          )}
+
+          {/* MODE 1: Reset Password View */}
+          {isResetting ? (
+            <form onSubmit={handleResetSubmit(onResetSubmit)} className="space-y-3">
+              <div className="p-2.5 bg-teal-50/80 border border-teal-200/70 rounded-xl text-[11px] text-teal-900 flex items-center gap-2">
+                <KeyRound className="w-4 h-4 text-teal-600 shrink-0" />
+                <span>Reset password by verifying your email and mobile number.</span>
+              </div>
+
+              {/* Email Address */}
+              <div>
+                <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-600 mb-1">
+                  Registered Email Address *
                 </label>
-              </div>
-              <div className="relative">
-                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-400">
-                  <Lock className="w-3.5 h-3.5" />
+                <div className="relative">
+                  <div className="absolute inset-y-0 left-0 pl-2.5 flex items-center pointer-events-none text-slate-400">
+                    <Mail className="w-3.5 h-3.5" />
+                  </div>
+                  <input
+                    {...registerReset('email')}
+                    type="email"
+                    placeholder="you@agency.com"
+                    className="w-full pl-8 pr-2.5 py-2 bg-slate-50/80 border border-slate-200 rounded-xl text-xs font-medium text-slate-800 placeholder-slate-400 focus:outline-none focus:bg-white focus:border-teal-500 focus:ring-2 focus:ring-teal-500/10 transition-all"
+                  />
                 </div>
-                <input
-                  {...register('password')}
-                  type={showPassword ? 'text' : 'password'}
-                  placeholder="••••••••"
-                  className="w-full pl-9 pr-9 py-2.5 bg-slate-50/80 border border-slate-200 rounded-xl text-xs font-medium text-slate-800 placeholder-slate-400 focus:outline-none focus:bg-white focus:border-teal-500 focus:ring-2 focus:ring-teal-500/10 transition-all"
-                />
+                {resetErrors.email && (
+                  <p className="text-[10px] text-rose-500 font-semibold mt-1">
+                    {resetErrors.email.message}
+                  </p>
+                )}
+              </div>
+
+              {/* Phone Number */}
+              <div>
+                <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-600 mb-1">
+                  Registered Mobile Phone (Optional)
+                </label>
+                <div className="relative">
+                  <div className="absolute inset-y-0 left-0 pl-2.5 flex items-center pointer-events-none text-slate-400">
+                    <Phone className="w-3.5 h-3.5" />
+                  </div>
+                  <input
+                    {...registerReset('phone')}
+                    type="tel"
+                    placeholder="10-digit mobile number"
+                    className="w-full pl-8 pr-2.5 py-2 bg-slate-50/80 border border-slate-200 rounded-xl text-xs font-medium text-slate-800 placeholder-slate-400 focus:outline-none focus:bg-white focus:border-teal-500 focus:ring-2 focus:ring-teal-500/10 transition-all"
+                  />
+                </div>
+                {resetErrors.phone && (
+                  <p className="text-[10px] text-rose-500 font-semibold mt-1">
+                    {resetErrors.phone.message}
+                  </p>
+                )}
+              </div>
+
+              {/* New Password & Confirm */}
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-600 mb-1">
+                    New Password *
+                  </label>
+                  <div className="relative">
+                    <div className="absolute inset-y-0 left-0 pl-2.5 flex items-center pointer-events-none text-slate-400">
+                      <Lock className="w-3.5 h-3.5" />
+                    </div>
+                    <input
+                      {...registerReset('newPassword')}
+                      type={showResetNewPassword ? 'text' : 'password'}
+                      placeholder="••••••"
+                      className="w-full pl-8 pr-7 py-2 bg-slate-50/80 border border-slate-200 rounded-xl text-xs font-medium text-slate-800 placeholder-slate-400 focus:outline-none focus:bg-white focus:border-teal-500 focus:ring-2 focus:ring-teal-500/10 transition-all"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowResetNewPassword(!showResetNewPassword)}
+                      className="absolute inset-y-0 right-0 pr-2 flex items-center text-slate-400 hover:text-slate-600 cursor-pointer"
+                    >
+                      {showResetNewPassword ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
+                    </button>
+                  </div>
+                  {resetErrors.newPassword && (
+                    <p className="text-[10px] text-rose-500 font-semibold mt-1">
+                      {resetErrors.newPassword.message}
+                    </p>
+                  )}
+                </div>
+
+                <div>
+                  <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-600 mb-1">
+                    Confirm Password *
+                  </label>
+                  <div className="relative">
+                    <div className="absolute inset-y-0 left-0 pl-2.5 flex items-center pointer-events-none text-slate-400">
+                      <Lock className="w-3.5 h-3.5" />
+                    </div>
+                    <input
+                      {...registerReset('confirmPassword')}
+                      type={showResetConfirmPassword ? 'text' : 'password'}
+                      placeholder="••••••"
+                      className="w-full pl-8 pr-7 py-2 bg-slate-50/80 border border-slate-200 rounded-xl text-xs font-medium text-slate-800 placeholder-slate-400 focus:outline-none focus:bg-white focus:border-teal-500 focus:ring-2 focus:ring-teal-500/10 transition-all"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowResetConfirmPassword(!showResetConfirmPassword)}
+                      className="absolute inset-y-0 right-0 pr-2 flex items-center text-slate-400 hover:text-slate-600 cursor-pointer"
+                    >
+                      {showResetConfirmPassword ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
+                    </button>
+                  </div>
+                  {resetErrors.confirmPassword && (
+                    <p className="text-[10px] text-rose-500 font-semibold mt-1">
+                      {resetErrors.confirmPassword.message}
+                    </p>
+                  )}
+                </div>
+              </div>
+
+              {/* Submit Reset Button */}
+              <button
+                type="submit"
+                disabled={loading}
+                className="w-full mt-2 py-3 px-5 rounded-xl bg-gradient-to-r from-teal-600 via-emerald-600 to-teal-700 hover:from-teal-700 hover:to-emerald-700 text-white text-[11px] sm:text-xs font-bold shadow-md shadow-teal-600/20 hover:shadow-lg hover:shadow-teal-600/30 transition-all hover:scale-[1.005] active:scale-[0.995] flex items-center justify-center gap-2 disabled:opacity-70 disabled:cursor-not-allowed cursor-pointer"
+              >
+                {loading ? (
+                  <>
+                    <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                    <span>Resetting Password...</span>
+                  </>
+                ) : (
+                  <>
+                    <span>Reset Password</span>
+                    <ArrowRight className="w-3.5 h-3.5" />
+                  </>
+                )}
+              </button>
+
+              {/* Back to sign in */}
+              <div className="text-center pt-2">
                 <button
                   type="button"
-                  onClick={() => setShowPassword(!showPassword)}
-                  className="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-400 hover:text-slate-600 transition-colors cursor-pointer"
+                  onClick={() => setIsResetting(false)}
+                  className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-600 hover:text-slate-900 cursor-pointer"
                 >
-                  {showPassword ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                  <ArrowLeft className="w-3.5 h-3.5" />
+                  <span>Back to Sign In</span>
                 </button>
               </div>
-              {errors.password && (
-                <p className="text-[10px] text-rose-500 font-semibold mt-1 flex flex-wrap items-center gap-1">
-                  <span>•</span> {errors.password.message}
-                </p>
-              )}
-            </div>
+            </form>
+          ) : !isRegistering ? (
+            /* MODE 2: Normal Sign In View */
+            <>
+              {/* Role Switcher */}
+              <div className="space-y-1">
+                <div className="flex items-center justify-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelectedRole('OWNER');
+                      setPendingApprovalMsg(null);
+                      resetLogin({ email: '', password: '' });
+                    }}
+                    className={clsx(
+                      "px-3.5 py-1.5 rounded-xl border text-[11px] font-semibold transition-all flex items-center gap-1.5 cursor-pointer shadow-2xs",
+                      selectedRole === 'OWNER'
+                        ? "bg-teal-600 text-white border-teal-700 shadow-teal-600/20"
+                        : "bg-teal-50 hover:bg-teal-100 border-teal-200/80 text-teal-800"
+                    )}
+                  >
+                    <Users className={clsx("w-3.5 h-3.5", selectedRole === 'OWNER' ? "text-white" : "text-teal-600")} /> 
+                    Owner
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelectedRole('EMPLOYEE');
+                      setPendingApprovalMsg(null);
+                      resetLogin({ email: '', password: '' });
+                    }}
+                    className={clsx(
+                      "px-3.5 py-1.5 rounded-xl border text-[11px] font-semibold transition-all flex items-center gap-1.5 cursor-pointer shadow-2xs",
+                      selectedRole === 'EMPLOYEE'
+                        ? "bg-indigo-600 text-white border-indigo-700 shadow-indigo-600/20"
+                        : "bg-indigo-50 hover:bg-indigo-100 border-indigo-200/80 text-indigo-800"
+                    )}
+                  >
+                    <Layers className={clsx("w-3.5 h-3.5", selectedRole === 'EMPLOYEE' ? "text-white" : "text-indigo-600")} /> 
+                    Employee
+                  </button>
+                </div>
+              </div>
 
-            {/* Submit Button */}
-            <button
-              type="submit"
-              disabled={loading}
-              className="w-full mt-1 py-3 px-5 rounded-xl bg-gradient-to-r from-teal-600 via-emerald-600 to-teal-700 hover:from-teal-700 hover:to-emerald-700 text-white text-[10px] sm:text-xs font-bold shadow-md shadow-teal-600/20 hover:shadow-lg hover:shadow-teal-600/30 transition-all hover:scale-[1.005] active:scale-[0.995] flex items-center justify-center gap-2 disabled:opacity-70 disabled:cursor-not-allowed cursor-pointer"
-            >
-              {loading ? (
-                <>
-                  <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                  <span>Signing In...</span>
-                </>
-              ) : (
-                <>
-                  <span>Sign In to Dashboard</span>
-                  <ArrowRight className="w-3.5 h-3.5" />
-                </>
-              )}
-            </button>
-          </form>
+              {/* Sign In Form */}
+              <form onSubmit={handleLoginSubmit(onLoginSubmit)} className="space-y-3">
+                {/* Email Field */}
+                <div>
+                  <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-600 mb-1">
+                    Email Address
+                  </label>
+                  <div className="relative">
+                    <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-400">
+                      <Mail className="w-3.5 h-3.5" />
+                    </div>
+                    <input
+                      {...registerLogin('email')}
+                      type="email"
+                      placeholder="you@agency.com"
+                      className="w-full pl-9 pr-3 py-2.5 bg-slate-50/80 border border-slate-200 rounded-xl text-xs font-medium text-slate-800 placeholder-slate-400 focus:outline-none focus:bg-white focus:border-teal-500 focus:ring-2 focus:ring-teal-500/10 transition-all"
+                    />
+                  </div>
+                  {loginErrors.email && (
+                    <p className="text-[10px] text-rose-500 font-semibold mt-1 flex items-center gap-1">
+                      <span>•</span> {loginErrors.email.message}
+                    </p>
+                  )}
+                </div>
+
+                {/* Password Field */}
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-600">
+                      Password
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsResetting(true);
+                        setIsRegistering(false);
+                        setPendingApprovalMsg(null);
+                      }}
+                      className="text-[11px] font-semibold text-teal-600 hover:text-teal-700 hover:underline cursor-pointer"
+                    >
+                      Reset Password?
+                    </button>
+                  </div>
+                  <div className="relative">
+                    <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-400">
+                      <Lock className="w-3.5 h-3.5" />
+                    </div>
+                    <input
+                      {...registerLogin('password')}
+                      type={showPassword ? 'text' : 'password'}
+                      placeholder="••••••••"
+                      className="w-full pl-9 pr-9 py-2.5 bg-slate-50/80 border border-slate-200 rounded-xl text-xs font-medium text-slate-800 placeholder-slate-400 focus:outline-none focus:bg-white focus:border-teal-500 focus:ring-2 focus:ring-teal-500/10 transition-all"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword(!showPassword)}
+                      className="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-400 hover:text-slate-600 transition-colors cursor-pointer"
+                    >
+                      {showPassword ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                    </button>
+                  </div>
+                  {loginErrors.password && (
+                    <p className="text-[10px] text-rose-500 font-semibold mt-1 flex items-center gap-1">
+                      <span>•</span> {loginErrors.password.message}
+                    </p>
+                  )}
+                </div>
+
+                {/* Submit Button */}
+                <button
+                  type="submit"
+                  disabled={loading}
+                  className="w-full mt-2 py-3 px-5 rounded-xl bg-gradient-to-r from-teal-600 via-emerald-600 to-teal-700 hover:from-teal-700 hover:to-emerald-700 text-white text-[11px] sm:text-xs font-bold shadow-md shadow-teal-600/20 hover:shadow-lg hover:shadow-teal-600/30 transition-all hover:scale-[1.005] active:scale-[0.995] flex items-center justify-center gap-2 disabled:opacity-70 disabled:cursor-not-allowed cursor-pointer"
+                >
+                  {loading ? (
+                    <>
+                      <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                      <span>Signing In...</span>
+                    </>
+                  ) : (
+                    <>
+                      <span>Sign In to Dashboard</span>
+                      <ArrowRight className="w-3.5 h-3.5" />
+                    </>
+                  )}
+                </button>
+              </form>
+
+              {/* Employee Registration Switch Link */}
+              <div className="text-center pt-2">
+                <p className="text-[11px] text-slate-500">
+                  New Employee?{' '}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsRegistering(true);
+                      setSelectedRole('EMPLOYEE');
+                      setIsResetting(false);
+                      setPendingApprovalMsg(null);
+                    }}
+                    className="font-bold text-indigo-600 hover:text-indigo-700 hover:underline cursor-pointer"
+                  >
+                    Employee Registration
+                  </button>
+                </p>
+              </div>
+            </>
+          ) : (
+            /* MODE 3: Employee Registration Form */
+            <form onSubmit={handleRegSubmit(onRegisterSubmit)} className="space-y-3">
+              <div className="p-2.5 bg-indigo-50/80 border border-indigo-200/70 rounded-xl text-[11px] text-indigo-900 flex items-center gap-2">
+                <CheckCircle2 className="w-4 h-4 text-indigo-600 shrink-0" />
+                <span>Submit your details to request access. Admin will approve your account.</span>
+              </div>
+
+              {/* First & Last Name */}
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-600 mb-1">
+                    First Name *
+                  </label>
+                  <div className="relative">
+                    <div className="absolute inset-y-0 left-0 pl-2.5 flex items-center pointer-events-none text-slate-400">
+                      <User className="w-3.5 h-3.5" />
+                    </div>
+                    <input
+                      {...registerReg('firstName')}
+                      type="text"
+                      placeholder="First name"
+                      className="w-full pl-8 pr-2.5 py-2 bg-slate-50/80 border border-slate-200 rounded-xl text-xs font-medium text-slate-800 placeholder-slate-400 focus:outline-none focus:bg-white focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/10 transition-all"
+                    />
+                  </div>
+                  {regErrors.firstName && (
+                    <p className="text-[10px] text-rose-500 font-semibold mt-1">
+                      {regErrors.firstName.message}
+                    </p>
+                  )}
+                </div>
+
+                <div>
+                  <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-600 mb-1">
+                    Last Name *
+                  </label>
+                  <div className="relative">
+                    <div className="absolute inset-y-0 left-0 pl-2.5 flex items-center pointer-events-none text-slate-400">
+                      <User className="w-3.5 h-3.5" />
+                    </div>
+                    <input
+                      {...registerReg('lastName')}
+                      type="text"
+                      placeholder="Last name"
+                      className="w-full pl-8 pr-2.5 py-2 bg-slate-50/80 border border-slate-200 rounded-xl text-xs font-medium text-slate-800 placeholder-slate-400 focus:outline-none focus:bg-white focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/10 transition-all"
+                    />
+                  </div>
+                  {regErrors.lastName && (
+                    <p className="text-[10px] text-rose-500 font-semibold mt-1">
+                      {regErrors.lastName.message}
+                    </p>
+                  )}
+                </div>
+              </div>
+
+              {/* Email Address */}
+              <div>
+                <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-600 mb-1">
+                  Email Address *
+                </label>
+                <div className="relative">
+                  <div className="absolute inset-y-0 left-0 pl-2.5 flex items-center pointer-events-none text-slate-400">
+                    <Mail className="w-3.5 h-3.5" />
+                  </div>
+                  <input
+                    {...registerReg('email')}
+                    type="email"
+                    placeholder="employee@agency.com"
+                    className="w-full pl-8 pr-2.5 py-2 bg-slate-50/80 border border-slate-200 rounded-xl text-xs font-medium text-slate-800 placeholder-slate-400 focus:outline-none focus:bg-white focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/10 transition-all"
+                  />
+                </div>
+                {regErrors.email && (
+                  <p className="text-[10px] text-rose-500 font-semibold mt-1">
+                    {regErrors.email.message}
+                  </p>
+                )}
+              </div>
+
+              {/* Phone Number */}
+              <div>
+                <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-600 mb-1">
+                  Phone Number *
+                </label>
+                <div className="relative">
+                  <div className="absolute inset-y-0 left-0 pl-2.5 flex items-center pointer-events-none text-slate-400">
+                    <Phone className="w-3.5 h-3.5" />
+                  </div>
+                  <input
+                    {...registerReg('phone')}
+                    type="tel"
+                    placeholder="10-digit mobile number"
+                    className="w-full pl-8 pr-2.5 py-2 bg-slate-50/80 border border-slate-200 rounded-xl text-xs font-medium text-slate-800 placeholder-slate-400 focus:outline-none focus:bg-white focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/10 transition-all"
+                  />
+                </div>
+                {regErrors.phone && (
+                  <p className="text-[10px] text-rose-500 font-semibold mt-1">
+                    {regErrors.phone.message}
+                  </p>
+                )}
+              </div>
+
+              {/* Password & Confirm Password */}
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-600 mb-1">
+                    Password *
+                  </label>
+                  <div className="relative">
+                    <div className="absolute inset-y-0 left-0 pl-2.5 flex items-center pointer-events-none text-slate-400">
+                      <Lock className="w-3.5 h-3.5" />
+                    </div>
+                    <input
+                      {...registerReg('password')}
+                      type={showPassword ? 'text' : 'password'}
+                      placeholder="••••••"
+                      className="w-full pl-8 pr-7 py-2 bg-slate-50/80 border border-slate-200 rounded-xl text-xs font-medium text-slate-800 placeholder-slate-400 focus:outline-none focus:bg-white focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/10 transition-all"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword(!showPassword)}
+                      className="absolute inset-y-0 right-0 pr-2 flex items-center text-slate-400 hover:text-slate-600 cursor-pointer"
+                    >
+                      {showPassword ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
+                    </button>
+                  </div>
+                  {regErrors.password && (
+                    <p className="text-[10px] text-rose-500 font-semibold mt-1">
+                      {regErrors.password.message}
+                    </p>
+                  )}
+                </div>
+
+                <div>
+                  <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-600 mb-1">
+                    Confirm Password *
+                  </label>
+                  <div className="relative">
+                    <div className="absolute inset-y-0 left-0 pl-2.5 flex items-center pointer-events-none text-slate-400">
+                      <Lock className="w-3.5 h-3.5" />
+                    </div>
+                    <input
+                      {...registerReg('confirmPassword')}
+                      type={showConfirmPassword ? 'text' : 'password'}
+                      placeholder="••••••"
+                      className="w-full pl-8 pr-7 py-2 bg-slate-50/80 border border-slate-200 rounded-xl text-xs font-medium text-slate-800 placeholder-slate-400 focus:outline-none focus:bg-white focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/10 transition-all"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                      className="absolute inset-y-0 right-0 pr-2 flex items-center text-slate-400 hover:text-slate-600 cursor-pointer"
+                    >
+                      {showConfirmPassword ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
+                    </button>
+                  </div>
+                  {regErrors.confirmPassword && (
+                    <p className="text-[10px] text-rose-500 font-semibold mt-1">
+                      {regErrors.confirmPassword.message}
+                    </p>
+                  )}
+                </div>
+              </div>
+
+              {/* Submit Registration Button */}
+              <button
+                type="submit"
+                disabled={loading}
+                className="w-full mt-2 py-3 px-5 rounded-xl bg-gradient-to-r from-indigo-600 via-indigo-700 to-indigo-800 hover:from-indigo-700 hover:to-indigo-800 text-white text-[11px] sm:text-xs font-bold shadow-md shadow-indigo-600/20 hover:shadow-lg hover:shadow-indigo-600/30 transition-all hover:scale-[1.005] active:scale-[0.995] flex items-center justify-center gap-2 disabled:opacity-70 disabled:cursor-not-allowed cursor-pointer"
+              >
+                {loading ? (
+                  <>
+                    <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                    <span>Submitting Request...</span>
+                  </>
+                ) : (
+                  <>
+                    <span>Submit Registration Request</span>
+                    <ArrowRight className="w-3.5 h-3.5" />
+                  </>
+                )}
+              </button>
+
+              {/* Switch back to sign in */}
+              <div className="text-center pt-2">
+                <button
+                  type="button"
+                  onClick={() => setIsRegistering(false)}
+                  className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-600 hover:text-slate-900 cursor-pointer"
+                >
+                  <ArrowLeft className="w-3.5 h-3.5" />
+                  <span>Already registered? Sign In</span>
+                </button>
+              </div>
+            </form>
+          )}
 
           {/* Security Compliance */}
           <div className="pt-2 border-t border-slate-100 flex items-center justify-center gap-1.5 text-[10px] text-slate-400 font-medium">

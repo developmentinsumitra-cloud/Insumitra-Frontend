@@ -29,7 +29,8 @@ export function applyProxyIfNeeded(config: InternalAxiosRequestConfig): Internal
     const [pathPart, queryPart] = rawUrl.split('?');
     const searchParams = new URLSearchParams(queryPart || '');
     const existingParams = config.params ?? {};
-    const mergedParams: Record<string, any> = { __path: pathPart.startsWith('/') ? pathPart : `/${pathPart}` };
+    const cleanPath = pathPart.startsWith('/') ? pathPart : `/${pathPart}`;
+    const mergedParams: Record<string, any> = { __path: cleanPath, _path: cleanPath };
     searchParams.forEach((val, key) => {
       mergedParams[key] = val;
     });
@@ -63,7 +64,7 @@ function flushQueue(token: string) {
 api.interceptors.response.use(
   res => res,
   async (error: AxiosError) => {
-    const original = error.config as InternalAxiosRequestConfig & { _retry?: boolean; _proxyRetry?: boolean };
+    const original = error.config as InternalAxiosRequestConfig & { _retry?: boolean; _proxyRetry?: boolean; _502Retry?: boolean };
 
     // Fallback to same-origin PHP proxy if a cross-origin request fails due to CORS / network error
     if (!error.response && original && !original._proxyRetry && typeof window !== 'undefined' && window.location.protocol.startsWith('http') && !window.location.hostname.includes('localhost')) {
@@ -79,6 +80,13 @@ api.interceptors.response.use(
       original.baseURL = '';
       original.url = '/api-proxy.php';
       original.params = mergedParams;
+      return api(original);
+    }
+
+    const errStatus = error.response?.status;
+    if ((errStatus === 502 || errStatus === 503 || errStatus === 504) && original && !original._502Retry) {
+      original._502Retry = true;
+      await new Promise(res => setTimeout(res, 2500));
       return api(original);
     }
 

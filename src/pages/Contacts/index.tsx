@@ -84,104 +84,133 @@ const INDIAN_DISTRICTS_BY_STATE = Object.fromEntries(
   ]),
 );
 
-const CONTACT_IMPORT_FIELDS = [
-  { name: 'First Name', key: 'firstName', required: true },
-  { name: 'Middle Name', key: 'middleName' },
-  { name: 'Last Name', key: 'lastName' },
-  { name: 'Phone', key: 'phone', required: true },
-  { name: 'Alternate Phone', key: 'alternatePhone' },
-  { name: 'Email', key: 'email' },
-  { name: 'Gender', key: 'gender' },
-  { name: 'Date of Birth', key: 'dateOfBirth' },
-  { name: 'Birth Place', key: 'birthPlace' },
-  { name: 'Marital Status', key: 'maritalStatus' },
-  { name: 'Wedding Anniversary', key: 'weddingAnniversaryDate' },
-  { name: 'Education', key: 'education' },
-  { name: 'Height', key: 'height' },
-  { name: 'Weight', key: 'weight' },
-  { name: 'Medical History', key: 'medicalHistory', list: true },
-  { name: 'Declared Medical History', key: 'declaredMedicalHistory', list: true },
-  { name: 'Undeclared Medical History', key: 'notDeclaredMedicalHistory', list: true },
-  { name: 'Medical History Details', key: 'medicalHistoryDetails' },
-  { name: 'Surgery Details', key: 'surgeryDetails' },
-  { name: 'Prescription Details', key: 'prescriptionDetails' },
-  { name: 'Chew Tobacco', key: 'chewTobacco', boolean: true },
-  { name: 'Smoke', key: 'smoke', boolean: true },
-  { name: 'Consume Alcohol', key: 'consumeAlcohol', boolean: true },
-  { name: 'PAN Number', key: 'panNumber' },
-  { name: 'Aadhaar Number', key: 'aadhaarNumber' },
-  { name: 'Annual Income', key: 'annualIncome', number: true },
-  { name: 'Tags', key: 'tags', list: true },
-  { name: 'Source', key: 'source' },
-  { name: 'Contact Status', key: 'isActive' },
-  { name: 'Role', key: 'role' },
-  { name: 'Notes', key: 'notes' },
-] as const;
+const CONTACT_IMPORT_COLUMNS: ImportFormatColumn[] = [
+  { name: 'Sr. No.', requirement: 'Optional; row serial number.' },
+  { name: 'First Name', requirement: 'Required; contact primary first name.' },
+  { name: 'Last Name', requirement: 'Required; contact last name.' },
+  { name: 'Customer Contact No.', requirement: 'Required; 10-digit mobile number, must be unique.' },
+  { name: 'Alternate Contact No.', requirement: 'Optional; 10-digit alternate mobile number.' },
+  { name: 'Customer Email ID', requirement: 'Optional; valid email address.' },
+  { name: 'Relation', requirement: 'Optional; relation (e.g. Self, Spouse, Child, Parent, Other).' },
+  { name: 'Is Dependent?', requirement: 'Optional; Yes or No.' },
+  { name: 'Date of Birth', requirement: 'Optional; format YYYY-MM-DD or DD-MM-YYYY.' },
+  { name: 'Pincode', requirement: 'Optional; 6-digit postal pincode.' },
+  { name: 'City', requirement: 'Optional; residential city.' },
+  { name: 'State', requirement: 'Optional; state name.' },
+  { name: 'Education', requirement: 'Optional; education qualification.' },
+  { name: 'Occupation', requirement: 'Optional; occupation type.' },
+  { name: 'Designation', requirement: 'Optional; job designation / role.' },
+  { name: 'Annual Income', requirement: 'Optional; annual income in INR (numeric value only).' },
+  { name: 'Declared Medical History', requirement: 'Optional; declared medical conditions (comma or pipe separated).' },
+  { name: 'Surgery History', requirement: 'Optional; past surgery details (or None).' },
+  { name: 'Current Medicines Prescription', requirement: 'Optional; current medicines / prescriptions (or None).' },
+];
 
-const CONTACT_IMPORT_ADDRESS_FIELDS = [
-  'Street Address', 'Address Line 2', 'City', 'District', 'State', 'Pincode', 'Country',
+const CONTACT_IMPORT_SAMPLE_ROW = [
+  '1',
+  'Rahul',
+  'Sharma',
+  '9876543210',
+  '9876543211',
+  'rahul.sharma@example.com',
+  'Self',
+  'No',
+  '1990-05-15',
+  '400001',
+  'Mumbai',
+  'Maharashtra',
+  'Graduate',
+  'Salaried Private',
+  'Software Engineer',
+  '1200000',
+  'None',
+  'None',
+  'None',
 ];
-const CONTACT_IMPORT_OCCUPATION_FIELDS = [
-  'Occupation Type', 'Company Name', 'Designation', 'Industry', 'Years of Experience',
-];
-const CONTACT_IMPORT_GROUP_FIELDS = {
-  'Product Interest': [
-    'Categories', 'Lead Source', 'Stage', 'Lead Status', 'Lead Type', 'Dependency Type',
-    'Dependent Details', 'Description Details', 'Follow-up Date', 'Expected Premium / Budget',
-    'Sum Assured Required', 'Notes',
-  ],
-  Family: [
-    'First Name', 'Middle Name', 'Last Name', 'Relationship', 'Phone', 'Alternate Phone',
-    'Date of Birth', 'Gender', 'Marital Status', 'Wedding Anniversary', 'Education',
-    'Occupation', 'Height', 'Weight', 'Medical History', 'Declared Medical History',
-    'Undeclared Medical History', 'Medical History Details', 'Surgery Details', 'Prescription Details',
-  ],
-  Policy: [
-    'Policy Number', 'Plan Name or Code', 'Status', 'Sum Assured', 'Premium Amount',
-    'Payment Frequency', 'Start Date', 'End Date', 'Maturity Date', 'Next Due Date',
-    'Agent Code', 'Notes',
-  ],
-  Claim: [
-    'Claim Number', 'Policy Number', 'Claim Type', 'Status', 'Claim Amount',
-    'Approved Amount', 'Intimated At', 'Filed At', 'Settled At', 'Rejection Reason', 'Notes',
-  ],
-} as const;
-const REQUIRED_CONTACT_IMPORT_GROUP_FIELDS: Record<string, string[]> = {
-  'Product Interest': ['Categories', 'Lead Source', 'Follow-up Date', 'Expected Premium / Budget'],
-  Family: ['First Name', 'Relationship'],
-  Policy: ['Policy Number', 'Plan Name or Code', 'Sum Assured', 'Premium Amount', 'Start Date', 'End Date'],
-  Claim: ['Claim Number', 'Policy Number', 'Claim Type', 'Claim Amount', 'Intimated At'],
+
+const getImportCell = (row: Record<string, unknown>, ...headers: string[]) => {
+  for (const h of headers) {
+    if (row[h] !== undefined && row[h] !== null && String(row[h]).trim() !== '') {
+      return String(row[h]).trim();
+    }
+  }
+  const normHeaders = headers.map(h => h.toLowerCase().replace(/[^a-z0-9]/g, ''));
+  for (const rowKey of Object.keys(row)) {
+    const normRowKey = rowKey.toLowerCase().replace(/[^a-z0-9]/g, '');
+    if (normHeaders.includes(normRowKey)) {
+      const val = row[rowKey];
+      if (val !== undefined && val !== null && String(val).trim() !== '') {
+        return String(val).trim();
+      }
+    }
+  }
+  return '';
 };
 
-const CONTACT_IMPORT_COLUMNS: ImportFormatColumn[] = [
-  ...CONTACT_IMPORT_FIELDS.map(field => ({
-    name: field.name,
-    requirement: 'required' in field && field.required
-      ? 'Required; phone must contain exactly 10 digits and be unique.'
-      : 'Optional; pipe-separate multiple values where applicable.',
-  })),
-  ...CONTACT_IMPORT_ADDRESS_FIELDS.map(name => ({
-    name: `Address - ${name}`,
-    requirement: 'Optional; used for the contact primary address.',
-  })),
-  ...CONTACT_IMPORT_OCCUPATION_FIELDS.map(name => ({
-    name: `Employment - ${name}`,
-    requirement: 'Optional; used for the contact primary occupation.',
-  })),
-  ...Object.entries(CONTACT_IMPORT_GROUP_FIELDS).flatMap(([group, fields]) =>
-    fields.map(field => ({
-      name: `${group} 1 - ${field}`,
-      requirement: `${REQUIRED_CONTACT_IMPORT_GROUP_FIELDS[group].includes(field) ? 'Required when importing this record. ' : 'Optional. '}Use ${group} 2, ${group} 3, etc. for additional records.`,
-    })),
-  ),
-];
+const normalizeImportDate = (val: unknown): string | undefined => {
+  if (val == null || val === '') return undefined;
+  if (val instanceof Date && !isNaN(val.getTime())) {
+    const y = val.getFullYear();
+    const m = String(val.getMonth() + 1).padStart(2, '0');
+    const d = String(val.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  }
+  const s = String(val).trim();
+  if (!s) return undefined;
 
-const getImportCell = (row: Record<string, unknown>, header: string) =>
-  String(row[header] ?? '').trim();
-const getImportList = (row: Record<string, unknown>, header: string) =>
-  getImportCell(row, header).split('|').map(value => value.trim()).filter(Boolean);
-const hasImportGroupValues = (values: Record<string, string>) =>
-  Object.values(values).some(value => value !== '');
+  // Number / Excel serial date code (e.g. 32888, 44927)
+  if (/^\d{4,5}(\.\d+)?$/.test(s)) {
+    const num = Number(s);
+    if (num > 1000 && num < 100000) {
+      try {
+        const parsed = XLSX.SSF.parse_date_code(num);
+        if (parsed && parsed.y && parsed.m && parsed.d) {
+          const y = parsed.y;
+          const m = String(parsed.m).padStart(2, '0');
+          const d = String(parsed.d).padStart(2, '0');
+          return `${y}-${m}-${d}`;
+        }
+      } catch {}
+    }
+  }
+
+  // YYYY-MM-DD, YYYY/MM/DD, YYYY.MM.DD
+  const ymdMatch = s.match(/^(\d{4})[-\/\.](\d{1,2})[-\/\.](\d{1,2})/);
+  if (ymdMatch) {
+    const y = ymdMatch[1];
+    const m = ymdMatch[2].padStart(2, '0');
+    const d = ymdMatch[3].padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  }
+
+  // DD-MM-YYYY, MM-DD-YYYY, D/M/YY, DD/MM/YYYY, M/D/YY
+  const dmyMatch = s.match(/^(\d{1,2})[-\/\.](\d{1,2})[-\/\.](\d{2,4})/);
+  if (dmyMatch) {
+    const p1 = parseInt(dmyMatch[1], 10);
+    const p2 = parseInt(dmyMatch[2], 10);
+    const rawY = dmyMatch[3];
+    const y = rawY.length === 2 ? (Number(rawY) > 40 ? 1900 + Number(rawY) : 2000 + Number(rawY)) : Number(rawY);
+    let d = p1;
+    let m = p2;
+    if (p1 <= 12 && p2 > 12) {
+      m = p1;
+      d = p2;
+    }
+    const mm = String(m).padStart(2, '0');
+    const dd = String(d).padStart(2, '0');
+    return `${y}-${mm}-${dd}`;
+  }
+
+  const fallback = new Date(s);
+  if (!isNaN(fallback.getTime())) {
+    const y = fallback.getFullYear();
+    const m = String(fallback.getMonth() + 1).padStart(2, '0');
+    const d = String(fallback.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  }
+
+  return s;
+};
 
 function mapContactImportRow(row: Record<string, unknown>) {
   const contact: Record<string, unknown> = {};
@@ -195,204 +224,164 @@ function mapContactImportRow(row: Record<string, unknown>) {
     }
     return number;
   };
-  const parseRelatedNumber = (value: string, field: string, errors: string[]) => {
-    if (!value) return undefined;
-    const number = Number(value.replace(/,/g, ''));
-    if (!Number.isFinite(number)) {
-      errors.push(`${field} must be a number`);
+
+  const validateDate = (rawVal: unknown, field: string, errors: string[]): string | undefined => {
+    if (rawVal == null || rawVal === '') return undefined;
+    const normalized = normalizeImportDate(rawVal);
+    if (!normalized) return undefined;
+    const match = normalized.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (!match) {
+      errors.push(`${field} must use YYYY-MM-DD or DD-MM-YYYY`);
       return undefined;
     }
-    return number;
-  };
-  const validateDate = (value: string, field: string, errors: string[]) => {
-    if (!value) return;
-    const match = value.match(/^(\d{4})-(\d{2})-(\d{2})$/);
-    if (!match) {
-      errors.push(`${field} must use YYYY-MM-DD`);
-      return;
-    }
-    const date = new Date(`${value}T00:00:00Z`);
-    if (Number.isNaN(date.getTime()) || date.toISOString().slice(0, 10) !== value) {
+    const date = new Date(`${normalized}T00:00:00Z`);
+    if (Number.isNaN(date.getTime()) || date.toISOString().slice(0, 10) !== normalized) {
       errors.push(`${field} is not a valid date`);
+      return undefined;
     }
+    return normalized;
   };
-  for (const field of CONTACT_IMPORT_FIELDS) {
-    const value = getImportCell(row, field.name);
-    if (!value) continue;
-    if ('list' in field && field.list) {
-      contact[field.key] = getImportList(row, field.name);
-    } else if ('number' in field && field.number) {
-      const number = parseNumber(value, field.name);
-      if (number !== undefined) {
-        if (field.key === 'annualIncome' && number < 0) importErrors.push('Annual Income cannot be negative');
-        else contact[field.key] = number;
-      }
-    } else if ('boolean' in field && field.boolean) {
-      if (/^(true|false|yes|no|1|0|active|inactive)$/i.test(value)) {
-        contact[field.key] = /^(true|yes|1|active)$/i.test(value);
-      } else {
-        importErrors.push(`${field.name} must be Yes or No`);
-      }
-    } else if (field.key === 'gender') {
-      const gender = value.toUpperCase();
-      if (['MALE', 'FEMALE', 'OTHER'].includes(gender)) contact[field.key] = gender;
-      else importErrors.push('Gender must be MALE, FEMALE, or OTHER');
-    } else if (field.key === 'email') {
-      if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) contact[field.key] = value;
-      else importErrors.push('Email must be a valid email address');
-    } else if (field.key === 'alternatePhone') {
-      const digits = value.replace(/\D/g, '');
-      if (digits.length >= 10 && digits.slice(-10).length === 10) contact[field.key] = digits.slice(-10);
-      else importErrors.push('Alternate Phone must contain 10 digits');
-    } else if (field.key === 'aadhaarNumber') {
-      if (/^\d{12}$/.test(value)) contact[field.key] = value;
-      else importErrors.push('Aadhaar Number must contain exactly 12 digits');
-    } else if (field.key === 'dateOfBirth' || field.key === 'weddingAnniversaryDate') {
-      validateDate(value, field.name, importErrors);
-      contact[field.key] = value;
-    } else if (field.key === 'isActive') {
-      contact[field.key] = !/^(inactive|false|no|0)$/i.test(value);
+
+  // 1. First Name (Required)
+  const firstName = getImportCell(row, 'First Name', 'firstName');
+  if (firstName) {
+    contact.firstName = firstName;
+  } else {
+    importErrors.push('First Name is required');
+  }
+
+  // 2. Last Name
+  const lastName = getImportCell(row, 'Last Name', 'lastName');
+  contact.lastName = lastName || '-';
+
+  // 3. Customer Contact No. (Required, 10-digit mobile number)
+  const phoneRaw = getImportCell(row, 'Customer Contact No.', 'Customer Contact No', 'Phone', 'Contact No', 'phone');
+  const phoneDigits = phoneRaw.replace(/\D/g, '');
+  if (!phoneDigits) {
+    importErrors.push('Customer Contact No. is required');
+  } else if (phoneDigits.length === 10) {
+    contact.phone = phoneDigits;
+  } else if (phoneDigits.length > 10 && phoneDigits.slice(-10).length === 10) {
+    contact.phone = phoneDigits.slice(-10);
+  } else {
+    importErrors.push('Customer Contact No. must contain exactly 10 digits');
+  }
+
+  // 4. Alternate Contact No.
+  const altPhoneRaw = getImportCell(row, 'Alternate Contact No.', 'Alternate Contact No', 'Alternate Phone', 'alternatePhone');
+  if (altPhoneRaw) {
+    const altDigits = altPhoneRaw.replace(/\D/g, '');
+    if (altDigits.length >= 10 && altDigits.slice(-10).length === 10) {
+      contact.alternatePhone = altDigits.slice(-10);
     } else {
-      contact[field.key] = value;
+      importErrors.push('Alternate Contact No. must contain 10 digits');
     }
   }
 
-  const addressValues = Object.fromEntries(CONTACT_IMPORT_ADDRESS_FIELDS.map(field => [
-    field,
-    getImportCell(row, `Address - ${field}`),
-  ]));
-  const address = hasImportGroupValues(addressValues) ? {
-    type: 'HOME',
-    line1: addressValues['Street Address'] || 'N/A',
-    line2: addressValues['Address Line 2'] || undefined,
-    city: addressValues.City || 'N/A',
-    district: addressValues.District || undefined,
-    state: addressValues.State || 'N/A',
-    pincode: addressValues.Pincode || 'N/A',
-    country: addressValues.Country || 'India',
-    isPrimary: true,
-  } : undefined;
-
-  const occupationValues = Object.fromEntries(CONTACT_IMPORT_OCCUPATION_FIELDS.map(field => [
-    field,
-    getImportCell(row, `Employment - ${field}`),
-  ]));
-  const occupation = hasImportGroupValues(occupationValues) ? {
-    type: occupationValues['Occupation Type'] || 'Other',
-    companyName: occupationValues['Company Name'] || undefined,
-    designation: occupationValues.Designation || undefined,
-    industry: occupationValues.Industry || undefined,
-    yearsOfExp: parseNumber(occupationValues['Years of Experience'], 'Years of Experience'),
-    isPrimary: true,
-  } : undefined;
-
-  const readGroup = (group: keyof typeof CONTACT_IMPORT_GROUP_FIELDS, index: number) =>
-    Object.fromEntries(CONTACT_IMPORT_GROUP_FIELDS[group].map(field => [
-      field,
-      getImportCell(row, `${group} ${index} - ${field}`),
-    ]));
-  const collectGroups = (group: keyof typeof CONTACT_IMPORT_GROUP_FIELDS) => {
-    const indexes = new Set<number>();
-    for (const header of Object.keys(row)) {
-      const match = header.match(new RegExp(`^${group} (\\d+) - `));
-      if (match) indexes.add(Number(match[1]));
+  // 5. Customer Email ID
+  const email = getImportCell(row, 'Customer Email ID', 'Customer Email', 'Email', 'email');
+  if (email) {
+    if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      contact.email = email;
+    } else {
+      importErrors.push('Customer Email ID must be a valid email address');
     }
-    return [...indexes].sort((a, b) => a - b).map(index => readGroup(group, index));
-  };
+  }
 
-  const productInterests = collectGroups('Product Interest')
-    .filter(hasImportGroupValues)
-    .map(values => {
-      const errors: string[] = [];
-      return {
-        interests: values.Categories.split('|').map(value => value.trim()).filter(Boolean),
-        source: values['Lead Source'] || undefined,
-        stage: values.Stage || undefined,
-        leadStatus: values['Lead Status'] || undefined,
-        leadType: values['Lead Type'] || undefined,
-        dependencyType: values['Dependency Type'] || undefined,
-        dependentDetails: values['Dependent Details'] || undefined,
-        descriptionDetails: values['Description Details'] || undefined,
-        followUpDate: values['Follow-up Date'] || undefined,
-        premiumBudget: parseRelatedNumber(values['Expected Premium / Budget'], 'Expected Premium / Budget', errors),
-        sumAssuredRequired: parseRelatedNumber(values['Sum Assured Required'], 'Sum Assured Required', errors),
-        notes: values.Notes || undefined,
-        importErrors: errors,
-      };
-    });
-  const familyMembers = collectGroups('Family')
-    .filter(hasImportGroupValues)
-    .map(values => ({
-      firstName: values['First Name'],
-      middleName: values['Middle Name'] || undefined,
-      lastName: values['Last Name'],
-      name: [values['First Name'], values['Middle Name'], values['Last Name']].filter(Boolean).join(' '),
-      relationshipType: values.Relationship || '',
-      phone: values.Phone || undefined,
-      alternatePhone: values['Alternate Phone'] || undefined,
-      dateOfBirth: values['Date of Birth'] || undefined,
-      gender: values.Gender || undefined,
-      maritalStatus: values['Marital Status'] || undefined,
-      weddingAnniversaryDate: values['Wedding Anniversary'] || undefined,
-      education: values.Education || undefined,
-      occupation: values.Occupation || undefined,
-      height: values.Height || undefined,
-      weight: values.Weight || undefined,
-      medicalHistory: values['Medical History'].split('|').map(value => value.trim()).filter(Boolean),
-      declaredMedicalHistory: values['Declared Medical History'].split('|').map(value => value.trim()).filter(Boolean),
-      notDeclaredMedicalHistory: values['Undeclared Medical History'].split('|').map(value => value.trim()).filter(Boolean),
-      medicalHistoryDetails: values['Medical History Details'] || undefined,
-      surgeryDetails: values['Surgery Details'] || undefined,
-      prescriptionDetails: values['Prescription Details'] || undefined,
-    }));
-  const policies = collectGroups('Policy')
-    .filter(hasImportGroupValues)
-    .map(values => {
-      const errors: string[] = [];
-      validateDate(values['Start Date'], 'Start Date', errors);
-      validateDate(values['End Date'], 'End Date', errors);
-      validateDate(values['Maturity Date'], 'Maturity Date', errors);
-      validateDate(values['Next Due Date'], 'Next Due Date', errors);
-      return {
-        policyNumber: values['Policy Number'] || undefined,
-        planName: values['Plan Name or Code'] || undefined,
-        status: values.Status || undefined,
-        sumAssured: parseRelatedNumber(values['Sum Assured'], 'Sum Assured', errors),
-        premiumAmount: parseRelatedNumber(values['Premium Amount'], 'Premium Amount', errors),
-        paymentFrequency: values['Payment Frequency'] || undefined,
-        startDate: values['Start Date'] || undefined,
-        endDate: values['End Date'] || undefined,
-        maturityDate: values['Maturity Date'] || undefined,
-        nextDueDate: values['Next Due Date'] || undefined,
-        agentCode: values['Agent Code'] || undefined,
-        notes: values.Notes || undefined,
-        importErrors: errors,
-      };
-    });
-  const claims = collectGroups('Claim')
-    .filter(hasImportGroupValues)
-    .map(values => {
-      const errors: string[] = [];
-      validateDate(values['Intimated At'], 'Intimated At', errors);
-      validateDate(values['Filed At'], 'Filed At', errors);
-      validateDate(values['Settled At'], 'Settled At', errors);
-      return {
-        claimNumber: values['Claim Number'] || undefined,
-        policyNumber: values['Policy Number'] || undefined,
-        claimType: values['Claim Type'] || undefined,
-        status: values.Status || undefined,
-        claimAmount: parseRelatedNumber(values['Claim Amount'], 'Claim Amount', errors),
-        approvedAmount: parseRelatedNumber(values['Approved Amount'], 'Approved Amount', errors),
-        intimatedAt: values['Intimated At'] || undefined,
-        filedAt: values['Filed At'] || undefined,
-        settledAt: values['Settled At'] || undefined,
-        rejectionReason: values['Rejection Reason'] || undefined,
-        notes: values.Notes || undefined,
-        importErrors: errors,
-      };
-    });
+  // 6. Relation
+  const relation = getImportCell(row, 'Relation', 'Relationship', 'relation');
+  if (relation) {
+    contact.role = relation;
+    contact.notes = `Relation: ${relation}`;
+  }
 
-  return { contact, address, occupation, productInterests, familyMembers, policies, claims, importErrors };
+  // 7. Is Dependent?
+  const isDepRaw = getImportCell(row, 'Is Dependent?', 'Is Dependent', 'isDependent', 'Dependent');
+  if (isDepRaw) {
+    if (/^(true|false|yes|no|y|n|1|0)$/i.test(isDepRaw)) {
+      const isDep = /^(true|yes|y|1)$/i.test(isDepRaw);
+      contact.isDependent = isDep;
+      if (isDep && contact.phone) {
+        contact.dependentNo = String(contact.phone);
+      }
+    } else {
+      importErrors.push('Is Dependent? must be Yes or No');
+    }
+  }
+
+  // 8. Date of Birth
+  const dobRaw = getImportCell(row, 'Date of Birth', 'dateOfBirth', 'DOB');
+  if (dobRaw) {
+    const parsedDob = validateDate(row['Date of Birth'] ?? dobRaw, 'Date of Birth', importErrors);
+    if (parsedDob) contact.dateOfBirth = parsedDob;
+  }
+
+  // 9. Education
+  const education = getImportCell(row, 'Education', 'education');
+  if (education) {
+    contact.education = education;
+  }
+
+  // 10. Annual Income
+  const incomeRaw = getImportCell(row, 'Annual Income', 'annualIncome', 'Income');
+  if (incomeRaw) {
+    const incomeNum = parseNumber(incomeRaw, 'Annual Income');
+    if (incomeNum !== undefined) {
+      if (incomeNum < 0) {
+        importErrors.push('Annual Income cannot be negative');
+      } else {
+        contact.annualIncome = incomeNum;
+      }
+    }
+  }
+
+  // 11. Declared Medical History
+  const declMedRaw = getImportCell(row, 'Declared Medical History', 'declaredMedicalHistory', 'Medical History');
+  if (declMedRaw && !/^(none|nil|na|n\/a|no|-)$/i.test(declMedRaw)) {
+    const medItems = declMedRaw.split(/[,|]/).map(s => s.trim()).filter(Boolean);
+    if (medItems.length > 0) {
+      contact.declaredMedicalHistory = medItems;
+      contact.medicalHistory = medItems;
+    }
+  }
+
+  // 12. Surgery History
+  const surgeryRaw = getImportCell(row, 'Surgery History', 'surgeryDetails', 'Surgery Details');
+  if (surgeryRaw && !/^(none|nil|na|n\/a|no|-)$/i.test(surgeryRaw)) {
+    contact.surgeryDetails = surgeryRaw;
+  }
+
+  // 13. Current Medicines Prescription
+  const prescRaw = getImportCell(row, 'Current Medicines Prescription', 'prescriptionDetails', 'Prescription Details', 'Current Medicines');
+  if (prescRaw && !/^(none|nil|na|n\/a|no|-)$/i.test(prescRaw)) {
+    contact.prescriptionDetails = prescRaw;
+  }
+
+  // 14. Pincode, City, State -> Address
+  const pincode = getImportCell(row, 'Pincode', 'Pin Code', 'pincode');
+  const city = getImportCell(row, 'City', 'city');
+  const state = getImportCell(row, 'State', 'state');
+  const address = (pincode || city || state) ? {
+    type: 'HOME',
+    line1: 'N/A',
+    city: city || 'N/A',
+    state: state || 'N/A',
+    pincode: pincode || 'N/A',
+    country: 'India',
+    isPrimary: true,
+  } : undefined;
+  if (city) contact.city = city;
+
+  // 15. Occupation, Designation -> Occupation
+  const occupationType = getImportCell(row, 'Occupation', 'Occupation Type', 'occupation');
+  const designation = getImportCell(row, 'Designation', 'designation');
+  const occupation = (occupationType || designation) ? {
+    type: occupationType || 'Other',
+    designation: designation || undefined,
+    isPrimary: true,
+  } : undefined;
+
+  return { contact, address, occupation, productInterests: [], familyMembers: [], policies: [], claims: [], importErrors };
 }
 
 export const contactFormSchema = z.object({
@@ -1278,33 +1267,43 @@ export default function Contacts() {
       const fullFamName = `${famFirst} ${famMiddle} ${famLast}`.replace(/\s+/g, ' ').trim();
       if (!fullFamName) return;
 
-      const rawFamPhone = (fam.whatsapp || fam.whatsappNumber || fam.phone || fam.contactNo || '').replace(/\D/g, '');
+      const rawMainPhone = (personalFields.whatsappNumber || personalFields.callingNumber || loadedContact?.phone || '').replace(/\D/g, '');
+      const cleanMainPhone = rawMainPhone.length > 10 ? rawMainPhone.slice(-10) : rawMainPhone;
+
+      const rawFamPhone = (fam.whatsapp || fam.whatsappNumber || fam.phone || fam.contactNo || (fam.isDependent ? cleanMainPhone : '')).replace(/\D/g, '');
       const cleanFamPhone = rawFamPhone.length > 10 ? rawFamPhone.slice(-10) : rawFamPhone;
-      const validFamPhone = (cleanFamPhone.length === 10 && !cleanFamPhone.startsWith('00') && cleanFamPhone !== '0000000000')
+      let validFamPhone = (cleanFamPhone.length === 10 && !cleanFamPhone.startsWith('00') && cleanFamPhone !== '0000000000')
         ? cleanFamPhone
         : (rawFamPhone.length >= 7 && !rawFamPhone.startsWith('00') && rawFamPhone !== '0000000000' ? rawFamPhone : (rawFamPhone || undefined));
 
-      const rawFamCall = (fam.callingNumber || fam.alternatePhone || '').replace(/\D/g, '');
+      if (fam.isDependent && (!validFamPhone || validFamPhone.startsWith('00') || validFamPhone === '0000000000')) {
+        validFamPhone = cleanMainPhone || undefined;
+      }
+
+      const rawFamCall = (fam.callingNumber || fam.alternatePhone || (fam.isDependent ? (validFamPhone || cleanMainPhone) : '')).replace(/\D/g, '');
       const cleanFamCall = rawFamCall.length > 10 ? rawFamCall.slice(-10) : rawFamCall;
-      const validFamCall = (cleanFamCall.length === 10 && !cleanFamCall.startsWith('00') && cleanFamCall !== '0000000000')
+      let validFamCall = (cleanFamCall.length === 10 && !cleanFamCall.startsWith('00') && cleanFamCall !== '0000000000')
         ? cleanFamCall
         : (rawFamCall.length >= 7 && !rawFamCall.startsWith('00') && rawFamCall !== '0000000000' ? rawFamCall : (rawFamCall || undefined));
       const relType = fam.relation ? fam.relation.toUpperCase().replace(/\s+/g, '_') : 'OTHER';
       const famIsoDob = toSafeIsoString(fam.dob || fam.dateOfBirth);
 
+      const rawDepNo = (fam.guardianWhatsapp || fam.dependentNo || (fam.isDependent ? (validFamPhone || cleanMainPhone) : '') || '').replace(/\D/g, '');
+      const depNo = rawDepNo.length > 10 ? rawDepNo.slice(-10) : rawDepNo;
+
       const famPayload: any = {
         firstName: famFirst,
         middleName: famMiddle || undefined,
         lastName: famLast,
-        phone: validFamPhone || '',
-        alternatePhone: validFamCall || undefined,
+        phone: validFamPhone || (fam.isDependent ? cleanMainPhone : '') || '',
+        alternatePhone: validFamCall || (fam.isDependent ? (validFamPhone || cleanMainPhone) : undefined),
         email: fam.email ? fam.email.trim() : undefined,
         dateOfBirth: famIsoDob,
         gender: fam.gender || undefined,
         birthPlace: fam.birthPlace ? fam.birthPlace.trim() : undefined,
         motherName: fam.motherName ? fam.motherName.trim() : undefined,
         isDependent: !!fam.isDependent,
-        dependentNo: fam.guardianWhatsapp || fam.dependentNo || undefined,
+        dependentNo: depNo || undefined,
         panNumber: fam.pan || fam.panNumber || undefined,
         aadhaarNumber: fam.aadhaarNumber || undefined,
         annualIncome: fam.annualIncome ? Number(fam.annualIncome) : undefined,
@@ -1400,8 +1399,14 @@ export default function Contacts() {
               const firstOcc = c.occupations?.find((o: any) => o.isPrimary) || c.occupations?.[0] || {};
               const rawDob = c?.dateOfBirth ? c.dateOfBirth.split('T')[0] : '';
               const computedAge = rawDob ? String(calculateAge(rawDob)) : '';
-              const famPhone = (c?.phone && !c.phone.startsWith('00') && c.phone !== '0000000000') ? c.phone : (r?.phone && !r.phone.startsWith('00') && r.phone !== '0000000000' ? r.phone : '');
-              const famAltPhone = (c?.alternatePhone && !c.alternatePhone.startsWith('00') && c.alternatePhone !== '0000000000') ? c.alternatePhone : (r?.alternatePhone && !r.alternatePhone.startsWith('00') && r.alternatePhone !== '0000000000' ? r.alternatePhone : '');
+              const mainContactPhone = (contact?.phone && !contact.phone.startsWith('00') && contact.phone !== '0000000000') ? (contact.phone.replace(/\D/g, '').length > 10 ? contact.phone.replace(/\D/g, '').slice(-10) : contact.phone) : '';
+              const isDep = !!(c?.isDependent || r?.isDependent);
+              const rawDepPhone = isDep ? (c?.dependentNo || r?.dependentNo || mainContactPhone) : '';
+              const depPhone = (rawDepPhone.replace(/\D/g, '').length > 10 && !rawDepPhone.startsWith('00')) ? rawDepPhone.replace(/\D/g, '').slice(-10) : rawDepPhone;
+              const rawFamPhone = (c?.phone && !c.phone.startsWith('00') && c.phone !== '0000000000') ? c.phone : (r?.phone && !r.phone.startsWith('00') && r.phone !== '0000000000' ? r.phone : depPhone);
+              const famPhone = (rawFamPhone.replace(/\D/g, '').length > 10 && !rawFamPhone.startsWith('00')) ? rawFamPhone.replace(/\D/g, '').slice(-10) : rawFamPhone;
+              const rawFamAlt = (c?.alternatePhone && !c.alternatePhone.startsWith('00') && c.alternatePhone !== '0000000000') ? c.alternatePhone : (r?.alternatePhone && !r.alternatePhone.startsWith('00') && r.alternatePhone !== '0000000000' ? r.alternatePhone : (isDep ? famPhone : ''));
+              const famAltPhone = (rawFamAlt.replace(/\D/g, '').length > 10 && !rawFamAlt.startsWith('00')) ? rawFamAlt.replace(/\D/g, '').slice(-10) : rawFamAlt;
               return {
                 id: r.id,
                 contactId: c.id,
@@ -1415,9 +1420,9 @@ export default function Contacts() {
                 relation: r.relationshipType || 'OTHER',
                 gender: c?.gender || '',
                 birthPlace: c?.birthPlace || '',
-                isDependent: !!c?.isDependent,
-                guardianWhatsapp: c?.dependentNo || '',
-                dependentNo: c?.dependentNo || '',
+                isDependent: isDep,
+                guardianWhatsapp: c?.dependentNo || (isDep ? depPhone : ''),
+                dependentNo: c?.dependentNo || (isDep ? depPhone : ''),
                 motherName: c?.motherName || '',
                 email: c?.email || '',
                 aadhaarNumber: c?.aadhaarNumber || '',
@@ -2124,20 +2129,52 @@ export default function Contacts() {
             relation: r.relationshipType || 'OTHER',
             gender: c?.gender || '',
             birthPlace: c?.birthPlace || '',
-            isDependent: !!c?.isDependent,
-            guardianWhatsapp: c?.dependentNo || '',
-            dependentNo: c?.dependentNo || '',
+            isDependent: !!(c?.isDependent || r?.isDependent),
+            guardianWhatsapp: (() => {
+              const raw = c?.dependentNo || (c?.isDependent || r?.isDependent ? ((c?.phone && !c.phone.startsWith('00') && c.phone !== '0000000000') ? c.phone : (contact?.phone || '')) : '');
+              const d = (raw || '').replace(/\D/g, '');
+              return (d.length > 10 && !d.startsWith('00')) ? d.slice(-10) : (raw || '');
+            })(),
+            dependentNo: (() => {
+              const raw = c?.dependentNo || (c?.isDependent || r?.isDependent ? ((c?.phone && !c.phone.startsWith('00') && c.phone !== '0000000000') ? c.phone : (contact?.phone || '')) : '');
+              const d = (raw || '').replace(/\D/g, '');
+              return (d.length > 10 && !d.startsWith('00')) ? d.slice(-10) : (raw || '');
+            })(),
             motherName: c?.motherName || '',
             email: c?.email || '',
             aadhaarNumber: c?.aadhaarNumber || '',
             pan: c?.panNumber || c?.pan || '',
             panNumber: c?.panNumber || c?.pan || '',
-            phone: (c?.phone && !c.phone.startsWith('00') && c.phone !== '0000000000') ? c.phone : (r?.phone && !r.phone.startsWith('00') && r.phone !== '0000000000' ? r.phone : ''),
-            contactNo: (c?.phone && !c.phone.startsWith('00') && c.phone !== '0000000000') ? c.phone : (r?.phone && !r.phone.startsWith('00') && r.phone !== '0000000000' ? r.phone : ''),
-            whatsapp: (c?.phone && !c.phone.startsWith('00') && c.phone !== '0000000000') ? c.phone : (r?.phone && !r.phone.startsWith('00') && r.phone !== '0000000000' ? r.phone : ''),
-            whatsappNumber: (c?.phone && !c.phone.startsWith('00') && c.phone !== '0000000000') ? c.phone : (r?.phone && !r.phone.startsWith('00') && r.phone !== '0000000000' ? r.phone : ''),
-            callingNumber: (c?.alternatePhone && !c.alternatePhone.startsWith('00') && c.alternatePhone !== '0000000000') ? c.alternatePhone : (r?.alternatePhone && !r.alternatePhone.startsWith('00') && r.alternatePhone !== '0000000000' ? r.alternatePhone : ''),
-            alternatePhone: (c?.alternatePhone && !c.alternatePhone.startsWith('00') && c.alternatePhone !== '0000000000') ? c.alternatePhone : (r?.alternatePhone && !r.alternatePhone.startsWith('00') && r.alternatePhone !== '0000000000' ? r.alternatePhone : ''),
+            phone: (() => {
+              const raw = (c?.phone && !c.phone.startsWith('00') && c.phone !== '0000000000') ? c.phone : (r?.phone && !r.phone.startsWith('00') && r.phone !== '0000000000' ? r.phone : ((c?.isDependent || r?.isDependent) ? (c?.dependentNo || contact?.phone || '') : ''));
+              const d = (raw || '').replace(/\D/g, '');
+              return (d.length > 10 && !d.startsWith('00')) ? d.slice(-10) : (raw || '');
+            })(),
+            contactNo: (() => {
+              const raw = (c?.phone && !c.phone.startsWith('00') && c.phone !== '0000000000') ? c.phone : (r?.phone && !r.phone.startsWith('00') && r.phone !== '0000000000' ? r.phone : ((c?.isDependent || r?.isDependent) ? (c?.dependentNo || contact?.phone || '') : ''));
+              const d = (raw || '').replace(/\D/g, '');
+              return (d.length > 10 && !d.startsWith('00')) ? d.slice(-10) : (raw || '');
+            })(),
+            whatsapp: (() => {
+              const raw = (c?.phone && !c.phone.startsWith('00') && c.phone !== '0000000000') ? c.phone : (r?.phone && !r.phone.startsWith('00') && r.phone !== '0000000000' ? r.phone : ((c?.isDependent || r?.isDependent) ? (c?.dependentNo || contact?.phone || '') : ''));
+              const d = (raw || '').replace(/\D/g, '');
+              return (d.length > 10 && !d.startsWith('00')) ? d.slice(-10) : (raw || '');
+            })(),
+            whatsappNumber: (() => {
+              const raw = (c?.phone && !c.phone.startsWith('00') && c.phone !== '0000000000') ? c.phone : (r?.phone && !r.phone.startsWith('00') && r.phone !== '0000000000' ? r.phone : ((c?.isDependent || r?.isDependent) ? (c?.dependentNo || contact?.phone || '') : ''));
+              const d = (raw || '').replace(/\D/g, '');
+              return (d.length > 10 && !d.startsWith('00')) ? d.slice(-10) : (raw || '');
+            })(),
+            callingNumber: (() => {
+              const raw = (c?.alternatePhone && !c.alternatePhone.startsWith('00') && c.alternatePhone !== '0000000000') ? c.alternatePhone : (r?.alternatePhone && !r.alternatePhone.startsWith('00') && r.alternatePhone !== '0000000000' ? r.alternatePhone : ((c?.isDependent || r?.isDependent) ? (c?.dependentNo || contact?.phone || '') : ''));
+              const d = (raw || '').replace(/\D/g, '');
+              return (d.length > 10 && !d.startsWith('00')) ? d.slice(-10) : (raw || '');
+            })(),
+            alternatePhone: (() => {
+              const raw = (c?.alternatePhone && !c.alternatePhone.startsWith('00') && c.alternatePhone !== '0000000000') ? c.alternatePhone : (r?.alternatePhone && !r.alternatePhone.startsWith('00') && r.alternatePhone !== '0000000000' ? r.alternatePhone : ((c?.isDependent || r?.isDependent) ? (c?.dependentNo || contact?.phone || '') : ''));
+              const d = (raw || '').replace(/\D/g, '');
+              return (d.length > 10 && !d.startsWith('00')) ? d.slice(-10) : (raw || '');
+            })(),
             sameAsWhatsapp: !!(c?.phone && c?.alternatePhone && c.phone === c.alternatePhone),
             role: c?.role || 'Contact',
             contactStatus: c?.isActive !== false ? 'Active' : 'Inactive',
@@ -3730,8 +3767,6 @@ export default function Contacts() {
           item.assignedEmployeeId,
           item.assignedEmployee?.id,
           item.assignedEmployee?.userId,
-          ...(item.productInterests || []).map((pi: any) => pi.assignedEmployeeId || pi.assignedEmployee?.id).filter(Boolean),
-          ...(item.policies || []).map((pol: any) => pol.assignedEmployeeId || pol.assignedEmployee?.id).filter(Boolean),
         ].filter(Boolean);
 
         const isAssignedToMe = directEmpIds.some((empId: string) => {
@@ -4381,6 +4416,7 @@ export default function Contacts() {
       key: 'name',
       label: 'NAME',
       sortable: true,
+      className: 'w-[24%] min-w-[180px]',
       render: r => {
         const fullName = [r.firstName || r.contact?.firstName, r.middleName || r.contact?.middleName, r.lastName || r.contact?.lastName].filter(Boolean).join(' ').trim() || r.name || '—';
         return (
@@ -4409,12 +4445,22 @@ export default function Contacts() {
       key: 'phone',
       label: 'PHONE',
       sortable: true,
-      render: r => <span className="text-slate-700 text-sm font-bold">{r.phone && !r.phone.startsWith('00') ? r.phone : '—'}</span>
+      className: 'w-[15%] min-w-[130px] whitespace-nowrap',
+      render: r => {
+        const isDep = !!(r.isDependent || r.relationshipType === 'CHILD' || r.dependentNo);
+        const resolvedPhone = (r.phone && !r.phone.startsWith('00') && r.phone !== '0000000000' && !String(r.phone).toLowerCase().includes('unknown'))
+          ? r.phone
+          : (isDep ? (r.dependentNo || r.guardianWhatsapp || r.relatedTo?.[0]?.primaryContact?.phone || '') : '');
+        const rawDigits = (resolvedPhone || '').replace(/\D/g, '');
+        const displayPhone = (rawDigits.length > 10 && !rawDigits.startsWith('00')) ? rawDigits.slice(-10) : resolvedPhone;
+        return <span className="text-slate-700 text-sm font-bold">{displayPhone || '—'}</span>;
+      }
     },
     {
       key: 'role',
       label: 'ROLE',
       sortable: true,
+      className: 'w-[10%] min-w-[90px] whitespace-nowrap',
       render: r => {
         const role = r.role || r.user?.role || 'Contact';
         const roleColors: Record<string, string> = {
@@ -4435,6 +4481,7 @@ export default function Contacts() {
       key: 'contactStatus',
       label: 'STATUS',
       sortable: true,
+      className: 'w-[10%] min-w-[90px] whitespace-nowrap',
       render: r => {
         const isActive = r.isActive !== false;
         return (
@@ -4448,6 +4495,7 @@ export default function Contacts() {
       key: 'leadStage',
       label: 'LEAD STAGE',
       sortable: true,
+      className: 'w-[14%] min-w-[120px] whitespace-nowrap',
       render: r => {
         const stageColors: Record<string, string> = {
           'To Contact': 'bg-slate-100 text-slate-700 border-slate-200',
@@ -4469,6 +4517,7 @@ export default function Contacts() {
       key: 'leadStatus',
       label: 'LEAD STATUS',
       sortable: true,
+      className: 'w-[14%] min-w-[120px] whitespace-nowrap',
       render: r => {
         const statusColors: Record<string, string> = {
           'Interested': 'bg-teal-50 text-teal-700 border-teal-200/60',
@@ -4489,6 +4538,7 @@ export default function Contacts() {
       key: 'assignedTo',
       label: 'ASSIGNED EMPLOYEE',
       sortable: true,
+      className: 'w-[25%] min-w-[180px]',
       render: r => {
         const assignedEmployeeIds = getAssignedEmployeeIds(r);
         const assignedEmployeeNames = assignedEmployeeIds
@@ -4533,11 +4583,13 @@ export default function Contacts() {
       key: 'source',
       label: 'SOURCE',
       sortable: true,
+      className: 'w-[12%] min-w-[100px] whitespace-nowrap',
       render: r => <span className="text-slate-600 text-sm font-bold capitalize bg-slate-100 px-2 py-0.5 rounded-md border border-slate-200/60">{r.source || '—'}</span>
     },
     {
       key: 'actions',
       label: 'ACTIONS',
+      className: 'w-[16%] min-w-[130px] whitespace-nowrap',
       render: r => {
         const isEmployee = authUser?.role === 'EMPLOYEE';
         const showPickButton = isEmployee && !r.assignedEmployeeId && getAssignedEmployeeIds(r).length === 0;
@@ -4553,26 +4605,34 @@ export default function Contacts() {
                 Pick Contact
               </button>
             )}
-            {r.phone && !r.phone.startsWith('00') && r.phone !== '0000000000' && !r.phone.toLowerCase().includes('unknown') && (
-              <>
-                <a
-                  href={`https://wa.me/${r.phone?.replace(/\D/g, '')}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="p-2 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white font-bold flex items-center justify-center cursor-pointer shadow-md shadow-emerald-500/20 hover:shadow-lg hover:scale-105 transition-all"
-                  title="WhatsApp"
-                >
-                  <MessageCircle size={14} />
-                </a>
-                <a
-                  href={`tel:${r.phone}`}
-                  className="p-2 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white font-bold flex items-center justify-center cursor-pointer shadow-md shadow-blue-500/20 hover:shadow-lg hover:scale-105 transition-all"
-                  title="Call"
-                >
-                  <Phone size={14} />
-                </a>
-              </>
-            )}
+            {(() => {
+              const rawEff = (r.phone && !r.phone.startsWith('00') && r.phone !== '0000000000' && !r.phone.toLowerCase().includes('unknown'))
+                ? r.phone
+                : ((r.isDependent || r.relationshipType === 'CHILD' || r.dependentNo) ? (r.dependentNo || r.guardianWhatsapp || r.relatedTo?.[0]?.primaryContact?.phone || '') : '');
+              const effDigits = (rawEff || '').replace(/\D/g, '');
+              const effectivePhone = (effDigits.length > 10 && !effDigits.startsWith('00')) ? effDigits.slice(-10) : effDigits;
+              if (!effectivePhone || effectivePhone.startsWith('00') || effectivePhone === '0000000000') return null;
+              return (
+                <>
+                  <a
+                    href={`https://wa.me/91${effectivePhone}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="p-2 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white font-bold flex items-center justify-center cursor-pointer shadow-md shadow-emerald-500/20 hover:shadow-lg hover:scale-105 transition-all"
+                    title="WhatsApp"
+                  >
+                    <MessageCircle size={14} />
+                  </a>
+                  <a
+                    href={`tel:${effectivePhone}`}
+                    className="p-2 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white font-bold flex items-center justify-center cursor-pointer shadow-md shadow-blue-500/20 hover:shadow-lg hover:scale-105 transition-all"
+                    title="Call"
+                  >
+                    <Phone size={14} />
+                  </a>
+                </>
+              );
+            })()}
             {canEditContacts && (
               <button
                 onClick={() => openEdit(r)}
@@ -4594,6 +4654,7 @@ export default function Contacts() {
       key: 'name',
       label: 'NAME',
       sortable: true,
+      className: 'min-w-[180px]',
       render: r => {
         const fullName = [r.firstName || r.contact?.firstName, r.middleName || r.contact?.middleName, r.lastName || r.contact?.lastName].filter(Boolean).join(' ').trim() || r.name || '—';
         return (
@@ -4622,12 +4683,22 @@ export default function Contacts() {
       key: 'phone',
       label: 'PHONE',
       sortable: true,
-      render: r => <span className="text-slate-700 text-sm font-bold">{r.phone && !r.phone.startsWith('00') ? r.phone : '—'}</span>
+      className: 'min-w-[130px] whitespace-nowrap',
+      render: r => {
+        const isDep = !!(r.isDependent || r.relationshipType === 'CHILD' || r.dependentNo);
+        const resolvedPhone = (r.phone && !r.phone.startsWith('00') && r.phone !== '0000000000' && !String(r.phone).toLowerCase().includes('unknown'))
+          ? r.phone
+          : (isDep ? (r.dependentNo || r.guardianWhatsapp || r.relatedTo?.[0]?.primaryContact?.phone || '') : '');
+        const rawDigits = (resolvedPhone || '').replace(/\D/g, '');
+        const displayPhone = (rawDigits.length > 10 && !rawDigits.startsWith('00')) ? rawDigits.slice(-10) : resolvedPhone;
+        return <span className="text-slate-700 text-sm font-bold">{displayPhone || '—'}</span>;
+      }
     },
     {
       key: 'product',
       label: 'PRODUCT',
       sortable: true,
+      className: 'min-w-[120px]',
       render: r => {
         const policies = policyMap[r.id] ?? [];
         if (policies.length === 0) return <span className="text-slate-400 text-sm">—</span>;
@@ -4659,6 +4730,7 @@ export default function Contacts() {
       key: 'renewStatus',
       label: 'RENEW STATUS',
       sortable: true,
+      className: 'min-w-[110px] whitespace-nowrap',
       render: r => {
         const policies = policyMap[r.id] ?? [];
         const active = policies.filter((p: any) => p.status === 'ACTIVE');
@@ -4681,6 +4753,7 @@ export default function Contacts() {
       key: 'renewAssigned',
       label: 'RENEW ASSIGNED',
       sortable: true,
+      className: 'min-w-[140px]',
       render: r => {
         const policies = policyMap[r.id] ?? [];
         const active = policies.find((p: any) => p.status === 'ACTIVE' && p.assignedEmployeeId);
@@ -4691,6 +4764,7 @@ export default function Contacts() {
       key: 'claimStatus',
       label: 'CLAIM STATUS',
       sortable: true,
+      className: 'min-w-[110px] whitespace-nowrap',
       render: r => {
         const claims = claimMap[r.id] ?? [];
         if (claims.length === 0) return <span className="text-slate-400 text-sm">—</span>;
@@ -4712,6 +4786,7 @@ export default function Contacts() {
       key: 'claimAssigned',
       label: 'CLAIM ASSIGNED',
       sortable: true,
+      className: 'min-w-[140px]',
       render: r => {
         const claims = claimMap[r.id] ?? [];
         const active = claims.find((c: any) =>
@@ -4724,6 +4799,7 @@ export default function Contacts() {
       key: 'waCampaign',
       label: 'WA CAMPAIGN',
       sortable: true,
+      className: 'min-w-[130px]',
       render: r => {
         const campaigns = r.tags?.filter((t: string) => [
           'Health Awareness',
@@ -4739,28 +4815,36 @@ export default function Contacts() {
     {
       key: 'actions',
       label: 'ACTIONS',
-      render: r => (
-        <div className="flex gap-1.5 justify-start items-center" onClick={e => e.stopPropagation()}>
-          {r.phone && !r.phone.startsWith('00') && r.phone !== '0000000000' && !r.phone.toLowerCase().includes('unknown') && (
-            <>
-              <a
-                href={`https://wa.me/${r.phone?.replace(/\D/g, '')}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="p-2 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white font-bold flex items-center justify-center cursor-pointer shadow-md shadow-emerald-500/20 hover:shadow-lg hover:scale-105 transition-all"
-                title="WhatsApp"
-              >
-                <MessageCircle size={14} />
-              </a>
-              <a
-                href={`tel:${r.phone}`}
-                className="p-2 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white font-bold flex items-center justify-center cursor-pointer shadow-md shadow-blue-500/20 hover:shadow-lg hover:scale-105 transition-all"
-                title="Call"
-              >
-                <Phone size={14} />
-              </a>
-            </>
-          )}
+      className: 'min-w-[120px] whitespace-nowrap',
+      render: r => {
+        const isDep = !!(r.isDependent || r.relationshipType === 'CHILD' || r.dependentNo);
+        const resolvedPhone = (r.phone && !r.phone.startsWith('00') && r.phone !== '0000000000' && !String(r.phone).toLowerCase().includes('unknown'))
+          ? r.phone
+          : (isDep ? (r.dependentNo || r.guardianWhatsapp || r.relatedTo?.[0]?.primaryContact?.phone || '') : '');
+        const pDigits = (resolvedPhone || '').replace(/\D/g, '');
+        const cleanPhone = (pDigits.length > 10 && !pDigits.startsWith('00')) ? pDigits.slice(-10) : pDigits;
+        return (
+          <div className="flex gap-1.5 justify-start items-center" onClick={e => e.stopPropagation()}>
+            {cleanPhone && !cleanPhone.startsWith('00') && cleanPhone !== '0000000000' && (
+              <>
+                <a
+                  href={`https://wa.me/91${cleanPhone}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="p-2 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white font-bold flex items-center justify-center cursor-pointer shadow-md shadow-emerald-500/20 hover:shadow-lg hover:scale-105 transition-all"
+                  title="WhatsApp"
+                >
+                  <MessageCircle size={14} />
+                </a>
+                <a
+                  href={`tel:${cleanPhone}`}
+                  className="p-2 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white font-bold flex items-center justify-center cursor-pointer shadow-md shadow-blue-500/20 hover:shadow-lg hover:scale-105 transition-all"
+                  title="Call"
+                >
+                  <Phone size={14} />
+                </a>
+              </>
+            )}
           {canEditContacts && (
             <button
               onClick={() => openEdit(r)}
@@ -4771,9 +4855,10 @@ export default function Contacts() {
             </button>
           )}
         </div>
-      )
+      );
     }
-  ];
+  }
+];
 
   // Birthday Columns
   const BIRTHDAY_COLS: Column<any>[] = [
@@ -4781,6 +4866,7 @@ export default function Contacts() {
       key: 'name',
       label: 'NAME',
       sortable: true,
+      className: 'w-[28%] min-w-[180px]',
       render: r => {
         const fullName = [r.firstName || r.contact?.firstName, r.middleName || r.contact?.middleName, r.lastName || r.contact?.lastName].filter(Boolean).join(' ').trim() || r.name || '—';
         return (
@@ -4809,18 +4895,29 @@ export default function Contacts() {
       key: 'phone',
       label: 'PHONE',
       sortable: true,
-      render: r => <span className="text-slate-700 text-sm font-bold">{(r.phone && !r.phone.startsWith('00') && r.phone !== '0000000000' && !r.phone.toLowerCase().includes('unknown')) ? r.phone : '—'}</span>
+      className: 'w-[18%] min-w-[130px] whitespace-nowrap',
+      render: r => {
+        const isDep = !!(r.isDependent || r.relationshipType === 'CHILD' || r.dependentNo);
+        const resolvedPhone = (r.phone && !r.phone.startsWith('00') && r.phone !== '0000000000' && !String(r.phone).toLowerCase().includes('unknown'))
+          ? r.phone
+          : (isDep ? (r.dependentNo || r.guardianWhatsapp || r.relatedTo?.[0]?.primaryContact?.phone || '') : '');
+        const rawDigits = (resolvedPhone || '').replace(/\D/g, '');
+        const displayPhone = (rawDigits.length > 10 && !rawDigits.startsWith('00')) ? rawDigits.slice(-10) : resolvedPhone;
+        return <span className="text-slate-700 text-sm font-bold">{displayPhone || '—'}</span>;
+      }
     },
     {
       key: 'dateOfBirth',
       label: 'DATE OF BIRTH',
       sortable: true,
+      className: 'w-[18%] min-w-[130px] whitespace-nowrap',
       render: r => <span className="text-slate-600 text-sm font-semibold">{r.dateOfBirth ? format(new Date(r.dateOfBirth), 'dd/MM/yyyy') : '—'}</span>
     },
     {
       key: 'daysUntil',
       label: 'DAYS UNTIL BIRTHDAY',
       sortable: true,
+      className: 'w-[20%] min-w-[140px] whitespace-nowrap',
       render: r => {
         if (!r.dateOfBirth) return '—';
         const dob = new Date(r.dateOfBirth);
@@ -4844,26 +4941,39 @@ export default function Contacts() {
     {
       key: 'actions',
       label: 'ACTIONS',
-      render: r => (
-        <div className="flex gap-1.5 justify-start items-center" onClick={e => e.stopPropagation()}>
-          <a
-            href={`https://wa.me/${r.phone?.replace(/\D/g, '')}`}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="p-2 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white font-bold flex items-center justify-center cursor-pointer shadow-md shadow-emerald-500/20 hover:shadow-lg hover:scale-105 transition-all"
-            title="WhatsApp"
-          >
-            <MessageCircle size={14} />
-          </a>
-          <a
-            href={`tel:${r.phone}`}
-            className="p-2 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white font-bold flex items-center justify-center cursor-pointer shadow-md shadow-blue-500/20 hover:shadow-lg hover:scale-105 transition-all"
-            title="Call"
-          >
-            <Phone size={14} />
-          </a>
-        </div>
-      )
+      className: 'w-[16%] min-w-[120px] whitespace-nowrap',
+      render: r => {
+        const isDep = !!(r.isDependent || r.relationshipType === 'CHILD' || r.dependentNo);
+        const resolvedPhone = (r.phone && !r.phone.startsWith('00') && r.phone !== '0000000000' && !String(r.phone).toLowerCase().includes('unknown'))
+          ? r.phone
+          : (isDep ? (r.dependentNo || r.guardianWhatsapp || r.relatedTo?.[0]?.primaryContact?.phone || '') : '');
+        const pDigits = (resolvedPhone || '').replace(/\D/g, '');
+        const cleanPhone = (pDigits.length > 10 && !pDigits.startsWith('00')) ? pDigits.slice(-10) : pDigits;
+        return (
+          <div className="flex gap-1.5 justify-start items-center" onClick={e => e.stopPropagation()}>
+            {cleanPhone && !cleanPhone.startsWith('00') && cleanPhone !== '0000000000' ? (
+              <>
+                <a
+                  href={`https://wa.me/91${cleanPhone}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="p-2 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white font-bold flex items-center justify-center cursor-pointer shadow-md shadow-emerald-500/20 hover:shadow-lg hover:scale-105 transition-all"
+                  title="WhatsApp"
+                >
+                  <MessageCircle size={14} />
+                </a>
+                <a
+                  href={`tel:${cleanPhone}`}
+                  className="p-2 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white font-bold flex items-center justify-center cursor-pointer shadow-md shadow-blue-500/20 hover:shadow-lg hover:scale-105 transition-all"
+                  title="Call"
+                >
+                  <Phone size={14} />
+                </a>
+              </>
+            ) : null}
+          </div>
+        );
+      }
     }
   ];
 
@@ -4956,6 +5066,7 @@ export default function Contacts() {
         key: 'contactId',
         label: 'CONTACT ID',
         sortable: true,
+        className: 'w-[10%] min-w-[100px] whitespace-nowrap',
         render: r => <span className="text-slate-500 font-mono text-xs">{r.contactId || r.id || '—'}</span>
       },
       name: CONTACT_COLS.find(c => c.key === 'name')!,
@@ -4978,13 +5089,71 @@ export default function Contacts() {
         key: 'email',
         label: 'EMAIL',
         sortable: true,
+        className: 'w-[16%] min-w-[150px]',
         render: r => <span className="text-slate-600 text-sm">{r.email || '—'}</span>
       },
       city: {
         key: 'city',
         label: 'CITY',
         sortable: true,
-        render: r => <span className="text-slate-600 text-sm">{r.city || (r as any).address?.city || '—'}</span>
+        className: 'w-[12%] min-w-[110px]',
+        render: r => <span className="text-slate-600 text-sm font-semibold">{r.city || (r as any).addresses?.[0]?.city || (r as any).address?.city || '—'}</span>
+      },
+      state: {
+        key: 'state',
+        label: 'STATE',
+        sortable: true,
+        className: 'w-[12%] min-w-[110px]',
+        render: r => <span className="text-slate-600 text-sm font-semibold">{r.state || (r as any).addresses?.[0]?.state || (r as any).address?.state || '—'}</span>
+      },
+      pincode: {
+        key: 'pincode',
+        label: 'PINCODE',
+        sortable: true,
+        className: 'w-[10%] min-w-[100px]',
+        render: r => <span className="text-slate-600 text-sm font-semibold">{r.pincode || (r as any).addresses?.[0]?.pincode || (r as any).address?.pincode || '—'}</span>
+      },
+      occupation: {
+        key: 'occupation',
+        label: 'OCCUPATION',
+        sortable: true,
+        className: 'w-[14%] min-w-[120px]',
+        render: r => <span className="text-slate-600 text-sm font-semibold">{r.occupation || (r as any).occupations?.[0]?.type || (r as any).occupationType || '—'}</span>
+      },
+      designation: {
+        key: 'designation',
+        label: 'DESIGNATION',
+        sortable: true,
+        className: 'w-[14%] min-w-[120px]',
+        render: r => <span className="text-slate-600 text-sm font-semibold">{r.designation || (r as any).occupations?.[0]?.designation || '—'}</span>
+      },
+      education: {
+        key: 'education',
+        label: 'EDUCATION',
+        sortable: true,
+        className: 'w-[12%] min-w-[110px]',
+        render: r => <span className="text-slate-600 text-sm font-semibold">{r.education || '—'}</span>
+      },
+      annualincome: {
+        key: 'annualIncome',
+        label: 'ANNUAL INCOME',
+        sortable: true,
+        className: 'w-[14%] min-w-[120px]',
+        render: r => <span className="text-slate-700 text-sm font-bold">{r.annualIncome ? `₹${Number(r.annualIncome).toLocaleString('en-IN')}` : '—'}</span>
+      },
+      alternatephone: {
+        key: 'alternatePhone',
+        label: 'ALTERNATE PHONE',
+        sortable: true,
+        className: 'w-[14%] min-w-[120px]',
+        render: r => <span className="text-slate-700 text-sm font-semibold">{r.alternatePhone || '—'}</span>
+      },
+      isdependent: {
+        key: 'isDependent',
+        label: 'IS DEPENDENT?',
+        sortable: true,
+        className: 'w-[10%] min-w-[90px]',
+        render: r => <span className="text-slate-700 text-sm font-semibold">{r.isDependent ? 'Yes' : 'No'}</span>
       },
     };
 
@@ -5001,6 +5170,7 @@ export default function Contacts() {
           key: colName,
           label: colName.toUpperCase(),
           sortable: true,
+          className: 'min-w-[120px]',
           render: (r: any) => {
             const val = r[colName] ?? r[colName.toLowerCase()] ?? (r.customFields && r.customFields[colName]) ?? (r.extraData && r.extraData[colName]) ?? '—';
             return <span className="text-slate-700 text-sm font-medium">{typeof val === 'object' ? JSON.stringify(val) : String(val)}</span>;
@@ -5026,7 +5196,7 @@ export default function Contacts() {
         onChange={handleImport}
       />
 
-      {/* Floating Right Action Panel (Import CSV, Import Directory & Add Buttons) */}
+      {/* Floating Right Action Panel (Import CSV & Add Buttons) */}
       <div className="fixed right-5 top-1/2 -translate-y-1/2 z-40 flex flex-col gap-3 bg-white/90 backdrop-blur-xl p-2 rounded-2xl shadow-2xl border border-slate-200/80 animate-fadeIn">
         {/* Import CSV */}
         <button
@@ -5037,18 +5207,6 @@ export default function Contacts() {
           <Upload size={18} strokeWidth={2.2} />
           <span className="absolute right-full mr-3 px-3 py-1.5 rounded-xl bg-slate-900/90 backdrop-blur-md text-white text-[11px] font-bold whitespace-nowrap opacity-0 group-hover:opacity-100 transition-all pointer-events-none shadow-xl border border-slate-800">
             Import Contact CSV
-          </span>
-        </button>
-
-        {/* Import Directory */}
-        <button
-          type="button"
-          onClick={() => setDirImportOpen(true)}
-          className="w-10 h-10 rounded-xl bg-gradient-to-tr from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white flex items-center justify-center transition-all hover:scale-105 shadow-md shadow-purple-500/25 cursor-pointer group relative"
-        >
-          <Users size={18} strokeWidth={2.2} />
-          <span className="absolute right-full mr-3 px-3 py-1.5 rounded-xl bg-slate-900/90 backdrop-blur-md text-white text-[11px] font-bold whitespace-nowrap opacity-0 group-hover:opacity-100 transition-all pointer-events-none shadow-xl border border-slate-800">
-            Import Phone Directory
           </span>
         </button>
 
@@ -5760,7 +5918,7 @@ export default function Contacts() {
           pageSize={20}
           scrollAreaHeight="420px"
           showPagination
-          horizontalScroll
+          horizontalScroll={activeCols.length > 7}
           loading={activeTab === 'birthdays' ? birthdayLoading : contactsLoading}
           rowKey={r => r.id}
           onPageChange={setPage}
@@ -7446,9 +7604,22 @@ export default function Contacts() {
                         }
                         const dobVal = member.dob || member.dateOfBirth || '';
                         const ageVal = member.age || (dobVal ? calculateAge(dobVal) : '');
-                        const phoneVal = (member.whatsapp && !member.whatsapp.startsWith('00') && member.whatsapp !== '0000000000')
+                        const mainPersonPhone = (personalFields.whatsappNumber || personalFields.callingNumber || loadedContact?.phone || '').trim();
+                        let phoneVal = (member.whatsapp && !member.whatsapp.startsWith('00') && member.whatsapp !== '0000000000')
                           ? member.whatsapp
                           : (member.whatsappNumber || member.phone || member.contactNo || member.callingNumber || member.alternatePhone || '');
+                        if (phoneVal.startsWith('00') || phoneVal === '0000000000' || phoneVal.toLowerCase().includes('unknown')) phoneVal = '';
+                        if (!phoneVal && member.isDependent) {
+                          phoneVal = (member.dependentNo && !member.dependentNo.startsWith('00') && member.dependentNo !== '0000000000')
+                            ? member.dependentNo
+                            : (member.guardianWhatsapp && !member.guardianWhatsapp.startsWith('00') && member.guardianWhatsapp !== '0000000000')
+                            ? member.guardianWhatsapp
+                            : mainPersonPhone;
+                        }
+                        const pDigits = (phoneVal || '').replace(/\D/g, '');
+                        if (pDigits.length > 10 && !pDigits.startsWith('00')) {
+                          phoneVal = pDigits.slice(-10);
+                        }
                         const addressVal = [member.city, member.state].filter(Boolean).join(', ');
                         const declaredCount = (member.declaredMedicalHistory || member.medicalHistory || []).length;
 
@@ -8469,8 +8640,8 @@ export default function Contacts() {
           isEditing={editingFamilyMemberIdx !== null}
           primaryContact={{
             gender: personalFields.gender,
-            phone: personalFields.callingNumber || personalFields.whatsappNumber,
-            whatsappNumber: personalFields.whatsappNumber,
+            phone: personalFields.whatsappNumber || personalFields.callingNumber || loadedContact?.phone || '',
+            whatsappNumber: personalFields.whatsappNumber || loadedContact?.phone || '',
             state: personalFields.state,
             district: personalFields.district,
             city: personalFields.city,
@@ -8636,29 +8807,14 @@ export default function Contacts() {
         onClose={() => setImportFormatOpen(false)}
         onChooseFile={() => fileInputRef.current?.click()}
         title="Import Contacts from CSV or Excel"
-        description="Use one row per contact. Keep the headers unchanged; use numbered columns for multiple related records."
-        warning="First Name and a unique 10-digit Phone are required. Add related entries in numbered columns (Family 1, Family 2, etc.). Product Interests need Categories, Lead Source, Follow-up Date, and a positive Expected Premium. Policies need an existing Plan Name or Code; claims must reference a policy for this contact. Dates use YYYY-MM-DD; separate list values with |."
+        description="Use one row per contact. Keep the column headers unchanged."
+        warning="First Name and a unique 10-digit Customer Contact No. are required. Date of Birth uses YYYY-MM-DD or DD-MM-YYYY; declared medical conditions can be separated with commas or |."
         columns={CONTACT_IMPORT_COLUMNS}
-        sampleRow={CONTACT_IMPORT_COLUMNS.map(({ name }) => ({
-          'First Name': 'Sample',
-          'Last Name': 'Contact',
-          Phone: '9000000001',
-          Email: 'sample@example.com',
-          Gender: 'OTHER',
-          'Date of Birth': '1990-01-15',
-          Tags: 'customer|health',
-          Notes: 'Replace this sample row',
-          'Product Interest 1 - Categories': 'Health',
-          'Product Interest 1 - Lead Source': 'Walkin',
-          'Product Interest 1 - Follow-up Date': '2026-10-30',
-          'Product Interest 1 - Expected Premium / Budget': '50000',
-          'Family 1 - First Name': 'Sample',
-          'Family 1 - Last Name': 'Family',
-          'Family 1 - Relationship': 'SPOUSE',
-        }[name] || ''))}
+        sampleRows={[CONTACT_IMPORT_SAMPLE_ROW]}
         fileFormats="CSV, XLS, and XLSX"
-        sampleFileName="contacts-sample.xlsx"
+        sampleFileName="Import Format.xlsx"
         sampleFileType="xlsx"
+        sheetName="Import Format"
       />
 
     </div>

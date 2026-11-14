@@ -618,7 +618,7 @@ function PhcDrawer({ record: rawRecord, onClose, policyNotesMap }: PhcModalProps
 
 // ── Main Component ────────────────────────────────────────────────────────────────
 export default function PhcTrackingView() {
-  const [activeTab, setActiveTab] = useState<'all' | 'dependencies' | 'due-this-month' | 'upcoming' | 'completed'>('all');
+  const [activeTab, setActiveTab] = useState<'all' | 'due-this-month' | 'upcoming' | 'completed'>('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [policyTypeFilter, setPolicyTypeFilter] = useState('All');
   const [phcStatusFilter, setPhcStatusFilter] = useState('All');
@@ -825,7 +825,7 @@ export default function PhcTrackingView() {
   }, [filteredData, sortKey, sortDir]);
 
   const exportPhcToExcel = () => {
-    const isDeps = activeTab === 'dependencies';
+    const isDeps = (activeTab as string) === 'dependencies';
     let headers: string[];
     let rows: string;
     
@@ -870,7 +870,7 @@ export default function PhcTrackingView() {
   };
 
   const exportPhcToPdf = () => {
-    const isDeps = activeTab === 'dependencies';
+    const isDeps = (activeTab as string) === 'dependencies';
     const printWindow = window.open('', '_blank');
     if (!printWindow) {
       import('react-hot-toast').then(({ default: toast }) => toast.error('Pop-up blocked. Please allow pop-ups to print PDF'));
@@ -1013,7 +1013,7 @@ export default function PhcTrackingView() {
     return dependenciesData.slice(start, start + rowsPerPage);
   }, [dependenciesData, currentPage, rowsPerPage]);
 
-  const totalRows = activeTab === 'dependencies' ? dependenciesData.length : sortedFilteredData.length;
+  const totalRows = (activeTab as string) === 'dependencies' ? dependenciesData.length : sortedFilteredData.length;
   const totalPages = Math.max(1, Math.ceil(totalRows / rowsPerPage));
 
   useEffect(() => {
@@ -1056,7 +1056,6 @@ export default function PhcTrackingView() {
 
   const TABS = [
     { key: 'all', label: 'All PHC Policies' },
-    { key: 'dependencies', label: 'Dependencies' },
     { key: 'due-this-month', label: 'Due this Month' },
     { key: 'upcoming', label: 'Under Process PHC' },
     { key: 'completed', label: 'Completed PHC' },
@@ -1313,7 +1312,7 @@ export default function PhcTrackingView() {
 
         {/* Table */}
         <div className="max-h-[420px] overflow-auto custom-scrollbar overscroll-contain">
-          {activeTab === 'dependencies' ? (
+          {(activeTab as string) === 'dependencies' ? (
             <table className="w-full text-left text-xs">
               <thead className="sticky top-0 z-20">
                 <tr className="bg-slate-50/80 border-b border-slate-200 text-[10px] font-bold text-slate-500 uppercase tracking-wider">

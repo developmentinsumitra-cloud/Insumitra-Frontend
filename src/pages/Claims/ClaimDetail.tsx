@@ -535,14 +535,19 @@ export default function ClaimDetail() {
         <div className="space-y-4">
           <div>
             <label className="label">New Status</label>
-            <select className="input" value={newStatus} onChange={e => setNewStatus(e.target.value)}>
+            <select className="input" value={newStatus} onChange={e => {
+              setNewStatus(e.target.value);
+              if (e.target.value === 'SETTLED' && !approvedAmount && cl?.claimAmount) {
+                setApprovedAmount(String(cl.claimAmount));
+              }
+            }}>
               {DISPLAY_STATUS_FLOW.map(s => <option key={s} value={s}>{s.replace('_', ' ')}</option>)}
             </select>
           </div>
           {(newStatus === 'APPROVED' || newStatus === 'SETTLED') && (
             <div>
-              <label className="label">Approved Amount (₹)</label>
-              <input type="number" className="input" value={approvedAmount} onChange={e => setApprovedAmount(e.target.value)} placeholder="Enter approved amount" />
+              <label className="label">{newStatus === 'SETTLED' ? 'Settled Amount (₹)' : 'Approved Amount (₹)'}</label>
+              <input type="number" className="input" value={approvedAmount} onChange={e => setApprovedAmount(e.target.value)} placeholder={newStatus === 'SETTLED' ? "Enter settled amount" : "Enter approved amount"} />
             </div>
           )}
           {newStatus === 'REJECTED' && (

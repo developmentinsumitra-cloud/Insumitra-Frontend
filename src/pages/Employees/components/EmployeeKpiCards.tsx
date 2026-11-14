@@ -10,6 +10,7 @@ export default function EmployeeKpiCards({ employeesList }: EmployeeKpiCardsProp
   const activeEmployees = employeesList?.length > 0
     ? employeesList.filter((e: any) => e.isActive).length
     : 16;
+  const pendingApprovals = employeesList?.filter((e: any) => e.approvalStatus === 'PENDING').length || 0;
   const inactiveEmployees = totalEmployees - activeEmployees;
 
   // Department counts
@@ -27,11 +28,16 @@ export default function EmployeeKpiCards({ employeesList }: EmployeeKpiCardsProp
       <div className="bg-white p-5 rounded-2xl border border-gray-100 shadow-sm flex items-center justify-between hover:shadow-md transition-shadow group">
         <div>
           <p className="text-[11px] font-bold text-gray-500 uppercase tracking-wider">Total Agency Workforce</p>
-          <div className="flex items-baseline gap-2 mt-1">
+          <div className="flex flex-wrap items-baseline gap-2 mt-1">
             <h3 className="text-2xl font-black text-gray-900">{totalEmployees}</h3>
             <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200/80 px-2 py-0.5 rounded-full">
               {activeEmployees} Active
             </span>
+            {pendingApprovals > 0 && (
+              <span className="text-[10px] font-bold text-amber-800 bg-amber-50 border border-amber-300 px-2 py-0.5 rounded-full animate-pulse">
+                {pendingApprovals} Pending Approval
+              </span>
+            )}
           </div>
           <p className="text-[11px] text-gray-400 mt-1 font-medium">Registered Team Members</p>
         </div>

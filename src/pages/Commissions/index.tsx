@@ -1395,22 +1395,8 @@ export default function Commissions() {
 return (
     <div className="space-y-5 pb-10 text-slate-800 font-sans text-sm sm:text-base">
 
-      {/* ── ACTION BUTTONS & SEARCH BAR ─────────────────────────────────────────── */}
-      <div className="flex flex-wrap items-center justify-between gap-3 bg-white p-3 border border-slate-100 rounded-2xl shadow-sm">
-        {/* Left Side: Search Bar ONLY */}
-        <div className="flex flex-wrap items-center gap-2 w-full lg:w-auto">
-          <div className="page-search-wrapper">
-            <Search className="page-search-icon" />
-            <input
-              type="text"
-              value={search}
-              onChange={e => setSearch(e.target.value)}
-              placeholder="Search policy#, employee..."
-              className="page-search-input"
-            />
-          </div>
-        </div>
-
+      {/* ── ACTION BUTTONS ─────────────────────────────────────────── */}
+      <div className="flex flex-wrap items-center justify-end gap-2 bg-white p-3 border border-slate-100 rounded-2xl shadow-sm">
         {/* Right Side: Add Commission Entry & Filter Toggle Button */}
         <div className="flex items-center gap-2">
           <button
@@ -1842,18 +1828,35 @@ return (
             return (
               <div className="-mt-4 bg-white rounded-b-2xl border border-slate-200/80 shadow-2xs p-4 sm:p-5 space-y-4">
                 {/* 1. Header Toolbar */}
-                <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 pb-3 border-b border-slate-100">
-                  <div>
-                    <h3 className="text-sm sm:text-base font-extrabold text-slate-800 flex items-center gap-2">
-                      <Shield size={17} className="text-indigo-600" />
-                      Policies &amp; Claims Management
-                    </h3>
-                    <p className="text-[11px] sm:text-xs text-slate-500 mt-0.5">
-                      Select any policy or claim to immediately calculate and assign commission
-                    </p>
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-100">
+                  {/* Left side: Search Bar (Moved in place of Policy & Claims Management) */}
+                  <div className="relative w-full sm:w-80 md:w-96">
+                    <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+                    <input
+                      type="text"
+                      value={listPanelSearch}
+                      onChange={e => {
+                        setListPanelSearch(e.target.value);
+                        setPanelPage(1);
+                      }}
+                      placeholder={listPanelTab === 'POLICIES' ? 'Search by policy#, plan, company...' : 'Search by claim#, policy#, client...'}
+                      className="w-full pl-9 pr-7 py-2 text-xs border border-slate-200 rounded-xl bg-slate-50/50 hover:bg-white focus:bg-white focus:outline-none focus:border-indigo-400 transition-colors shadow-2xs"
+                    />
+                    {listPanelSearch && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setListPanelSearch('');
+                          setPanelPage(1);
+                        }}
+                        className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 p-0.5"
+                      >
+                        <X size={13} />
+                      </button>
+                    )}
                   </div>
 
-                  {/* Right side: Sub-tabs, Search, and View Mode Toggle */}
+                  {/* Right side: Sub-tabs and View Mode Toggle */}
                   <div className="flex flex-wrap items-center gap-2.5">
                     {/* Sub-tabs pills */}
                     <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl border border-slate-200/70">
@@ -1889,33 +1892,6 @@ return (
                         <FileText size={13} />
                         Claims ({allClaimsList.length})
                       </button>
-                    </div>
-
-                    {/* Search Bar */}
-                    <div className="relative min-w-[200px] sm:min-w-[240px]">
-                      <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
-                      <input
-                        type="text"
-                        value={listPanelSearch}
-                        onChange={e => {
-                          setListPanelSearch(e.target.value);
-                          setPanelPage(1);
-                        }}
-                        placeholder={listPanelTab === 'POLICIES' ? 'Search by policy#, plan, company...' : 'Search by claim#, policy#, client...'}
-                        className="w-full pl-8 pr-7 py-1.5 text-xs border border-slate-200 rounded-xl bg-slate-50/50 hover:bg-white focus:bg-white focus:outline-none focus:border-indigo-400 transition-colors"
-                      />
-                      {listPanelSearch && (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setListPanelSearch('');
-                            setPanelPage(1);
-                          }}
-                          className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 p-0.5"
-                        >
-                          <X size={12} />
-                        </button>
-                      )}
                     </div>
 
                     {/* View Switcher: Grid vs Table */}

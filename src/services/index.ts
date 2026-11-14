@@ -122,6 +122,8 @@ export const employeesService = {
   get:         (id: string)                   => api.get(`/employees/${id}`).then(r => r.data),
   update:      (id: string, body: any)        => api.put(`/employees/${id}`, body).then(r => r.data),
   deactivate:  (id: string)                   => api.delete(`/employees/${id}`).then(r => r.data),
+  approve:     (id: string)                   => api.patch(`/employees/${id}/approve`).then(r => r.data),
+  reject:      (id: string)                   => api.patch(`/employees/${id}/reject`).then(r => r.data),
   stats:       (id: string)                   => api.get(`/employees/${id}/stats`).then(r => r.data),
   tasks:       (id: string)                   => api.get(`/employees/${id}/tasks`).then(r => r.data),
   addTask:     (id: string, body: any)        => api.post(`/employees/${id}/tasks`, body).then(r => r.data),

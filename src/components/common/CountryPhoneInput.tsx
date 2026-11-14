@@ -64,6 +64,7 @@ export const CountryPhoneInput: React.FC<CountryPhoneInputProps> = ({
 }) => {
   const [isOpen, setIsOpen] = useState(false);
   const [search, setSearch] = useState('');
+  const [selectedCountry, setSelectedCountry] = useState<CountryCodeOption | null>(null);
   const buttonRef = useRef<HTMLButtonElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const [popoverPos, setPopoverPos] = useState<{ top: number; left: number }>({ top: 0, left: 0 });
@@ -72,17 +73,28 @@ export const CountryPhoneInput: React.FC<CountryPhoneInputProps> = ({
   const isDummyPhone = rawDigits.startsWith('00') || rawDigits === '0000000000';
   const effectiveDigits = isDummyPhone ? '' : rawDigits;
 
-  // Detect matching country code
+  // Detect matching country code if value had merged country code, otherwise use selectedCountry or default (+91 India)
   const currentOption = useMemo(() => {
-    if (!effectiveDigits) return COUNTRY_CODES[0]; // India +91 default
-    const sorted = [...COUNTRY_CODES].sort((a, b) => b.code.length - a.code.length);
-    const match = sorted.find(c => effectiveDigits.startsWith(c.code));
-    return match || COUNTRY_CODES[0];
-  }, [effectiveDigits]);
+    if (selectedCountry) return selectedCountry;
+    if (effectiveDigits.length > 10) {
+      const sorted = [...COUNTRY_CODES].sort((a, b) => b.code.length - a.code.length);
+      const match = sorted.find(c => effectiveDigits.startsWith(c.code));
+      if (match) return match;
+    }
+    return COUNTRY_CODES[0]; // India +91 default
+  }, [effectiveDigits, selectedCountry]);
 
-  const phoneDigits = effectiveDigits.startsWith(currentOption.code)
-    ? effectiveDigits.slice(currentOption.code.length)
-    : effectiveDigits;
+  // Strip country code if merged, and keep clean local digits (up to 10 digits)
+  const phoneDigits = useMemo(() => {
+    if (!effectiveDigits) return '';
+    if (effectiveDigits.length > 10) {
+      if (effectiveDigits.startsWith(currentOption.code)) {
+        return effectiveDigits.slice(currentOption.code.length);
+      }
+      return effectiveDigits.slice(-10);
+    }
+    return effectiveDigits;
+  }, [effectiveDigits, currentOption]);
 
   // Position popover on open
   useEffect(() => {
@@ -114,12 +126,12 @@ export const CountryPhoneInput: React.FC<CountryPhoneInputProps> = ({
   const handleSelectCountry = (c: CountryCodeOption) => {
     setIsOpen(false);
     setSearch('');
-    onChange(`${c.code}${phoneDigits}`);
+    setSelectedCountry(c);
   };
 
   const handlePhoneChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const newDigits = e.target.value.replace(/\D/g, '').slice(0, 10);
-    onChange(`${currentOption.code}${newDigits}`);
+    onChange(newDigits);
   };
 
   const filteredCountries = COUNTRY_CODES.filter(

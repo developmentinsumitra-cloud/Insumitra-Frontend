@@ -5,6 +5,8 @@ import { useLookupStore } from '@store/lookup.store';
 
 export interface LoginPayload     { email: string; password: string }
 export interface RegisterPayload  { tenantName: string; tenantSlug: string; email: string; password: string; firstName: string; lastName: string; phone?: string }
+export interface RegisterEmployeePayload { email: string; password: string; firstName: string; lastName: string; phone: string; designation?: string; department?: string; tenantId?: string }
+export interface ResetPasswordDirectPayload { email: string; phone?: string; newPassword: string }
 export interface ChangePassPayload { currentPassword: string; newPassword: string }
 
 export const authService = {
@@ -24,6 +26,16 @@ export const authService = {
   async register(payload: RegisterPayload) {
     const { data } = await api.post('/auth/register', payload);
     return data.data;
+  },
+
+  async registerEmployee(payload: RegisterEmployeePayload) {
+    const { data } = await api.post('/auth/register-employee', payload);
+    return data;
+  },
+
+  async resetPasswordDirect(payload: ResetPasswordDirectPayload) {
+    const { data } = await api.post('/auth/reset-password-direct', payload);
+    return data;
   },
 
   async changePassword(payload: ChangePassPayload) {

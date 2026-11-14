@@ -493,6 +493,8 @@ export function parseExtraNotes(notesText?: string | null): Record<string, any> 
     paymentDate: '',
     loanAmount: undefined as number | undefined,
     emiComment: '',
+    paymentComment: '',
+    loanComment: '',
     phcRequired: false,
     phcAmount: undefined as number | undefined,
     phcStatus: '',
@@ -654,9 +656,22 @@ export function parseExtraNotes(notesText?: string | null): Record<string, any> 
       res.firstInstallmentDate = line.replace(/^(1st|First) Installment Date:\s*/, '').trim();
       if (!res.firstPremiumDate) res.firstPremiumDate = res.firstInstallmentDate;
     } else if (line.startsWith('Payment Mode: ')) {
-      res.paymentMode = line.replace('Payment Mode: ', '').trim();
+      const pModeVal = line.replace('Payment Mode: ', '').trim();
+      if (pModeVal.includes(',')) {
+        res.paymentMode = pModeVal.split(',')[0].trim();
+        const dateMatch = pModeVal.match(/Date:\s*([^,\n\r]+)/);
+        if (dateMatch && dateMatch[1].trim() !== 'N/A') res.paymentDate = dateMatch[1].trim();
+        const refMatch = pModeVal.match(/Ref:\s*([^,\n\r]+)/);
+        if (refMatch && refMatch[1].trim() !== 'N/A') res.transactionRef = refMatch[1].trim();
+      } else {
+        res.paymentMode = pModeVal;
+      }
     } else if (line.startsWith('Payment Date: ')) {
       res.paymentDate = line.replace('Payment Date: ', '').trim();
+    } else if (line.startsWith('Payment Comment: ')) {
+      res.paymentComment = line.replace('Payment Comment: ', '').trim();
+    } else if (line.startsWith('Loan Comment: ')) {
+      res.loanComment = line.replace('Loan Comment: ', '').trim();
     } else if (line.startsWith('Loan Amount: ')) {
       res.loanAmount = Number(line.replace('Loan Amount: ', '').replace('₹', '').replace(/,/g, '').trim()) || undefined;
     } else if (line.startsWith('Installment Comment: ') || line.startsWith('EMI Comment: ')) {
@@ -800,6 +815,17 @@ export function parseExtraNotes(notesText?: string | null): Record<string, any> 
 
   if ((res.phcStatus === 'FULLY_UTILISED' || res.phcStatus === 'Fully Utilised') && (!res.phcUtilizedAmount || res.phcUtilizedAmount === 0) && res.phcAmount) {
     res.phcUtilizedAmount = res.phcAmount;
+  }
+
+  if (!res.emiCase) {
+    res.lastInstallmentDate = '';
+    res.firstInstallmentDate = '';
+    res.installmentAmount = undefined;
+    res.noOfInstallments = undefined;
+    res.emiGateway = '';
+    res.emiDate = '';
+    res.downpaymentAmount = undefined;
+    res.processingFee = undefined;
   }
 
   res.cleanNotes = cleanLines.join('\n').trim();
@@ -1110,6 +1136,9 @@ export default function Policies() {
     firmGst: '',
   });
 
+  // Installment Comment
+  const [emiComment, setEmiComment] = useState('');
+
   // Payment Mode & Loan Details
   const [paymentModeDetails, setPaymentModeDetails] = useState({
     paymentMode: 'ONLINE',
@@ -1120,6 +1149,8 @@ export default function Policies() {
     loanProvider: '',
     loanSanctionNo: '',
     loanEmi: '',
+    paymentComment: '',
+    loanComment: '',
   });
 
   // Connected Persons State
@@ -1446,11 +1477,17 @@ export default function Policies() {
         const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
         if (!firstSheet) throw new Error('The Excel file does not contain a worksheet');
         const csvContent = XLSX.utils.sheet_to_csv(firstSheet, { dateNF: 'YYYY-MM-DD' });
-        fileToUpload = new File([csvContent], file.name.replace(/\.[^/.]+$/, '.csv'), { type: 'text/csv' });
+        fileToUpload = new File(['\uFEFF' + csvContent], file.name.replace(/\.[^/.]+$/, '.csv'), { type: 'text/csv;charset=utf-8' });
       }
       const res = await policiesService.importCsv(fileToUpload);
-      toast.success(res.message || `Successfully imported policies!`, { id: toastId });
+      if (res.created === 0 && res.skipped && res.skipped.length > 0) {
+        toast.error(res.message || `No policies imported. Skipped: ${res.skipped.slice(0, 3).join(', ')}`, { id: toastId, duration: 8000 });
+      } else {
+        toast.success(res.message || `Successfully imported ${res.created} policies!`, { id: toastId });
+      }
       qc.invalidateQueries({ queryKey: ['policies'] });
+      qc.invalidateQueries({ queryKey: ['contacts'] });
+      qc.invalidateQueries({ queryKey: ['stats'] });
       if (fileInputRef.current) fileInputRef.current.value = '';
     } catch (err: any) {
       toast.error(err?.response?.data?.message || err?.message || 'Failed to import policies', { id: toastId });
@@ -1589,7 +1626,36 @@ export default function Policies() {
     return [];
   };
 
-  const rawPolicies = useMemo(() => getArrayData(data), [data]);
+  const rawPolicies = useMemo(() => {
+    const list = getArrayData(data);
+    if (user?.role === 'EMPLOYEE') {
+      const myIds = [user.id, (user as any)?.userId].filter(Boolean);
+      const myEmp = (employeeResults?.data || []).find((e: any) => e.userId === user.id || e.id === user.id || e.user?.id === user.id);
+      if (myEmp?.id) myIds.push(myEmp.id);
+      if (myEmp?.userId) myIds.push(myEmp.userId);
+
+      return list.filter((p: any) => {
+        const policyAssigneeIds = [
+          p.assignedEmployeeId,
+          p.assignedEmployee?.id,
+          p.assignedEmployee?.userId,
+          ...(Array.isArray(p.assignedEmployeeIds) ? p.assignedEmployeeIds : []),
+        ].filter(Boolean);
+
+        if (policyAssigneeIds.length > 0) {
+          return policyAssigneeIds.some((id: string) => myIds.includes(id));
+        }
+
+        const contactAssigneeIds = [
+          p.contact?.assignedEmployeeId,
+          ...(Array.isArray(p.contact?.assignedEmployeeIds) ? p.contact.assignedEmployeeIds : []),
+        ].filter(Boolean);
+
+        return contactAssigneeIds.some((id: string) => myIds.includes(id));
+      });
+    }
+    return list;
+  }, [data, user, employeeResults?.data]);
 
   // Client-side Filter Logic
   const filteredPolicies = useMemo(() => {
@@ -1883,7 +1949,16 @@ export default function Policies() {
 
     // Assigned To Filter
     if (appliedFilters.assignedTo) {
-      list = list.filter((p: any) => p.assignedEmployeeId === appliedFilters.assignedTo);
+      list = list.filter((p: any) => {
+        const target = appliedFilters.assignedTo;
+        const allEmpIds = [
+          p.assignedEmployeeId,
+          ...(Array.isArray(p.assignedEmployeeIds) ? p.assignedEmployeeIds : []),
+          p.contact?.assignedEmployeeId,
+          ...(Array.isArray(p.contact?.assignedEmployeeIds) ? p.contact.assignedEmployeeIds : []),
+        ].filter(Boolean);
+        return allEmpIds.includes(target);
+      });
     }
 
     // Installment Case Filter
@@ -2020,6 +2095,17 @@ export default function Policies() {
         return (row as any).policyTerm || '';
       }
       if (k === 'assignedTo' || k === 'renewAssign') {
+        const ids: string[] = [];
+        if (Array.isArray((row as any).assignedEmployeeIds)) ids.push(...(row as any).assignedEmployeeIds);
+        if (row.assignedEmployeeId) ids.push(row.assignedEmployeeId);
+        if (Array.isArray((row.contact as any)?.assignedEmployeeIds)) ids.push(...(row.contact as any).assignedEmployeeIds);
+        if ((row.contact as any)?.assignedEmployeeId) ids.push((row.contact as any).assignedEmployeeId);
+        const uniqueIds = Array.from(new Set(ids.filter(Boolean)));
+        const names = uniqueIds.map((id: string) => {
+          const emp = (employeeResults?.data || []).find((e: any) => e.userId === id || e.id === id || e.user?.id === id);
+          return emp ? `${emp.firstName || emp.employeeProfile?.firstName || ''} ${emp.lastName || emp.employeeProfile?.lastName || ''}`.trim() : '';
+        }).filter(Boolean);
+        if (names.length > 0) return names.join(', ');
         return row.assignedEmployee?.employeeProfile
           ? `${row.assignedEmployee.employeeProfile.firstName} ${row.assignedEmployee.employeeProfile.lastName || ''}`.trim()
           : ((row.assignedEmployee as any)?.firstName ? `${(row.assignedEmployee as any).firstName} ${(row.assignedEmployee as any).lastName || ''}`.trim() : '');
@@ -2040,19 +2126,24 @@ export default function Policies() {
         return extra.emiCase ? 'Yes' : 'No';
       }
       if (k === 'downpaymentAmount') {
+        if (!extra.emiCase) return null;
         return extra.downpaymentAmount != null ? Number(extra.downpaymentAmount) : null;
       }
       if (k === 'processingFee') {
+        if (!extra.emiCase) return null;
         return extra.processingFee != null ? Number(extra.processingFee) : null;
       }
       if (k === 'installmentAmount') {
+        if (!extra.emiCase) return null;
         const amt = extra.installmentAmount || extra.emiPremium;
         return amt != null ? Number(amt) : null;
       }
       if (k === 'noOfInstallments') {
+        if (!extra.emiCase) return null;
         return extra.noOfInstallments != null ? Number(extra.noOfInstallments) : ((row as any).noOfInstallments != null ? Number((row as any).noOfInstallments) : null);
       }
       if (k === 'lastInstallmentDate') {
+        if (!extra.emiCase) return '';
         return extra.lastInstallmentDate || extra.lastPremiumDate || row.lastPremiumDate || '';
       }
       if (k === 'nomineeDetails') {
@@ -2368,7 +2459,7 @@ export default function Policies() {
     })
   );
   const showLifeTermInstallmentFields = isLifeOrTerm && Boolean(watchEmiCase);
-  const showInstallmentAndYearlyFields = isLifeOrTerm || Boolean(watchEmiCase);
+  const showInstallmentAndYearlyFields = isLifeOrTerm && Boolean(watchEmiCase);
   const [durationYears, setDurationYears] = useState<number>(1);
   const [policyTerm, setPolicyTerm] = useState<string>('1 Year');
   const [insuredPerson, setInsuredPerson] = useState<string>('');
@@ -2738,6 +2829,26 @@ export default function Policies() {
     });
     setIsCustomPhcPersonManual(false);
     setKeepCreateOpen(false);
+    setEmiComment('');
+    setPaymentModeDetails({
+      paymentMode: 'ONLINE',
+      paymentDate: '',
+      transactionRef: '',
+      isLoanCase: false,
+      loanAmount: '',
+      loanProvider: '',
+      loanSanctionNo: '',
+      loanEmi: '',
+      paymentComment: '',
+      loanComment: '',
+    });
+    setPaymentAccount({
+      bankName: '',
+      ifscCode: '',
+      branch: '',
+      accountNo: '',
+      accountType: 'SAVINGS',
+    });
     if (returnRoute) {
       navigate(returnRoute, {
         replace: true,
@@ -2875,6 +2986,26 @@ export default function Policies() {
     setValue('noOfInstallments', extra.noOfInstallments || (p as any).noOfInstallments || undefined);
     setValue('lastInstallmentDate', extra.lastInstallmentDate || extra.lastPremiumDate || p.lastPremiumDate || '');
     setValue('lastPremiumDate', extra.lastPremiumDate || extra.lastInstallmentDate || p.lastPremiumDate || '');
+    setEmiComment(extra.emiComment || '');
+    setPaymentModeDetails({
+      paymentMode: extra.paymentMode || 'ONLINE',
+      paymentDate: extra.paymentDate || '',
+      transactionRef: extra.transactionRef || '',
+      isLoanCase: Boolean(extra.isLoanCase || (extra.loanAmount && Number(extra.loanAmount) > 0)),
+      loanAmount: extra.loanAmount != null ? String(extra.loanAmount) : '',
+      loanProvider: extra.loanProvider || '',
+      loanSanctionNo: extra.loanSanctionNo || '',
+      loanEmi: extra.loanEmi ? String(extra.loanEmi) : '',
+      paymentComment: extra.paymentComment || '',
+      loanComment: extra.loanComment || '',
+    });
+    setPaymentAccount({
+      bankName: extra.bankName || '',
+      ifscCode: extra.ifscCode || '',
+      branch: extra.branch || '',
+      accountNo: extra.accountNo || '',
+      accountType: extra.accountType || 'SAVINGS',
+    });
 
     if (extra.phcAmount || extra.phcStatus || extra.phcInsuredPerson || extra.phcStage || extra.phcUtilizedAmount !== undefined || extra.phcBookingDate || extra.phcAppointmentDate) {
       setPhcExtraDetails(prev => ({
@@ -3152,11 +3283,11 @@ export default function Policies() {
       endDate: nextYearStr,
       maturityDate: nextYearStr,
       firstPremiumDate: todayStr,
-      noOfInstallments: 1,
+      noOfInstallments: '',
       downpaymentAmount: 0,
       processingFee: 0,
       installmentAmount: 0,
-      lastInstallmentDate: todayStr,
+      lastInstallmentDate: '',
       lastPremiumDate: todayStr,
       emiCase: false,
       emiGateway: '',
@@ -3182,6 +3313,26 @@ export default function Policies() {
     setConnectedPersons([]);
     setPendingDocs([]);
     setCustomDropdownValues({});
+    setEmiComment('');
+    setPaymentModeDetails({
+      paymentMode: 'ONLINE',
+      paymentDate: '',
+      transactionRef: '',
+      isLoanCase: false,
+      loanAmount: '',
+      loanProvider: '',
+      loanSanctionNo: '',
+      loanEmi: '',
+      paymentComment: '',
+      loanComment: '',
+    });
+    setPaymentAccount({
+      bankName: '',
+      ifscCode: '',
+      branch: '',
+      accountNo: '',
+      accountType: 'SAVINGS',
+    });
     setEditTarget(null);
     setIsViewMode(false);
     setIsPremiumBreakdownCollapsed(false);
@@ -3416,10 +3567,43 @@ export default function Policies() {
         label: 'Assigned To',
         sortable: true,
         render: r => {
-          const empName = r.assignedEmployee?.employeeProfile
-            ? `${r.assignedEmployee.employeeProfile.firstName} ${r.assignedEmployee.employeeProfile.lastName}`
-            : ((r.assignedEmployee as any)?.firstName ? `${(r.assignedEmployee as any).firstName} ${(r.assignedEmployee as any).lastName || ''}` : '—');
-          return <span className="font-bold text-slate-800 text-sm">{empName}</span>;
+          const getEmpName = (empId?: string | null): string => {
+            if (!empId) return '';
+            const emp = (employeeResults?.data || []).find((e: any) => e.userId === empId || e.id === empId || e.user?.id === empId);
+            if (emp) {
+              const fn = emp.firstName || emp.employeeProfile?.firstName || '';
+              const ln = emp.lastName || emp.employeeProfile?.lastName || '';
+              return `${fn} ${ln}`.trim();
+            }
+            return '';
+          };
+
+          const ids: string[] = [];
+          if (Array.isArray((r as any).assignedEmployeeIds)) ids.push(...(r as any).assignedEmployeeIds);
+          if (r.assignedEmployeeId) ids.push(r.assignedEmployeeId);
+          if (Array.isArray((r.contact as any)?.assignedEmployeeIds)) ids.push(...(r.contact as any).assignedEmployeeIds);
+          if ((r.contact as any)?.assignedEmployeeId) ids.push((r.contact as any).assignedEmployeeId);
+          const uniqueIds = Array.from(new Set(ids.filter(Boolean)));
+
+          const names = uniqueIds.map(getEmpName).filter(Boolean);
+          if (names.length === 0) {
+            const direct = r.assignedEmployee?.employeeProfile
+              ? `${r.assignedEmployee.employeeProfile.firstName} ${r.assignedEmployee.employeeProfile.lastName}`
+              : ((r.assignedEmployee as any)?.firstName ? `${(r.assignedEmployee as any).firstName} ${(r.assignedEmployee as any).lastName || ''}` : '');
+            if (direct) names.push(direct.trim());
+          }
+
+          const display = names.join(', ') || '—';
+          return (
+            <span className="font-bold text-slate-800 text-sm">
+              {display}
+              {user?.role === 'OWNER' && uniqueIds.length > 1 && (
+                <span className="ml-1 text-[10px] font-extrabold text-blue-700">
+                  ({uniqueIds.length} employees)
+                </span>
+              )}
+            </span>
+          );
         }
       },
       {
@@ -3433,6 +3617,15 @@ export default function Policies() {
         label: '1st Year Premium Amount',
         sortable: true,
         render: r => {
+          const extra = parseExtraNotes(r.notes);
+          const categories = [
+            extra.planCategory,
+            r.plan?.category,
+            extra.policyType,
+            (r as any).policyCategory,
+            (r as any).policyType,
+          ].filter(Boolean).join(' ').toUpperCase();
+          if (categories.includes('HEALTH')) return null;
           const val = (r as any).firstYearPremium ? `₹${Number((r as any).firstYearPremium).toLocaleString('en-IN')}` : (r.premiumAmount ? `₹${Number(r.premiumAmount).toLocaleString('en-IN')}` : '—');
           return <span className="font-extrabold text-slate-900 text-sm">{val}</span>;
         }
@@ -3442,6 +3635,15 @@ export default function Policies() {
         label: '2nd Year Onwards Premium Amount',
         sortable: true,
         render: r => {
+          const extra = parseExtraNotes(r.notes);
+          const categories = [
+            extra.planCategory,
+            r.plan?.category,
+            extra.policyType,
+            (r as any).policyCategory,
+            (r as any).policyType,
+          ].filter(Boolean).join(' ').toUpperCase();
+          if (categories.includes('HEALTH')) return null;
           const val = (r as any).secondYearPremium ? `₹${Number((r as any).secondYearPremium).toLocaleString('en-IN')}` : (r.premiumAmount ? `₹${Number(r.premiumAmount).toLocaleString('en-IN')}` : '—');
           return <span className="font-extrabold text-slate-900 text-sm">{val}</span>;
         }
@@ -3471,6 +3673,7 @@ export default function Policies() {
         sortable: true,
         render: r => {
           const extra = parseExtraNotes(r.notes);
+          if (!extra.emiCase) return <span className="font-bold text-slate-800 text-sm">—</span>;
           return <span className="font-bold text-slate-800 text-sm">{extra.downpaymentAmount ? `₹${Number(extra.downpaymentAmount).toLocaleString('en-IN')}` : '—'}</span>;
         }
       },
@@ -3480,6 +3683,7 @@ export default function Policies() {
         sortable: true,
         render: r => {
           const extra = parseExtraNotes(r.notes);
+          if (!extra.emiCase) return <span className="font-bold text-slate-800 text-sm">—</span>;
           return <span className="font-bold text-slate-800 text-sm">{extra.processingFee ? `₹${Number(extra.processingFee).toLocaleString('en-IN')}` : '—'}</span>;
         }
       },
@@ -3489,6 +3693,7 @@ export default function Policies() {
         sortable: true,
         render: r => {
           const extra = parseExtraNotes(r.notes);
+          if (!extra.emiCase) return <span className="font-bold text-slate-800 text-sm">—</span>;
           const amt = extra.installmentAmount || extra.emiPremium;
           return <span className="font-bold text-slate-800 text-sm">{amt ? `₹${Number(amt).toLocaleString('en-IN')}` : '—'}</span>;
         }
@@ -3499,6 +3704,7 @@ export default function Policies() {
         sortable: true,
         render: r => {
           const extra = parseExtraNotes(r.notes);
+          if (!extra.emiCase) return <span className="font-bold text-slate-800 text-sm">—</span>;
           return <span className="font-bold text-slate-800 text-sm">{extra.noOfInstallments || (r as any).noOfInstallments || '—'}</span>;
         }
       },
@@ -3508,6 +3714,7 @@ export default function Policies() {
         sortable: true,
         render: r => {
           const extra = parseExtraNotes(r.notes);
+          if (!extra.emiCase) return <span className="font-bold text-slate-800 text-sm">—</span>;
           const d = extra.lastInstallmentDate || extra.lastPremiumDate || r.lastPremiumDate;
           return <span className="font-bold text-slate-800 text-sm">{d ? d.slice(0, 10) : '—'}</span>;
         }
@@ -3855,26 +4062,6 @@ export default function Policies() {
       if (body.firstPremiumDate) extraNotes += `\nFirst Premium Date: ${body.firstPremiumDate}`;
       if (body.premiumPaymentPeriod) extraNotes += `\nPremium Payment Period: ${body.premiumPaymentPeriod} Years`;
       if (finalLastInstDate) extraNotes += `\nLast Premium Date: ${finalLastInstDate}`;
-      const finalDownpayment = body.downpaymentAmount !== undefined && body.downpaymentAmount !== null && (body.downpaymentAmount as any) !== ''
-        ? body.downpaymentAmount
-        : watch('downpaymentAmount');
-      if (finalDownpayment !== undefined && finalDownpayment !== null && (finalDownpayment as any) !== '' && Number(finalDownpayment) > 0) {
-        extraNotes += `\nDownpayment Amount: ₹${finalDownpayment}`;
-      }
-      const finalProcessingFee = body.processingFee !== undefined && body.processingFee !== null && (body.processingFee as any) !== ''
-        ? body.processingFee
-        : watch('processingFee');
-      if (finalProcessingFee !== undefined && finalProcessingFee !== null && (finalProcessingFee as any) !== '' && Number(finalProcessingFee) > 0) {
-        extraNotes += `\nProcessing Fee (incl. GST): ₹${finalProcessingFee}`;
-      }
-      const finalInstAmt = body.installmentAmount || body.emiPremium || watch('installmentAmount') || watch('emiPremium');
-      if (finalInstAmt) {
-        extraNotes += `\nInstallment Amount: ₹${finalInstAmt}`;
-      }
-      if (finalNoOfInst) extraNotes += `\nNo. of Installments: ${finalNoOfInst}`;
-      if (finalLastInstDate) {
-        extraNotes += `\nLast Installment Date: ${finalLastInstDate}`;
-      }
       const formVals = getValues ? getValues() : ({} as any);
       const finalEmiCase = body.emiCase !== undefined ? body.emiCase : (formVals.emiCase !== undefined ? formVals.emiCase : watchEmiCase);
       const finalEmiGateway = (body.emiGateway || formVals.emiGateway || watchEmiGateway || '').trim();
@@ -3882,6 +4069,26 @@ export default function Policies() {
       const finalEmiDate = normalizeInstallmentDay(rawEmiDate);
 
       if (finalEmiCase) {
+        const finalDownpayment = body.downpaymentAmount !== undefined && body.downpaymentAmount !== null && (body.downpaymentAmount as any) !== ''
+          ? body.downpaymentAmount
+          : watch('downpaymentAmount');
+        if (finalDownpayment !== undefined && finalDownpayment !== null && (finalDownpayment as any) !== '' && Number(finalDownpayment) > 0) {
+          extraNotes += `\nDownpayment Amount: ₹${finalDownpayment}`;
+        }
+        const finalProcessingFee = body.processingFee !== undefined && body.processingFee !== null && (body.processingFee as any) !== ''
+          ? body.processingFee
+          : watch('processingFee');
+        if (finalProcessingFee !== undefined && finalProcessingFee !== null && (finalProcessingFee as any) !== '' && Number(finalProcessingFee) > 0) {
+          extraNotes += `\nProcessing Fee (incl. GST): ₹${finalProcessingFee}`;
+        }
+        const finalInstAmt = body.installmentAmount || body.emiPremium || watch('installmentAmount') || watch('emiPremium');
+        if (finalInstAmt) {
+          extraNotes += `\nInstallment Amount: ₹${finalInstAmt}`;
+        }
+        if (finalNoOfInst) extraNotes += `\nNo. of Installments: ${finalNoOfInst}`;
+        if (finalLastInstDate) {
+          extraNotes += `\nLast Installment Date: ${finalLastInstDate}`;
+        }
         const emiParts: string[] = [];
         if (finalEmiGateway && finalEmiGateway.toUpperCase() !== 'N/A') emiParts.push(`Gateway: ${finalEmiGateway}`);
         if (finalEmiDate) emiParts.push(`Date: ${finalEmiDate}`);
@@ -3889,11 +4096,40 @@ export default function Policies() {
         extraNotes += `\nEMI Case: Yes${emiParts.length > 0 ? ` (${emiParts.join(', ')})` : ''}`;
         if (finalEmiGateway && finalEmiGateway.toUpperCase() !== 'N/A') extraNotes += `\nInstallment Gateway: ${finalEmiGateway}`;
         if (finalEmiDate) extraNotes += `\nInstallment Date: ${finalEmiDate}`;
-      } else if (finalEmiCase === false) {
+        if (emiComment) extraNotes += `\nInstallment Comment: ${emiComment}`;
+      } else {
         extraNotes += `\nEMI Case: No`;
       }
-      if (finalEmiDate && !finalEmiCase) {
-        extraNotes += `\nInstallment Date: ${finalEmiDate}`;
+      if (paymentModeDetails.paymentMode) {
+        let pStr = paymentModeDetails.paymentMode;
+        if (paymentModeDetails.paymentDate && paymentModeDetails.paymentDate !== 'N/A') pStr += `, Date: ${paymentModeDetails.paymentDate}`;
+        if (paymentModeDetails.transactionRef && paymentModeDetails.transactionRef !== 'N/A') pStr += `, Ref: ${paymentModeDetails.transactionRef}`;
+        extraNotes += `\nPayment Mode: ${pStr}`;
+      }
+      if (paymentModeDetails.paymentComment) {
+        extraNotes += `\nPayment Comment: ${paymentModeDetails.paymentComment}`;
+      }
+      if (paymentModeDetails.isLoanCase) {
+        const parts = [
+          paymentModeDetails.loanAmount ? `Amount: ₹${paymentModeDetails.loanAmount}` : null,
+          paymentModeDetails.loanProvider && paymentModeDetails.loanProvider !== 'N/A' ? `Provider: ${paymentModeDetails.loanProvider}` : null,
+          paymentModeDetails.loanSanctionNo && paymentModeDetails.loanSanctionNo !== 'N/A' ? `Sanction No: ${paymentModeDetails.loanSanctionNo}` : null,
+          paymentModeDetails.loanEmi ? `EMI: ₹${paymentModeDetails.loanEmi}` : null,
+        ].filter(Boolean);
+        if (parts.length > 0) extraNotes += `\nLoan Case: ${parts.join(', ')}`;
+        if (paymentModeDetails.loanComment) {
+          extraNotes += `\nLoan Comment: ${paymentModeDetails.loanComment}`;
+        }
+      }
+      if (paymentAccount.bankName || paymentAccount.ifscCode || paymentAccount.accountNo) {
+        const parts = [
+          paymentAccount.bankName && paymentAccount.bankName !== 'N/A' ? `Bank: ${paymentAccount.bankName}` : null,
+          paymentAccount.ifscCode && paymentAccount.ifscCode !== 'N/A' ? `IFSC: ${paymentAccount.ifscCode}` : null,
+          paymentAccount.branch && paymentAccount.branch !== 'N/A' ? `Branch: ${paymentAccount.branch}` : null,
+          paymentAccount.accountNo && paymentAccount.accountNo !== 'N/A' ? `A/C: ${paymentAccount.accountNo}` : null,
+          paymentAccount.accountType && paymentAccount.accountType !== 'N/A' ? `Type: ${paymentAccount.accountType}` : null,
+        ].filter(Boolean);
+        if (parts.length > 0) extraNotes += `\nBank Details: ${parts.join(', ')}`;
       }
       if (body.phcRequired || watchPhcRequired) {
         const isCompleted = phcExtraDetails.phcStage === 'PROCESS_COMPLETED' ||
@@ -5303,21 +5539,6 @@ export default function Policies() {
                           />
                         </div>
 
-                        {/* Policy Status */}
-                        <div>
-                          <label className="label text-[10px] font-extrabold text-slate-900 uppercase tracking-wider block mb-1">
-                            Policy Status <span className="text-red-600 font-black text-sm ml-0.5" style={{ color: '#dc2626' }}>*</span>
-                          </label>
-                          <CustomSelect
-                            value={normalizeStatusVal(watch('status'))}
-                            onChange={val => {
-                              setValue('status', normalizeStatusVal(val) as any, { shouldValidate: true, shouldDirty: true });
-                            }}
-                            placeholder="Select Policy Status"
-                            options={policyStatusOptions}
-                          />
-                        </div>
-
                         {/* Custom Dropdown Menus configured in Operations */}
                         {customPolicyDropdowns.map(customDrop => {
                           const currentVal = customDropdownValues[customDrop.name] || '';
@@ -5930,6 +6151,13 @@ export default function Policies() {
                                 setValue('emiCase', isYes);
                                 if (!isYes) {
                                   setValue('paymentFrequency', 'YEARLY', { shouldValidate: true, shouldDirty: true });
+                                  setValue('lastInstallmentDate', '');
+                                  setValue('noOfInstallments', '' as any);
+                                  setValue('installmentAmount', 0 as any);
+                                  setValue('downpaymentAmount', 0 as any);
+                                  setValue('processingFee', 0 as any);
+                                  setValue('emiDate', '');
+                                  setValue('emiGateway', '');
                                 }
                               }}
                               options={[
@@ -6124,6 +6352,18 @@ export default function Policies() {
                                 placeholder="e.g. 500"
                               />
                             </div>
+                            <div>
+                              <label className="label text-[10px] font-extrabold text-blue-700 uppercase tracking-wider block mb-1">
+                                Comment
+                              </label>
+                              <input
+                                type="text"
+                                value={emiComment}
+                                onChange={(e) => setEmiComment(e.target.value)}
+                                className="input w-full h-10 text-xs rounded-xl bg-white border border-blue-200"
+                                placeholder="Installment comment / remarks"
+                              />
+                            </div>
                           </div>
                         )}
                       </div>
@@ -6207,6 +6447,19 @@ export default function Policies() {
                               ]}
                             />
                           </div>
+
+                          <div className="col-span-1 md:col-span-2">
+                            <label className="label text-[10px] font-extrabold text-slate-900 uppercase tracking-wider block mb-1">
+                              Comment
+                            </label>
+                            <input
+                              type="text"
+                              value={paymentModeDetails.paymentComment}
+                              onChange={e => setPaymentModeDetails(p => ({ ...p, paymentComment: e.target.value }))}
+                              className="input w-full h-10 text-xs rounded-xl bg-white border border-slate-200 focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
+                              placeholder="Payment comment / remarks"
+                            />
+                          </div>
                         </div>
 
                         {paymentModeDetails.isLoanCase && (
@@ -6249,6 +6502,18 @@ export default function Policies() {
                                 onChange={e => setPaymentModeDetails(p => ({ ...p, loanEmi: e.target.value }))}
                                 className="input w-full h-10 text-xs rounded-xl bg-white border border-purple-200"
                                 placeholder="EMI Amount"
+                              />
+                            </div>
+                            <div className="col-span-1 md:col-span-4">
+                              <label className="label text-[10px] font-extrabold text-purple-800 uppercase tracking-wider block mb-1">
+                                Comment
+                              </label>
+                              <input
+                                type="text"
+                                value={paymentModeDetails.loanComment}
+                                onChange={e => setPaymentModeDetails(p => ({ ...p, loanComment: e.target.value }))}
+                                className="input w-full h-10 text-xs rounded-xl bg-white border border-purple-200"
+                                placeholder="Loan comment / remarks"
                               />
                             </div>
                           </div>

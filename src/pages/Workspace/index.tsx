@@ -205,16 +205,9 @@ export default function Workspace() {
   const employeesList = (employeesRes?.data?.data || employeesRes?.data || []) as any[];
   const selectedEmployeeObj = employeesList.find((e: any) => (e.user?.id || e.userId || e.id) === selectedEmployeeUserId);
 
-  const defaultMockCounts = { leads: 24, policies: 18, claims: 4, contacts: 36 };
-  const defaultMockTarget = { monthlyTarget: 500000, progress: 382000, percentage: 76, callsTarget: 25, callsProgress: 18, visitsTarget: 5, visitsProgress: 3 };
-
   const activeWorkspaceData = selectedEmployeeUserId ? (selectedEmpWsRes?.data || selectedEmpWsRes) : workspaceData;
-  const activeCounts = activeWorkspaceData?.counts && Object.values(activeWorkspaceData.counts).some((v: any) => Number(v) > 0)
-    ? activeWorkspaceData.counts
-    : (workspaceData?.counts && Object.values(workspaceData.counts).some((v: any) => Number(v) > 0) ? workspaceData.counts : defaultMockCounts);
-  const activeTarget = activeWorkspaceData?.target && activeWorkspaceData.target.monthlyTarget > 0
-    ? activeWorkspaceData.target
-    : (workspaceData?.target && workspaceData.target.monthlyTarget > 0 ? workspaceData.target : defaultMockTarget);
+  const activeCounts = activeWorkspaceData?.counts ?? workspaceData?.counts ?? { leads: 0, policies: 0, claims: 0, contacts: 0 };
+  const activeTarget = activeWorkspaceData?.target ?? workspaceData?.target ?? { monthlyTarget: 0, progress: 0, percentage: 0, baseSalary: 0, bonusPlanned: 0, callsTarget: 0, visitsTarget: 0, callsProgress: 0, visitsProgress: 0 };
   const activeTasks = activeWorkspaceData?.tasks || (workspaceData?.tasks || []);
   const activeRecentLogs = activeWorkspaceData?.recentLogs || (workspaceData?.recentLogs || []);
   const activeLogToday = activeWorkspaceData?.dailyLog;
@@ -273,7 +266,7 @@ export default function Workspace() {
       />
 
       {/* Admin Select Employee Modal / Modal List */}
-      {isEmployeeModalOpen && (
+      {isEmployeeModalOpen && (user?.role === 'OWNER' || user?.role === 'SUPERADMIN') && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[9999] flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl p-6 max-w-md w-full shadow-2xl border border-gray-100 space-y-4">
             <div className="flex items-center justify-between border-b border-gray-100 pb-3">
@@ -349,24 +342,26 @@ export default function Workspace() {
           <DollarSign className="w-4 h-4" /> Commissions
         </button>
 
-        {/* "View Employee Workspace" Button Next to Tabs */}
-        <div className="shrink-0 whitespace-nowrap ml-auto flex items-center gap-2">
-          {selectedEmployeeUserId ? (
-            <button
-              onClick={() => setSearchParams({})}
-              className="flex items-center gap-1.5 px-3 py-2 bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-300 rounded-xl text-xs font-bold transition-all cursor-pointer shadow-sm shrink-0 whitespace-nowrap"
-            >
-              <X className="w-4 h-4 text-amber-700" /> Clear Filter
-            </button>
-          ) : (
-            <button
-              onClick={() => setIsEmployeeModalOpen(!isEmployeeModalOpen)}
-              className="flex items-center gap-1.5 px-3 sm:px-3.5 py-2 bg-primary-50 hover:bg-primary-100 text-primary-700 border border-primary-200 rounded-xl text-xs font-bold transition-all cursor-pointer shadow-sm shrink-0 whitespace-nowrap"
-            >
-              <Users className="w-4 h-4 text-primary-600" /> View Employee <ChevronDown className="w-3.5 h-3.5" />
-            </button>
-          )}
-        </div>
+        {/* "View Employee Workspace" Button Next to Tabs (Owners / Superadmins only) */}
+        {(user?.role === 'OWNER' || user?.role === 'SUPERADMIN') && (
+          <div className="shrink-0 whitespace-nowrap ml-auto flex items-center gap-2">
+            {selectedEmployeeUserId ? (
+              <button
+                onClick={() => setSearchParams({})}
+                className="flex items-center gap-1.5 px-3 py-2 bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-300 rounded-xl text-xs font-bold transition-all cursor-pointer shadow-sm shrink-0 whitespace-nowrap"
+              >
+                <X className="w-4 h-4 text-amber-700" /> Clear Filter
+              </button>
+            ) : (
+              <button
+                onClick={() => setIsEmployeeModalOpen(!isEmployeeModalOpen)}
+                className="flex items-center gap-1.5 px-3 sm:px-3.5 py-2 bg-primary-50 hover:bg-primary-100 text-primary-700 border border-primary-200 rounded-xl text-xs font-bold transition-all cursor-pointer shadow-sm shrink-0 whitespace-nowrap"
+              >
+                <Users className="w-4 h-4 text-primary-600" /> View Employee <ChevronDown className="w-3.5 h-3.5" />
+              </button>
+            )}
+          </div>
+        )}
       </div>
 
       {/* COMMISSIONS */}

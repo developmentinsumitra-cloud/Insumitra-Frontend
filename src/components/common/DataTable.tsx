@@ -75,9 +75,9 @@ export default function DataTable<T>({
           {/* ── Header ────────────────────────────────────────────────── */}
           <thead className={scrollAreaHeight ? 'sticky top-0 z-10' : undefined}>
             <tr className="bg-gradient-to-r from-slate-100/90 via-slate-50 to-slate-100/90 border-b border-slate-200/80">
-              {columns.map(col => (
+              {columns.map((col, cIdx) => (
                 <th
-                  key={String(col.key)}
+                  key={`${String(col.key)}_${col.label || cIdx}_${cIdx}`}
                   className={clsx(
                     'px-3 sm:px-4 py-2.5 text-left text-xs font-black uppercase tracking-wider border border-slate-200/80',
                     'text-slate-500 whitespace-normal sm:whitespace-nowrap min-w-[100px] sm:min-w-0 select-none',
@@ -109,8 +109,8 @@ export default function DataTable<T>({
             {loading
               ? Array.from({ length: 5 }).map((_, i) => (
                   <tr key={i} className="even:bg-slate-50/30">
-                    {columns.map(col => (
-                      <td key={String(col.key)} className="px-3 py-2.5">
+                    {columns.map((col, cIdx) => (
+                      <td key={`${String(col.key)}_${col.label || cIdx}_${cIdx}`} className="px-3 py-2.5">
                         <div
                           className="h-3.5 rounded-full animate-pulse bg-slate-100"
                           style={{
@@ -146,9 +146,9 @@ export default function DataTable<T>({
                       : '',
                   )}
                 >
-                  {columns.map(col => (
+                  {columns.map((col, cIdx) => (
                     <td
-                      key={String(col.key)}
+                      key={`${String(col.key)}_${col.label || cIdx}_${cIdx}`}
                       className={clsx('px-3 sm:px-4 py-2.5 text-slate-700 align-middle text-sm font-medium border border-slate-200/80', col.className)}
                     >
                       {col.render ? col.render(row) : String((row as any)[col.key] ?? '')}

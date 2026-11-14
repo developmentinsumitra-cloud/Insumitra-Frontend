@@ -25,6 +25,7 @@ interface ClaimPolicyDetailsTabProps {
   policyId?: string;
   contact?: any;
   claimId?: string;
+  claim?: any;
   onGoToClaimTab?: () => void;
 }
 
@@ -33,6 +34,7 @@ export default function ClaimPolicyDetailsTab({
   policyId,
   contact: initialContact,
   claimId,
+  claim,
   onGoToClaimTab,
 }: ClaimPolicyDetailsTabProps) {
   const targetId = policyId || initialPolicy?.id;
@@ -260,6 +262,7 @@ export default function ClaimPolicyDetailsTab({
                   returnPayload: {
                     claimId: currentClaimId,
                     tab: 'Policy Details',
+                    claim,
                   },
                   from: 'claims',
                 }}

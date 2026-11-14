@@ -35,6 +35,7 @@ export interface Employee {
     }[];
   };
   designation?: string; department?: string; phone?: string; isActive: boolean;
+  approvalStatus?: 'PENDING' | 'APPROVED' | 'REJECTED' | string;
   dateOfJoining?: string; dateOfBirth?: string; gender?: string;
   baseSalary?: number; bonusPlanned?: number; monthlyTarget?: number;
   bankName?: string; bankAccountNumber?: string; bankIfscCode?: string;
@@ -68,7 +69,7 @@ const createSchema = z.object({
 });
 type CreateForm = z.infer<typeof createSchema>;
 
-type TabKey = 'personal' | 'job' | 'targets' | 'bank';
+type TabKey = 'personal' | 'job' | 'bank';
 
 const TABS: { id: TabKey; label: string; stepNumber: number; icon: typeof User; fields: (keyof CreateForm)[] }[] = [
   { 
@@ -86,16 +87,9 @@ const TABS: { id: TabKey; label: string; stepNumber: number; icon: typeof User; 
     fields: ['designation', 'department', 'dateOfJoining'] 
   },
   { 
-    id: 'targets', 
-    label: 'Targets & Pay', 
-    stepNumber: 3, 
-    icon: Target, 
-    fields: ['monthlyTarget', 'callsTarget', 'visitsTarget', 'baseSalary', 'bonusPlanned'] 
-  },
-  { 
     id: 'bank', 
     label: 'Bank & Settlement', 
-    stepNumber: 4, 
+    stepNumber: 3, 
     icon: Landmark, 
     fields: ['bankName', 'bankAccountNumber', 'bankIfscCode', 'bankBranch', 'bankAccountType'] 
   },
@@ -607,44 +601,7 @@ export default function EmployeesLayout() {
               </div>
             )}
 
-            {/* ── TAB 3: Targets & Compensation ────────────────────────────── */}
-            {activeTab === 'targets' && (
-              <div className="space-y-4 animate-fadeIn">
-                <div className="p-3 bg-purple-50/60 rounded-xl border border-purple-100 flex items-start gap-2.5">
-                  <Target className="w-5 h-5 text-purple-600 shrink-0 mt-0.5" />
-                  <div className="text-xs text-slate-600">
-                    <p className="font-bold text-purple-900">Targets &amp; Performance Quotas</p>
-                    <p>Set baseline quotas for calls, proposals, monthly sales target, and salary package commitments.</p>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5">
-                  <div className="sm:col-span-3 bg-white p-3.5 rounded-xl border border-purple-200/80 shadow-2xs">
-                    <label className="label font-extrabold text-purple-900">Monthly Sales Target (₹)</label>
-                    <input {...register('monthlyTarget')} type="number" className="input text-base font-black text-purple-700" placeholder="e.g. 500000" />
-                    <p className="text-[11px] text-slate-400 mt-1">Calculates attainment % in Employee Targets dashboard</p>
-                  </div>
-                  <div>
-                    <label className="label font-bold text-slate-700">Daily Calls Target</label>
-                    <input {...register('callsTarget')} type="number" className="input font-bold" placeholder="e.g. 30" />
-                  </div>
-                  <div>
-                    <label className="label font-bold text-slate-700">Daily Proposals / Visits Target</label>
-                    <input {...register('visitsTarget')} type="number" className="input font-bold" placeholder="e.g. 5" />
-                  </div>
-                  <div>
-                    <label className="label font-bold text-slate-700">Base Salary (₹ / month)</label>
-                    <input {...register('baseSalary')} type="number" className="input font-bold" placeholder="e.g. 45000" />
-                  </div>
-                  <div className="sm:col-span-3">
-                    <label className="label font-bold text-slate-700">Planned Monthly Performance Bonus (₹)</label>
-                    <input {...register('bonusPlanned')} type="number" className="input font-bold" placeholder="e.g. 15000" />
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* ── TAB 4: Bank & Settlement ─────────────────────────────────── */}
+            {/* ── TAB 3: Bank & Settlement ─────────────────────────────────── */}
             {activeTab === 'bank' && (
               <div className="space-y-4 animate-fadeIn">
                 <div className="p-3 bg-emerald-50/50 rounded-xl border border-emerald-100 flex items-start gap-2.5">

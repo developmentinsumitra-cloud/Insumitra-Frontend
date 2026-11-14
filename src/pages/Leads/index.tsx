@@ -893,12 +893,14 @@ export default function Leads() {
         .map((t: string) => t.replace('med:', ''));
 
       const relRaw = (r.relationshipType || 'OTHER').toUpperCase();
+      const isDep = !!(c?.isDependent ?? r.isDependent);
+      const depPhone = isDep ? (c?.dependentNo || r?.dependentNo || contact?.phone || '') : '';
       const phoneVal = (c?.phone && !c.phone.startsWith('00') && c.phone !== '0000000000')
         ? c.phone
-        : (r?.phone && !r.phone.startsWith('00') && r.phone !== '0000000000' ? r.phone : '');
+        : (r?.phone && !r.phone.startsWith('00') && r.phone !== '0000000000' ? r.phone : depPhone);
       const altPhoneVal = (c?.alternatePhone && !c.alternatePhone.startsWith('00') && c.alternatePhone !== '0000000000')
         ? c.alternatePhone
-        : (r?.alternatePhone && !r.alternatePhone.startsWith('00') && r.alternatePhone !== '0000000000' ? r.alternatePhone : '');
+        : (r?.alternatePhone && !r.alternatePhone.startsWith('00') && r.alternatePhone !== '0000000000' ? r.alternatePhone : (isDep ? phoneVal : ''));
 
       result.push({
         id: r.id,
@@ -912,7 +914,11 @@ export default function Leads() {
         dateOfBirth: rawDob,
         gender: c?.gender || '',
         whatsapp: phoneVal,
+        whatsappNumber: phoneVal,
+        phone: phoneVal,
+        contactNo: phoneVal,
         callingNumber: altPhoneVal,
+        alternatePhone: altPhoneVal,
         city: c?.addresses?.[0]?.city || c?.city || '',
         state: c?.addresses?.[0]?.state || c?.state || '',
         streetAddress: c?.addresses?.[0]?.line1 || c?.streetAddress || '',
@@ -942,8 +948,9 @@ export default function Leads() {
         medicalHistoryDetails: c?.medicalHistoryDetails || '',
         surgeryDetails: c?.surgeryDetails || '',
         prescriptionDetails: c?.prescriptionDetails || '',
-        isDependent: !!(c?.isDependent ?? r.isDependent),
-        dependentNo: c?.dependentNo || '',
+        isDependent: isDep,
+        guardianWhatsapp: c?.dependentNo || r?.dependentNo || (isDep ? depPhone : ''),
+        dependentNo: c?.dependentNo || r?.dependentNo || (isDep ? depPhone : ''),
       });
     });
 
@@ -1085,33 +1092,42 @@ export default function Leads() {
       const fullFamName = `${famFirst} ${famMiddle} ${famLast}`.replace(/\s+/g, ' ').trim();
       if (!fullFamName) return;
 
-      const rawFamPhone = (fam.whatsapp || fam.whatsappNumber || fam.phone || fam.contactNo || '').replace(/\D/g, '');
+      const rawMainPhone = (personalFields.whatsappNumber || personalFields.callingNumber || loadedContact?.phone || '').replace(/\D/g, '');
+      const cleanMainPhone = rawMainPhone.length > 10 ? rawMainPhone.slice(-10) : rawMainPhone;
+
+      const rawFamPhone = (fam.whatsapp || fam.whatsappNumber || fam.phone || fam.contactNo || (fam.isDependent ? cleanMainPhone : '')).replace(/\D/g, '');
       const cleanFamPhone = rawFamPhone.length > 10 ? rawFamPhone.slice(-10) : rawFamPhone;
-      const validFamPhone = (cleanFamPhone.length === 10 && !cleanFamPhone.startsWith('00') && cleanFamPhone !== '0000000000')
+      let validFamPhone = (cleanFamPhone.length === 10 && !cleanFamPhone.startsWith('00') && cleanFamPhone !== '0000000000')
         ? cleanFamPhone
         : (rawFamPhone.length >= 7 && !rawFamPhone.startsWith('00') && rawFamPhone !== '0000000000' ? rawFamPhone : (rawFamPhone || undefined));
 
-      const rawFamCall = (fam.callingNumber || fam.alternatePhone || '').replace(/\D/g, '');
+      if (fam.isDependent && (!validFamPhone || validFamPhone.startsWith('00') || validFamPhone === '0000000000')) {
+        validFamPhone = cleanMainPhone || undefined;
+      }
+
+      const rawFamCall = (fam.callingNumber || fam.alternatePhone || (fam.isDependent ? (validFamPhone || cleanMainPhone) : '')).replace(/\D/g, '');
       const cleanFamCall = rawFamCall.length > 10 ? rawFamCall.slice(-10) : rawFamCall;
-      const validFamCall = (cleanFamCall.length === 10 && !cleanFamCall.startsWith('00') && cleanFamCall !== '0000000000')
+      let validFamCall = (cleanFamCall.length === 10 && !cleanFamCall.startsWith('00') && cleanFamCall !== '0000000000')
         ? cleanFamCall
         : (rawFamCall.length >= 7 && !rawFamCall.startsWith('00') && rawFamCall !== '0000000000' ? rawFamCall : (rawFamCall || undefined));
       const relType = fam.relation ? fam.relation.toUpperCase().replace(/\s+/g, '_') : 'OTHER';
       const famIsoDob = toSafeIsoString(fam.dob || fam.dateOfBirth);
 
+      const depNo = fam.guardianWhatsapp || fam.dependentNo || (fam.isDependent ? (validFamPhone || cleanMainPhone) : undefined);
+
       const famPayload: any = {
         firstName: famFirst,
         middleName: famMiddle || undefined,
         lastName: famLast,
-        phone: validFamPhone || '',
-        alternatePhone: validFamCall || undefined,
+        phone: validFamPhone || (fam.isDependent ? cleanMainPhone : '') || '',
+        alternatePhone: validFamCall || (fam.isDependent ? (validFamPhone || cleanMainPhone) : undefined),
         email: fam.email ? fam.email.trim() : undefined,
         dateOfBirth: famIsoDob,
         gender: fam.gender || undefined,
         birthPlace: fam.birthPlace ? fam.birthPlace.trim() : undefined,
         motherName: fam.motherName ? fam.motherName.trim() : undefined,
         isDependent: !!fam.isDependent,
-        dependentNo: fam.guardianWhatsapp || fam.dependentNo || undefined,
+        dependentNo: depNo || undefined,
         panNumber: fam.pan || fam.panNumber || undefined,
         aadhaarNumber: fam.aadhaarNumber || undefined,
         annualIncome: fam.annualIncome ? Number(fam.annualIncome) : undefined,
@@ -5441,9 +5457,18 @@ export default function Leads() {
                         }
                         const dobVal = member.dob || member.dateOfBirth || '';
                         const ageVal = member.age || (dobVal ? calculateAge(dobVal) : '');
-                        const phoneVal = (member.whatsapp && !member.whatsapp.startsWith('00') && member.whatsapp !== '0000000000')
+                        const mainPersonPhone = (personalFields.whatsappNumber || personalFields.callingNumber || loadedContact?.phone || '').trim();
+                        let phoneVal = (member.whatsapp && !member.whatsapp.startsWith('00') && member.whatsapp !== '0000000000')
                           ? member.whatsapp
                           : (member.whatsappNumber || member.phone || member.contactNo || member.callingNumber || member.alternatePhone || '');
+                        if (phoneVal.startsWith('00') || phoneVal === '0000000000' || phoneVal.toLowerCase().includes('unknown')) phoneVal = '';
+                        if (!phoneVal && member.isDependent) {
+                          phoneVal = (member.dependentNo && !member.dependentNo.startsWith('00') && member.dependentNo !== '0000000000')
+                            ? member.dependentNo
+                            : (member.guardianWhatsapp && !member.guardianWhatsapp.startsWith('00') && member.guardianWhatsapp !== '0000000000')
+                            ? member.guardianWhatsapp
+                            : mainPersonPhone;
+                        }
                         const addressVal = [member.city, member.state].filter(Boolean).join(', ');
                         const declaredCount = (member.declaredMedicalHistory || member.medicalHistory || []).length;
 
@@ -6903,8 +6928,8 @@ export default function Leads() {
         isEditing={editingFamilyMemberIdx !== null}
         primaryContact={{
           gender: personalFields.gender,
-          phone: personalFields.callingNumber || personalFields.whatsappNumber,
-          whatsappNumber: personalFields.whatsappNumber,
+          phone: personalFields.whatsappNumber || personalFields.callingNumber || loadedContact?.phone || '',
+          whatsappNumber: personalFields.whatsappNumber || loadedContact?.phone || '',
           state: personalFields.state,
           district: personalFields.district,
           city: personalFields.city,
