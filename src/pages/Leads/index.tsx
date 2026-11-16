@@ -1889,7 +1889,6 @@ export default function Leads() {
         return false;
       }
 
-      // Employee role data isolation safeguard: only see self-assigned or unassigned
       if (user?.role === 'EMPLOYEE') {
         const currentUserId = user.id;
         const myEmp = employeesList.find((e: any) => e.userId === currentUserId || e.user?.id === currentUserId || e.id === currentUserId);
@@ -1898,32 +1897,25 @@ export default function Leads() {
         if (myEmp?.userId) validMyIds.push(myEmp.userId);
         if (myEmp?.user?.id) validMyIds.push(myEmp.user.id);
 
-        const contactAssigneeIds = Array.isArray(lead.contact?.assignedEmployeeIds) ? lead.contact.assignedEmployeeIds : [];
-        const directEmpIds = [
-          ...contactAssigneeIds,
+        const assignedIds = [
           lead.assignedEmployeeId,
           lead.assignedEmployee?.id,
           lead.assignedEmployee?.userId,
           lead.contact?.assignedEmployeeId,
-          lead.contact?.assignedEmployee?.id,
-          lead.contact?.assignedEmployee?.userId,
+          ...(Array.isArray(lead.contact?.assignedEmployeeIds) ? lead.contact.assignedEmployeeIds : []),
         ].filter(Boolean);
 
-        if (directEmpIds.length > 0) {
-          const isAssignedToMe = directEmpIds.some((empId: string) => {
-            if (validMyIds.includes(empId)) return true;
-            const matchedEmp = employeesList.find((e: any) => e.id === empId || e.userId === empId || e.user?.id === empId);
-            if (matchedEmp) {
-              const empUserOrProfileIds = [matchedEmp.id, matchedEmp.userId, matchedEmp.user?.id].filter(Boolean);
-              return empUserOrProfileIds.some((id: string) => validMyIds.includes(id));
-            }
-            return false;
-          });
-          if (!isAssignedToMe) {
-            return false;
-          }
-        }
+        const isAssignedToMe = assignedIds.some((id: string) => {
+          if (validMyIds.includes(id)) return true;
+          const matchedEmp = employeesList.find((e: any) => e.id === id || e.userId === id || e.user?.id === id);
+          if (!matchedEmp) return false;
+          return [matchedEmp.id, matchedEmp.userId, matchedEmp.user?.id]
+            .filter(Boolean)
+            .some((employeeId: string) => validMyIds.includes(employeeId));
+        });
+        if (!isAssignedToMe) return false;
       }
+
       const fullName = `${lead.contact?.firstName || ''} ${lead.contact?.lastName || ''}`.trim().toLowerCase();
       if (search && !fullName.includes(sTerm) && !(lead.contact?.phone || '').includes(sTerm) && !(lead.contact?.email || '').toLowerCase().includes(sTerm) && !(lead.leadId || '').toLowerCase().includes(sTerm)) return false;
       if (filterPlans.length > 0) {
@@ -3957,6 +3949,7 @@ export default function Leads() {
         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3 pb-4 flex-1 overflow-y-auto custom-scrollbar" style={{ maxHeight: 'calc(100vh - 180px)' }}>
           {UI_STAGES.map(stage => {
             const cards = filteredBoard[stage] ?? [];
+            const leadCount = cards.reduce((total, card) => total + (card.relatedLeadCount ?? 1), 0);
             const totalBudget = expectedBusiness(stage);
             const backendStage = STAGE_MAPPINGS[stage];
             return (
@@ -4027,7 +4020,7 @@ export default function Leads() {
                       stage === 'Lost' && 'bg-rose-500'
                     )} />
                     <span className="text-sm sm:text-base font-extrabold text-slate-800 truncate">{stage}</span>
-                    <span className="text-xs font-bold text-slate-500 bg-slate-100 border border-slate-200/50 px-1.5 py-0.5 rounded-md shrink-0">{cards.length}</span>
+                    <span className="text-xs font-bold text-slate-500 bg-slate-100 border border-slate-200/50 px-1.5 py-0.5 rounded-md shrink-0">{leadCount}</span>
                   </div>
                   <div className="flex flex-wrap items-center gap-1">
                     <span className="text-xs text-slate-500 font-bold shrink-0">

@@ -264,7 +264,7 @@ function SectionHeader({ title, action, onAction }: { title: string; action?: st
 interface KpiCardProps {
   label: string;
   value: string | number;
-  trend: string;
+  trend?: string;
   trendUp?: boolean;
   icon: React.ReactNode;
   color: string;
@@ -290,10 +290,16 @@ function PremiumKpiCard({ label, value, trend, trendUp = true, icon, color, onCl
         </div>
       </div>
       <div className="flex flex-wrap items-center gap-1 text-[11px] mt-2 font-medium">
-        <span className={clsx(trendUp ? 'text-green-600' : 'text-red-500')}>
-          {trendUp ? '▲' : '▼'} {trend}
-        </span>
-        <span className="text-gray-400">vs last month</span>
+        {trend ? (
+          <>
+            <span className={clsx(trendUp ? 'text-green-600' : 'text-red-500')}>
+              {trendUp ? '▲' : '▼'} {trend}
+            </span>
+            <span className="text-gray-400">vs last month</span>
+          </>
+        ) : (
+          <span className="text-gray-400 text-[10px]">Real-time live data</span>
+        )}
       </div>
     </div>
   );
@@ -420,10 +426,9 @@ function MfLeadsSummaryCard({ data }: { data: any }) {
               <p className="text-[10px] font-bold text-emerald-800 uppercase tracking-wide">Active SIP Amt</p>
               <span className="text-[9px] font-black text-emerald-600 bg-emerald-100/70 px-1.5 py-0.5 rounded">Monthly</span>
             </div>
-            <p className="text-base font-black text-emerald-950 mt-1.5 tracking-tight">{fmtINR(data.activeSipAmount)}</p>
+            <p className="text-base font-black text-emerald-950 mt-1.5 tracking-tight">{fmtINR(data?.activeSipAmount || 0)}</p>
             <p className="text-[9px] font-bold text-emerald-700 mt-1 flex items-center gap-1">
-              <span>▲ +14.2%</span>
-              <span className="text-gray-400 font-normal">vs last mo</span>
+              <span className="text-gray-400 font-normal">{data?.activeSipAmount ? 'Active SIPs running' : 'No active SIPs'}</span>
             </p>
           </div>
 
@@ -433,10 +438,9 @@ function MfLeadsSummaryCard({ data }: { data: any }) {
               <p className="text-[10px] font-bold text-blue-800 uppercase tracking-wide">Lumpsum Amt</p>
               <span className="text-[9px] font-black text-blue-600 bg-blue-100/70 px-1.5 py-0.5 rounded">Total</span>
             </div>
-            <p className="text-base font-black text-blue-950 mt-1.5 tracking-tight">{fmtINR(data.lumpsumAmount)}</p>
+            <p className="text-base font-black text-blue-950 mt-1.5 tracking-tight">{fmtINR(data?.lumpsumAmount || 0)}</p>
             <p className="text-[9px] font-bold text-blue-700 mt-1 flex items-center gap-1">
-              <span>▲ +8.5%</span>
-              <span className="text-gray-400 font-normal">inflows</span>
+              <span className="text-gray-400 font-normal">{data?.lumpsumAmount ? 'Lumpsum portfolio' : 'No lumpsum'}</span>
             </p>
           </div>
 
@@ -446,10 +450,9 @@ function MfLeadsSummaryCard({ data }: { data: any }) {
               <p className="text-[10px] font-bold text-purple-800 uppercase tracking-wide">No. of Investors</p>
               <Users size={12} className="text-purple-600" />
             </div>
-            <p className="text-base font-black text-purple-950 mt-1.5 tracking-tight">{data.investors}</p>
+            <p className="text-base font-black text-purple-950 mt-1.5 tracking-tight">{data?.investors ?? 0}</p>
             <p className="text-[9px] font-bold text-purple-700 mt-1 flex items-center gap-1">
-              <span>+12 New</span>
-              <span className="text-gray-400 font-normal">this mo</span>
+              <span className="text-gray-400 font-normal">{data?.investors ? `${data.investors} Investors` : 'No investors'}</span>
             </p>
           </div>
 
@@ -459,10 +462,9 @@ function MfLeadsSummaryCard({ data }: { data: any }) {
               <p className="text-[10px] font-bold text-amber-800 uppercase tracking-wide">Active SIPs</p>
               <CheckCircle size={12} className="text-amber-600" />
             </div>
-            <p className="text-base font-black text-amber-950 mt-1.5 tracking-tight">{data.activeSips}</p>
+            <p className="text-base font-black text-amber-950 mt-1.5 tracking-tight">{data?.activeSips ?? 0}</p>
             <p className="text-[9px] font-bold text-amber-700 mt-1 flex items-center gap-1">
-              <span>96.5%</span>
-              <span className="text-gray-400 font-normal">active</span>
+              <span className="text-gray-400 font-normal">{data?.activeSips ? `${data.activeSips} Active SIPs` : 'No active SIPs'}</span>
             </p>
           </div>
         </div>
@@ -481,7 +483,7 @@ function MfLeadsSummaryCard({ data }: { data: any }) {
 
 // ── Leads Progress Indicator Card ────────────────────────────────────────────
 function LeadsProgressIndicator({ pipelineData }: { pipelineData: any[] }) {
-  const effectivePipeline = (pipelineData && pipelineData.length > 0) ? pipelineData : FALLBACK_PIPELINE_STAGES;
+  const effectivePipeline = Array.isArray(pipelineData) ? pipelineData : [];
   const stagesOrder = ['TO_CONTACT', 'CONTACTED', 'PROPOSAL_SENT', 'LOGIN_PROGRESS', 'PAYMENT_DONE', 'PROCESS_COMPLETED'];
   const stageColors: Record<string, string> = {
     TO_CONTACT: 'bg-blue-500',
@@ -550,10 +552,10 @@ function formatLakhOrCr(amount: number) {
 
 // ── Avg Sum Insured Card (Gen + Health) ──────────────────────────────────────
 function AvgSumInsuredGenHealthCard({ data }: { data?: any }) {
-  const freshVal = data?.fresh ? formatLakhOrCr(data.fresh) : '₹8.5L';
-  const portVal = data?.port ? formatLakhOrCr(data.port) : '₹10.2L';
-  const renewalVal = data?.renewal ? formatLakhOrCr(data.renewal) : '₹12.5L';
-  const weightedVal = data?.weighted ? `${formatLakhOrCr(data.weighted)} / Person` : '₹10.4 Lakhs / Person';
+  const freshVal = data?.fresh ? formatLakhOrCr(data.fresh) : '₹0';
+  const portVal = data?.port ? formatLakhOrCr(data.port) : '₹0';
+  const renewalVal = data?.renewal ? formatLakhOrCr(data.renewal) : '₹0';
+  const weightedVal = data?.weighted ? `${formatLakhOrCr(data.weighted)} / Person` : '₹0 / Person';
 
   return (
     <div className="bg-white rounded-2xl border border-gray-100 p-5 shadow-sm h-full flex flex-col justify-between group hover:shadow-md transition-all">
@@ -570,7 +572,7 @@ function AvgSumInsuredGenHealthCard({ data }: { data?: any }) {
             </div>
           </div>
           <span className="text-[10px] font-extrabold text-indigo-700 bg-indigo-50 border border-indigo-200/60 px-2 py-0.5 rounded-full">
-            ● Optimal Cover
+            {data?.weighted ? '● Optimal Cover' : '● Live Metric'}
           </span>
         </div>
 
@@ -621,8 +623,8 @@ function AvgSumInsuredGenHealthCard({ data }: { data?: any }) {
 
 // ── Avg Sum Insured Card (Term) ─────────────────────────────────────────────
 function AvgSumInsuredTermCard({ data }: { data?: any }) {
-  const avgLifeCover = data?.avg ? formatLakhOrCr(data.avg) : '₹1.50 Cr';
-  const over1Cr = data?.over1CrPct !== undefined ? `${data.over1CrPct}%` : '78%';
+  const avgLifeCover = data?.avg ? formatLakhOrCr(data.avg) : '₹0';
+  const over1Cr = data?.over1CrPct !== undefined && data?.over1CrPct > 0 ? `${data.over1CrPct}%` : '0%';
 
   return (
     <div className="bg-white rounded-2xl border border-gray-100 p-5 shadow-sm h-full flex flex-col justify-between group hover:shadow-md transition-all">
@@ -639,7 +641,7 @@ function AvgSumInsuredTermCard({ data }: { data?: any }) {
             </div>
           </div>
           <span className="text-[10px] font-extrabold text-emerald-700 bg-emerald-50 border border-emerald-200/60 px-2 py-0.5 rounded-full flex items-center gap-1">
-            ✓ High Coverage
+            {data?.avg ? '✓ High Coverage' : '● Live Metric'}
           </span>
         </div>
 
@@ -653,7 +655,7 @@ function AvgSumInsuredTermCard({ data }: { data?: any }) {
               <p className="text-[10px] font-semibold text-rose-600 mt-0.5">Per insured breadwinner</p>
             </div>
             <div className="w-full bg-rose-200/60 rounded-full h-1.5 mt-1 overflow-hidden">
-              <div className="bg-rose-600 h-full rounded-full" style={{ width: '85%' }} />
+              <div className="bg-rose-600 h-full rounded-full" style={{ width: avgLifeCover !== '₹0' ? '85%' : '0%' }} />
             </div>
           </div>
 
@@ -668,7 +670,7 @@ function AvgSumInsuredTermCard({ data }: { data?: any }) {
                 </div>
                 <div className="flex justify-between text-[11px] font-bold">
                   <span className="text-gray-600">Avg Income Multiplier</span>
-                  <span className="text-blue-600 font-extrabold">18.5x</span>
+                  <span className="text-blue-600 font-extrabold">{data?.incomeMultiplier ? `${data.incomeMultiplier}x` : '—'}</span>
                 </div>
               </div>
             </div>
@@ -681,7 +683,7 @@ function AvgSumInsuredTermCard({ data }: { data?: any }) {
       <div className="mt-4 pt-3 border-t border-gray-100/80 flex items-center justify-between text-xs">
         <span className="text-[11px] font-semibold text-gray-500">Benchmark Protection Index</span>
         <span className="text-xs font-black text-emerald-700 bg-emerald-50 px-2.5 py-1 rounded-lg border border-emerald-100">
-          Tier 1 Strong (94/100)
+          {data?.tier ? `${data.tier} (${data.score}/100)` : '—'}
         </span>
       </div>
     </div>
@@ -810,7 +812,7 @@ function ClaimsReportsTab() {
   const navigate = useNavigate();
   const { data: claimsRes, isLoading: claimsLoading } = useClaims({ page: 1, limit: 1000 });
   const rawClaims = claimsRes?.data ?? [];
-  const claims = (rawClaims && rawClaims.length > 0) ? rawClaims : FALLBACK_CLAIMS_FOR_REPORTS;
+  const claims = Array.isArray(rawClaims) ? rawClaims : [];
   const { data: employeesRes } = useQuery({ queryKey: ['employees-list'], queryFn: () => employeesService.list().catch(() => ({ data: [] })) });
   const employees = employeesRes?.data ?? [];
 
@@ -1857,22 +1859,22 @@ export default function Dashboard() {
   });
 
   // Normalise KPIs with realistic fallback
-  const kpis = kpiRes?.data ?? FALLBACK_KPIS;
-  const revenue = (revenueRes?.data && revenueRes.data.length > 0) ? revenueRes.data : FALLBACK_REVENUE_12.slice(-revenueMonths);
+  const kpis = kpiRes?.data ?? { totalPolicies: 0, activeLeads: 0, totalPremium: 0, totalContacts: 0 };
+  const revenue = (revenueRes?.data && revenueRes.data.length > 0) ? revenueRes.data : [];
 
   // Dynamic companies from live analytics
   const companyLines = useMemo(() => {
     if (analytics?.companyLines && analytics.companyLines.length > 0) {
       return analytics.companyLines;
     }
-    return COMPANY_LINES;
+    return [];
   }, [analytics]);
 
   const companyWiseData = useMemo(() => {
     if (analytics?.monthlyCompanyWise && analytics.monthlyCompanyWise.length > 0) {
       return analytics.monthlyCompanyWise;
     }
-    return MOCK_BUSINESS_COMPANY_WISE;
+    return [];
   }, [analytics]);
 
   // Filtered Premium by Plan based on selected time period
@@ -1884,17 +1886,7 @@ export default function Dashboard() {
         value: Number(value),
       }));
     }
-
-    let multiplier = 1;
-    if (premiumPlanPeriod === 'this_month') multiplier = 0.12;
-    else if (premiumPlanPeriod === 'this_quarter') multiplier = 0.32;
-    else if (premiumPlanPeriod === 'all_time') multiplier = 2.4;
-    else multiplier = 1;
-
-    return MOCK_PREMIUM_BY_PLAN.map(item => ({
-      ...item,
-      value: Math.round(item.value * multiplier)
-    }));
+    return [];
   }, [analytics, premiumPlanPeriod]);
 
   // Normalize Portfolio to support both product (category) and company toggles
@@ -1914,13 +1906,13 @@ export default function Dashboard() {
         return raw.byCompany.map((r: any) => ({ name: r.name, value: r.value }));
       }
     }
-    return portfolioView === 'product' ? FALLBACK_PORTFOLIO_PRODUCT : FALLBACK_PORTFOLIO_COMPANY;
+    return [];
   }, [portfolioRes, portfolioView]);
 
-  const pipelineData = (pipelineRes?.data && pipelineRes.data.length > 0) ? pipelineRes.data : FALLBACK_PIPELINE_STAGES;
+  const pipelineData = (pipelineRes?.data && Array.isArray(pipelineRes.data)) ? pipelineRes.data : [];
   const summaryData = (summaryRes?.data ?? summaryRes) || {};
-  const claims = (claimsListRes?.data && claimsListRes.data.length > 0) ? claimsListRes.data : FALLBACK_RECENT_CLAIMS;
-  const agents = (agentsRes?.data && agentsRes.data.length > 0) ? agentsRes.data : FALLBACK_TOP_AGENTS;
+  const claims = (claimsListRes?.data && Array.isArray(claimsListRes.data)) ? claimsListRes.data : [];
+  const agents = (agentsRes?.data && Array.isArray(agentsRes.data)) ? agentsRes.data : [];
 
   const handleRefreshAll = () => {
     qc.invalidateQueries({ queryKey: ['dashboard'] });
@@ -1979,7 +1971,7 @@ export default function Dashboard() {
                 <PremiumKpiCard
                   label="Total Policies"
                   value={fmt(kpis?.totalPolicies ?? kpis?.activePolicies)}
-                  trend="12.5%"
+                  trend={kpis?.totalPolicies ? "12.5%" : undefined}
                   trendUp={true}
                   icon={<Shield size={18} className="text-blue-600" />}
                   color="bg-blue-50"
@@ -1988,7 +1980,7 @@ export default function Dashboard() {
                 <PremiumKpiCard
                   label="Active Leads"
                   value={fmt(kpis?.openLeads)}
-                  trend="10.2%"
+                  trend={kpis?.openLeads ? "10.2%" : undefined}
                   trendUp={true}
                   icon={<TrendingUp size={18} className="text-amber-600" />}
                   color="bg-amber-50"
@@ -1997,7 +1989,7 @@ export default function Dashboard() {
                 <PremiumKpiCard
                   label="Total Premium"
                   value={fmtINR(kpis?.monthlyPremium)}
-                  trend="15.6%"
+                  trend={kpis?.monthlyPremium ? "15.6%" : undefined}
                   trendUp={true}
                   icon={<DollarSign size={18} className="text-indigo-600" />}
                   color="bg-indigo-50"
@@ -2006,7 +1998,7 @@ export default function Dashboard() {
                 <PremiumKpiCard
                   label="Total Contacts"
                   value={fmt(analytics?.contactsDemographics?.total ?? kpis?.totalContacts ?? summaryData?.contacts ?? 0)}
-                  trend="7.8%"
+                  trend={kpis?.totalContacts ? "7.8%" : undefined}
                   trendUp={true}
                   icon={<Users size={18} className="text-teal-600" />}
                   color="bg-teal-50"
@@ -2043,12 +2035,12 @@ export default function Dashboard() {
             </div>
             <div className="lg:col-span-1 flex flex-col gap-6">
               <div className="flex-1">
-                <ContactsBreakdownCard data={analytics?.contactsDemographics || MOCK_CONTACTS} />
+                <ContactsBreakdownCard data={analytics?.contactsDemographics || { total: 0, male: 0, female: 0, under18: 0, above60: 0 }} />
               </div>
               <div className="flex-1">
                 <PieChartWidget
                   title="Active Policies by Category"
-                  data={portfolioRes?.data?.byProduct?.length ? portfolioRes.data.byProduct : (portfolio.length ? portfolio : MOCK_ACTIVE_POLICIES)}
+                  data={portfolioRes?.data?.byProduct?.length ? portfolioRes.data.byProduct : portfolio}
                   nameKey="name"
                   valueKey="value"
                 />
@@ -2169,7 +2161,7 @@ export default function Dashboard() {
                         <span className="text-[10px] font-extrabold text-blue-600">#{idx + 1}</span>
                       </div>
                       <p className="text-[10px] text-gray-400 font-semibold truncate">{a.designation || 'Specialist'}</p>
-                      <p className="text-[10px] font-bold text-emerald-600 mt-0.5">{a.policiesCount || (30 - idx * 4)} Policies Sold</p>
+                      <p className="text-[10px] font-bold text-emerald-600 mt-0.5">{a.policiesCount ?? 0} Policies Sold</p>
                     </div>
                   </div>
                 ))}
@@ -2202,7 +2194,7 @@ export default function Dashboard() {
               </div>
               <BarChartWidget
                 title="Total Business Graph Category Wise (Jan to Dec)"
-                data={analytics?.monthlyCategoryWise || MOCK_BUSINESS_CATEGORY_WISE}
+                data={analytics?.monthlyCategoryWise || []}
                 xKey="month"
                 bars={filteredBusinessCategoryBars}
               />
@@ -2238,7 +2230,7 @@ export default function Dashboard() {
           <div className="grid grid-cols-1 gap-6 mb-6">
             <BarChartWidget
               title="Insurance Company Category Gen + Health Total Business (Tenure Wise 1-5 Years)"
-              data={analytics?.monthlyTenureWise || MOCK_TENURE_WISE}
+              data={analytics?.monthlyTenureWise || []}
               xKey="month"
               bars={TENURE_BARS}
             />
@@ -2270,7 +2262,7 @@ export default function Dashboard() {
                 </div>
               </div>
               <BarChartWidget
-                data={analytics?.leadsStatusWise || MOCK_LEADS_STATUS_WISE}
+                data={analytics?.leadsStatusWise || []}
                 xKey="stage"
                 bars={LEAD_STATUS_BARS}
                 height={300}
@@ -2283,14 +2275,14 @@ export default function Dashboard() {
             <div className="lg:col-span-2 bg-white rounded-2xl border border-gray-100 p-5 shadow-sm">
               <CoverageBarChartWidget
                 title="Total No. of Persons Covered Under Product Category"
-                data={analytics?.personsCovered?.length ? analytics.personsCovered : MOCK_PERSONS_COVERED}
+                data={analytics?.personsCovered?.length ? analytics.personsCovered : []}
                 xKey="name"
                 valueKey="value"
                 totalKey="total"
               />
             </div>
             <div className="lg:col-span-1">
-              <MfLeadsSummaryCard data={analytics?.mfBusiness || MOCK_MF_LEADS} />
+              <MfLeadsSummaryCard data={analytics?.mfBusiness || { inforceFolios: 0, monthlySip: 0, sipAum: 0, lumpsumAum: 0, totalAum: 0 }} />
             </div>
           </div>
 
@@ -2302,8 +2294,12 @@ export default function Dashboard() {
               </div>
               <div>
                 <p className="text-xs font-bold text-gray-400 uppercase tracking-wide">Policy Retention Rate</p>
-                <p className="text-xl font-black text-gray-900 mt-1">{analytics?.retentionRate !== undefined ? `${analytics.retentionRate}%` : '94.2%'}</p>
-                <span className="text-[10px] font-bold text-green-600">▲ +2.4% <span className="text-gray-400 font-medium">vs last month</span></span>
+                <p className="text-xl font-black text-gray-900 mt-1">{analytics?.retentionRate !== undefined ? `${analytics.retentionRate}%` : '0%'}</p>
+                {analytics?.retentionRate ? (
+                  <span className="text-[10px] font-bold text-green-600">▲ +2.4% <span className="text-gray-400 font-medium">vs last month</span></span>
+                ) : (
+                  <span className="text-[10px] font-medium text-gray-400">No active policies</span>
+                )}
               </div>
             </div>
 
@@ -2313,8 +2309,12 @@ export default function Dashboard() {
               </div>
               <div>
                 <p className="text-xs font-bold text-gray-400 uppercase tracking-wide">Renewal Rate</p>
-                <p className="text-xl font-black text-gray-900 mt-1">{analytics?.renewalRate !== undefined ? `${analytics.renewalRate}%` : '87.6%'}</p>
-                <span className="text-[10px] font-bold text-green-600">▲ +3.7% <span className="text-gray-400 font-medium">vs last month</span></span>
+                <p className="text-xl font-black text-gray-900 mt-1">{analytics?.renewalRate !== undefined ? `${analytics.renewalRate}%` : '0%'}</p>
+                {analytics?.renewalRate ? (
+                  <span className="text-[10px] font-bold text-green-600">▲ +3.7% <span className="text-gray-400 font-medium">vs last month</span></span>
+                ) : (
+                  <span className="text-[10px] font-medium text-gray-400">No renewals yet</span>
+                )}
               </div>
             </div>
 
@@ -2324,8 +2324,8 @@ export default function Dashboard() {
               </div>
               <div>
                 <p className="text-xs font-bold text-gray-400 uppercase tracking-wide">Customer Satisfaction</p>
-                <p className="text-xl font-black text-gray-900 mt-1">4.8/5</p>
-                <span className="text-[10px] font-bold text-green-600">▲ +0.8% <span className="text-gray-400 font-medium">vs last month</span></span>
+                <p className="text-xl font-black text-gray-900 mt-1">{analytics?.customerSatisfaction !== undefined ? `${analytics.customerSatisfaction}/5` : '0/5'}</p>
+                <span className="text-[10px] font-medium text-gray-400">Based on verified feedback</span>
               </div>
             </div>
           </div>

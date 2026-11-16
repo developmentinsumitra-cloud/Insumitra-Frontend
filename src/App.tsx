@@ -56,7 +56,7 @@ function PrivateRoute({ children }: { children: React.ReactNode }) {
 
 function getEmployeeDefaultPath(user: any): string {
   const perms: string[] = user?.permissions || [];
-  if (perms.length === 0) return '/workspace';
+  if (perms.length === 0) return '/';
   if (perms.includes('dashboard')) return '/dashboard';
   if (perms.includes('workspace')) return '/workspace';
   const first = perms[0];
@@ -72,10 +72,6 @@ function PermissionRoute({ children, permission }: { children: React.ReactNode; 
   if (user.role === 'OWNER' || user.role === 'SUPERADMIN') return <>{children}</>;
   if (user.role === 'EMPLOYEE') {
     const perms: string[] = (user as any)?.permissions || [];
-    // If employee has no perms set at all (legacy), allow workspace fallback
-    if (perms.length === 0 && permission === 'workspace') {
-      return <>{children}</>;
-    }
     if (perms.includes(permission)) {
       return <>{children}</>;
     }
@@ -150,6 +146,18 @@ function IndexRedirect() {
   }
 
   if (user.role === 'EMPLOYEE') {
+    if (!(user.permissions || []).length) {
+      return (
+        <div className="flex min-h-full items-center justify-center">
+          <div className="max-w-md rounded-2xl border border-slate-200 bg-white p-8 text-center shadow-sm">
+            <h1 className="text-lg font-bold text-slate-900">No modules assigned</h1>
+            <p className="mt-2 text-sm text-slate-600">
+              Please contact your owner to request access to a module.
+            </p>
+          </div>
+        </div>
+      );
+    }
     return <Navigate to={getEmployeeDefaultPath(user)} replace />;
   }
 

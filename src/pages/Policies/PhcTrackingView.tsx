@@ -1,6 +1,6 @@
 import { useState, useMemo, useEffect, useRef } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { policiesService } from '../../services';
+import { contactsService, policiesService } from '../../services';
 import {
   Activity, Calendar, CheckCircle2, Clock, Search, Download, FileText,
   ChevronLeft, ChevronRight, Eye, X, User, Shield,
@@ -11,7 +11,9 @@ import {
 import clsx from 'clsx';
 import { sortData } from '../../utils/sortUtils';
 import Modal from '@comps/common/Modal';
+import ActivityTimeline from '@comps/common/ActivityTimeline';
 import { usePolicies } from '../../hooks/usePolicies';
+import PolicyDetailModal from './PolicyDetailModal';
 import { parseExtraNotes } from './index';
 
 // ── Types ───────────────────────────────────────────────────────────────────────
@@ -42,6 +44,9 @@ interface PhcYearRecord {
 
 interface PhcPolicyRecord {
   id: string;
+  contactId?: string;
+  createdAt?: string;
+  updatedAt?: string;
   policyNo: string;
   customerName: string;
   customerPhone: string;
@@ -103,7 +108,15 @@ function StatusBadge({ status }: { status: PhcStatus }) {
 // ── PHC Year Card ────────────────────────────────────────────────────────────────
 type PhcEntryState = { id: number; status: string };
 
-function PhcYearCard({ yr }: { yr: PhcYearRecord }) {
+function PhcYearCard({
+  yr,
+  onViewDetails,
+  onViewHistory,
+}: {
+  yr: PhcYearRecord;
+  onViewDetails: () => void;
+  onViewHistory: () => void;
+}) {
   const [selPerson, setSelPerson] = useState('All Family Members');
   const [entries, setEntries] = useState<PhcEntryState[]>([{ id: Date.now(), status: 'Unutilised' }]);
   const pct = yr.eligibleAmount > 0 ? Math.round((yr.utilizedAmount / yr.eligibleAmount) * 100) : 0;
@@ -315,10 +328,10 @@ function PhcYearCard({ yr }: { yr: PhcYearRecord }) {
 
         {/* Buttons */}
         <div className="flex flex-wrap items-center gap-2 pt-1">
-          <button type="button" className="flex-1 flex items-center justify-center gap-1.5 py-1.5 px-3 text-[10px] sm:text-xs font-bold text-blue-700 bg-blue-50 hover:bg-blue-100 border border-blue-200 rounded-lg cursor-pointer transition-colors">
+          <button type="button" onClick={onViewDetails} className="flex-1 flex items-center justify-center gap-1.5 py-1.5 px-3 text-[10px] sm:text-xs font-bold text-blue-700 bg-blue-50 hover:bg-blue-100 border border-blue-200 rounded-lg cursor-pointer transition-colors">
             <Eye size={12} /> View Details <ArrowRight size={11} className="ml-auto" />
           </button>
-          <button type="button" className="flex-1 flex items-center justify-center gap-1.5 py-1.5 px-3 text-[10px] sm:text-xs font-bold text-slate-600 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-lg cursor-pointer transition-colors">
+          <button type="button" onClick={onViewHistory} className="flex-1 flex items-center justify-center gap-1.5 py-1.5 px-3 text-[10px] sm:text-xs font-bold text-slate-600 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-lg cursor-pointer transition-colors">
             <History size={12} /> View History
           </button>
         </div>
@@ -327,6 +340,59 @@ function PhcYearCard({ yr }: { yr: PhcYearRecord }) {
   );
 }
 
+function PhcHistoryModal({ record, onClose }: { record: PhcPolicyRecord | null; onClose: () => void }) {
+  const contactId = record?.contactId;
+  const {
+    data: activityRes,
+    isLoading,
+    isError,
+  } = useQuery({
+    queryKey: ['contact-activity', contactId, 'phc-policy-history', record?.id],
+    queryFn: () => contactsService.activity(contactId!, { page: 1, limit: 100 }),
+    enabled: Boolean(record && contactId),
+  });
+
+  const fallbackEvents = record ? [
+    ...(record.createdAt ? [{
+      id: `policy-created-${record.id}`,
+      entityType: 'Policy',
+      entityId: record.id,
+      action: 'CREATE',
+      description: `Policy ${record.policyNo} created`,
+      createdAt: record.createdAt,
+    }] : []),
+    ...(record.updatedAt && record.updatedAt !== record.createdAt ? [{
+      id: `policy-updated-${record.id}`,
+      entityType: 'Policy',
+      entityId: record.id,
+      action: 'UPDATE',
+      description: `Policy ${record.policyNo} updated`,
+      createdAt: record.updatedAt,
+    }] : []),
+  ] : [];
+
+  return (
+    <Modal
+      open={Boolean(record)}
+      onClose={onClose}
+      title="Policy History"
+      subtitle={record ? `Activity history for policy ${record.policyNo}.` : undefined}
+      size="2xl"
+    >
+      {record && (
+        <ActivityTimeline
+          events={activityRes}
+          fallbackEvents={fallbackEvents}
+          entityType="Policy"
+          entityId={record.id}
+          isLoading={isLoading}
+          isError={isError}
+          subtitle="Latest activity for this policy."
+        />
+      )}
+    </Modal>
+  );
+}
 
 
 // ── PHC Record Enrichment Helper ────────────────────────────────────────────────
@@ -511,10 +577,12 @@ function enrichPhcRecord(r: PhcPolicyRecord, polNotes?: string): PhcPolicyRecord
 interface PhcModalProps {
   record: PhcPolicyRecord;
   onClose: () => void;
+  onViewDetails: () => void;
+  onViewHistory: () => void;
   policyNotesMap?: Map<string, string>;
 }
 
-function PhcDrawer({ record: rawRecord, onClose, policyNotesMap }: PhcModalProps) {
+function PhcDrawer({ record: rawRecord, onClose, onViewDetails, onViewHistory, policyNotesMap }: PhcModalProps) {
   const record = useMemo(() => {
     const polNotes = (rawRecord as any).notes || policyNotesMap?.get(rawRecord.policyNo?.trim()) || policyNotesMap?.get(rawRecord.id) || '';
     return enrichPhcRecord(rawRecord, polNotes);
@@ -609,7 +677,14 @@ function PhcDrawer({ record: rawRecord, onClose, policyNotesMap }: PhcModalProps
         <div className="h-[360px] overflow-y-auto pr-1.5 custom-scrollbar">
           {record.years
             .filter(yr => yr.yearNo === selectedYearTab)
-            .map(yr => <PhcYearCard key={yr.yearNo} yr={yr} />)}
+            .map(yr => (
+              <PhcYearCard
+                key={yr.yearNo}
+                yr={yr}
+                onViewDetails={onViewDetails}
+                onViewHistory={onViewHistory}
+              />
+            ))}
         </div>
       </div>
     </Modal>
@@ -627,11 +702,18 @@ export default function PhcTrackingView() {
   const [toDate, setToDate] = useState('');
   const [dateFilterType, setDateFilterType] = useState('PHC Year End Date');
   const [companyFilter, setCompanyFilter] = useState('All');
-  const [selectedRows, setSelectedRows] = useState<Set<string>>(new Set());
   const [quickFilter, setQuickFilter] = useState<string | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
   const rowsPerPage = 10;
-  const [drawerRecord, setDrawerRecord] = useState<PhcPolicyRecord | null>(null);
+  const [activeModal, setActiveModal] = useState<
+    | { type: 'phc'; record: PhcPolicyRecord }
+    | { type: 'details'; record: PhcPolicyRecord }
+    | { type: 'history'; record: PhcPolicyRecord }
+    | null
+  >(null);
+  const activePhcRecord = activeModal?.type === 'phc' ? activeModal.record : null;
+  const activeDetailsRecord = activeModal?.type === 'details' ? activeModal.record : null;
+  const activeHistoryRecord = activeModal?.type === 'history' ? activeModal.record : null;
   const [showDateFilter, setShowDateFilter] = useState(false);
   const [openDropdown, setOpenDropdown] = useState<string | null>(null);
 
@@ -691,7 +773,7 @@ export default function PhcTrackingView() {
   }, [allPoliciesRes]);
 
   const policyMetaMap = useMemo(() => {
-    const map = new Map<string, { notes?: string; updatedAt?: string; createdAt?: string }>();
+    const map = new Map<string, { notes?: string; updatedAt?: string; createdAt?: string; contactId?: string }>();
     const getArrayData = (obj: any): any[] => {
       if (!obj) return [];
       if (Array.isArray(obj)) return obj;
@@ -701,7 +783,12 @@ export default function PhcTrackingView() {
     };
     const list = getArrayData(allPoliciesRes);
     list.forEach((p: any) => {
-      const meta = { notes: p.notes || '', updatedAt: p.updatedAt, createdAt: p.createdAt };
+      const meta = {
+        notes: p.notes || '',
+        updatedAt: p.updatedAt,
+        createdAt: p.createdAt,
+        contactId: p.contactId || p.contact?.id,
+      };
       if (p.policyNumber) map.set(p.policyNumber.trim(), meta);
       if (p.id) map.set(p.id, meta);
     });
@@ -723,6 +810,7 @@ export default function PhcTrackingView() {
 
       return {
         ...enriched,
+        contactId: meta?.contactId || (p as any).contactId,
         updatedAt: effectiveUpdatedAt,
         createdAt: effectiveCreatedAt,
       };
@@ -1353,7 +1441,7 @@ export default function PhcTrackingView() {
                 {paginatedDependencies.length === 0 ? (
                   <tr><td colSpan={9} className="px-5 py-12 text-center text-slate-400 font-semibold">No dependents match the selected filters.</td></tr>
                 ) : paginatedDependencies.map((r, idx) => (
-                  <tr key={r.id} onClick={() => setDrawerRecord(r.policyRecord)} className={clsx(idx % 2 === 1 ? 'bg-slate-50/80' : 'bg-white')}>
+                  <tr key={r.id} onClick={() => setActiveModal({ type: 'phc', record: r.policyRecord })} className={clsx(idx % 2 === 1 ? 'bg-slate-50/80' : 'bg-white')}>
                     <td className="px-3 py-3 border border-slate-200 text-center font-bold text-slate-500">{(currentPage - 1) * rowsPerPage + idx + 1}</td>
                     <td className="px-3 py-3 border border-slate-200 font-bold text-slate-900 whitespace-nowrap">{r.policyRecord.customerName}</td>
                     <td className="px-3 py-3 border border-slate-200 whitespace-nowrap"><span className="font-bold text-slate-800 text-[11px]">{r.policyRecord.policyNo}</span></td>
@@ -1365,7 +1453,7 @@ export default function PhcTrackingView() {
                     <td className="px-3 py-3 border border-slate-200 whitespace-nowrap font-extrabold text-slate-900 text-xs">{fmtCurr(r.utilizedAmount)}</td>
                     <td className="px-3 py-3 border border-slate-200 whitespace-nowrap font-extrabold text-slate-900 text-xs">{r.phcCount}</td>
                     <td className="px-3 py-3 border border-slate-200 whitespace-nowrap text-right" onClick={e => e.stopPropagation()}>
-                      <button onClick={() => setDrawerRecord(r.policyRecord)} className="p-1.5 rounded-lg bg-blue-50 hover:bg-blue-100 border border-blue-200 text-blue-600 cursor-pointer transition-colors" title="View Policy Details">
+                      <button onClick={() => setActiveModal({ type: 'phc', record: r.policyRecord })} className="p-1.5 rounded-lg bg-blue-50 hover:bg-blue-100 border border-blue-200 text-blue-600 cursor-pointer transition-colors" title="View Policy Details">
                         <Eye size={13} />
                       </button>
                     </td>
@@ -1377,14 +1465,6 @@ export default function PhcTrackingView() {
           <table className="w-full text-left text-xs">
             <thead className="sticky top-0 z-20">
                 <tr className="bg-slate-50 border-b border-slate-200 text-[10px] font-bold text-slate-500 uppercase tracking-wider">
-                <th className="px-3 py-3 border border-slate-200 text-center w-10">
-                  <input type="checkbox" className="rounded border-slate-300 text-blue-600 focus:ring-blue-500/20 cursor-pointer"
-                    checked={selectedRows.size === paginatedData.length && paginatedData.length > 0}
-                    onChange={(e) => {
-                      if (e.target.checked) setSelectedRows(new Set(paginatedData.map(r => r.id)));
-                      else setSelectedRows(new Set());
-                    }} />
-                </th>
                 {[
                   { key: 'srNo', label: 'Sr. No.' },
                   { key: 'customerName', label: 'Customer Name' },
@@ -1428,16 +1508,16 @@ export default function PhcTrackingView() {
             </thead>
             <tbody className="divide-y divide-slate-100/80 font-medium">
               {isLoading ? (
-                <tr><td colSpan={18} className="px-5 py-12 text-center text-slate-400 font-semibold">Loading PHC records…</td></tr>
+              <tr><td colSpan={17} className="px-5 py-12 text-center text-slate-400 font-semibold">Loading PHC records…</td></tr>
               ) : isError ? (
                 <tr>
-                  <td colSpan={18} className="px-5 py-12 text-center text-rose-600 font-semibold">
+                <td colSpan={17} className="px-5 py-12 text-center text-rose-600 font-semibold">
                     <span>Unable to load PHC records.</span>
                     <button type="button" onClick={() => refetch()} className="ml-2 text-blue-600 underline">Retry</button>
                   </td>
                 </tr>
               ) : paginatedData.length === 0 ? (
-                <tr><td colSpan={18} className="px-5 py-12 text-center text-slate-400 font-semibold">No PHC policies match the selected filters.</td></tr>
+                <tr><td colSpan={17} className="px-5 py-12 text-center text-slate-400 font-semibold">No PHC policies match the selected filters.</td></tr>
               ) : paginatedData.map((r, idx) => {
                 const resolvedCompanyType = (
                   r.companyType ||
@@ -1452,17 +1532,7 @@ export default function PhcTrackingView() {
                   : Math.max(0, effEligible - effUtilized);
 
                 return (
-                <tr key={r.id} onClick={() => setDrawerRecord(r)} className={clsx(idx % 2 === 1 ? 'bg-slate-50/80' : 'bg-white', selectedRows.has(r.id) && 'bg-blue-50/50')}>
-                  <td className="px-3 py-3 border border-slate-200 text-center" onClick={e => e.stopPropagation()}>
-                    <input type="checkbox" className="rounded border-slate-300 text-blue-600 focus:ring-blue-500/20 cursor-pointer"
-                      checked={selectedRows.has(r.id)}
-                      onChange={(e) => {
-                        const newSet = new Set(selectedRows);
-                        if (e.target.checked) newSet.add(r.id);
-                        else newSet.delete(r.id);
-                        setSelectedRows(newSet);
-                      }} />
-                  </td>
+                <tr key={r.id} onClick={() => setActiveModal({ type: 'phc', record: r })} className={clsx(idx % 2 === 1 ? 'bg-slate-50/80' : 'bg-white')}>
                   <td className="px-3 py-3 border border-slate-200 text-center font-bold text-slate-500">{(currentPage - 1) * rowsPerPage + idx + 1}</td>
                   <td className="px-3 py-3 border border-slate-200">
                     <span className="font-extrabold text-slate-900 text-xs transition-colors whitespace-nowrap">
@@ -1516,7 +1586,7 @@ export default function PhcTrackingView() {
                   </td>
                   <td className="px-3 py-3 border border-slate-200 whitespace-nowrap font-black text-emerald-700 text-xs">{fmtCurr(effBalance)}</td>
                   <td className="px-3 py-3 border border-slate-200 whitespace-nowrap text-right" onClick={e => e.stopPropagation()}>
-                    <button onClick={() => setDrawerRecord(r)} className="p-1.5 rounded-lg bg-blue-50 hover:bg-blue-100 border border-blue-200 text-blue-600 cursor-pointer transition-colors" title="View PHC Details">
+                    <button onClick={() => setActiveModal({ type: 'phc', record: r })} className="p-1.5 rounded-lg bg-blue-50 hover:bg-blue-100 border border-blue-200 text-blue-600 cursor-pointer transition-colors" title="View PHC Details">
                       <Eye size={13} />
                     </button>
                   </td>
@@ -1558,7 +1628,32 @@ export default function PhcTrackingView() {
       </div>
 
       {/* Drawer */}
-      {drawerRecord && <PhcDrawer record={drawerRecord} onClose={() => setDrawerRecord(null)} policyNotesMap={policyNotesMap} />}
+      {activePhcRecord && (
+        <PhcDrawer
+          record={activePhcRecord}
+          onClose={() => setActiveModal(null)}
+          onViewDetails={() => {
+            setActiveModal({ type: 'details', record: activePhcRecord });
+          }}
+          onViewHistory={() => {
+            setActiveModal({ type: 'history', record: activePhcRecord });
+          }}
+          policyNotesMap={policyNotesMap}
+        />
+      )}
+      <PolicyDetailModal
+        open={Boolean(activeDetailsRecord)}
+        policyId={activeDetailsRecord?.id || null}
+        onClose={() => {
+          if (activeDetailsRecord) setActiveModal({ type: 'phc', record: activeDetailsRecord });
+        }}
+      />
+      <PhcHistoryModal
+        record={activeHistoryRecord}
+        onClose={() => {
+          if (activeHistoryRecord) setActiveModal({ type: 'phc', record: activeHistoryRecord });
+        }}
+      />
     </div>
   );
 }

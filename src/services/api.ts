@@ -30,7 +30,7 @@ export function applyProxyIfNeeded(config: InternalAxiosRequestConfig): Internal
     const searchParams = new URLSearchParams(queryPart || '');
     const existingParams = config.params ?? {};
     const cleanPath = pathPart.startsWith('/') ? pathPart : `/${pathPart}`;
-    const mergedParams: Record<string, any> = { __path: cleanPath, _path: cleanPath };
+    const mergedParams: Record<string, any> = { __path: cleanPath, _path: cleanPath, path: cleanPath };
     searchParams.forEach((val, key) => {
       mergedParams[key] = val;
     });

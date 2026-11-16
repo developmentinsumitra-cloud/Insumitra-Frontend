@@ -79,7 +79,7 @@ export default function ClaimDetail() {
     mutationFn: ({ status, ...rest }: any) => {
       return claimsService.updateStatus(id!, {
         status: status,
-        approvedAmount: rest.approvedAmount ? Number(rest.approvedAmount) : undefined,
+        approvedAmount: rest.approvedAmount !== undefined ? Number(rest.approvedAmount) : undefined,
         rejectionReason: rest.rejectionReason || undefined,
       });
     },
@@ -136,7 +136,7 @@ export default function ClaimDetail() {
   const openStatusModal = () => {
     const cl = claim?.data ?? claim;
     setNewStatus(cl?.status || '');
-    setApprovedAmount(cl?.approvedAmount ? String(cl.approvedAmount) : '');
+    setApprovedAmount(cl?.approvedAmount != null ? String(cl.approvedAmount) : '');
     setRejectionReason(cl?.rejectionReason ?? '');
     setStatusModal(true);
   };
@@ -535,19 +535,14 @@ export default function ClaimDetail() {
         <div className="space-y-4">
           <div>
             <label className="label">New Status</label>
-            <select className="input" value={newStatus} onChange={e => {
-              setNewStatus(e.target.value);
-              if (e.target.value === 'SETTLED' && !approvedAmount && cl?.claimAmount) {
-                setApprovedAmount(String(cl.claimAmount));
-              }
-            }}>
+            <select className="input" value={newStatus} onChange={e => setNewStatus(e.target.value)}>
               {DISPLAY_STATUS_FLOW.map(s => <option key={s} value={s}>{s.replace('_', ' ')}</option>)}
             </select>
           </div>
           {(newStatus === 'APPROVED' || newStatus === 'SETTLED') && (
             <div>
               <label className="label">{newStatus === 'SETTLED' ? 'Settled Amount (₹)' : 'Approved Amount (₹)'}</label>
-              <input type="number" className="input" value={approvedAmount} onChange={e => setApprovedAmount(e.target.value)} placeholder={newStatus === 'SETTLED' ? "Enter settled amount" : "Enter approved amount"} />
+              <input type="number" min="0" step="any" className="input" value={approvedAmount} onChange={e => setApprovedAmount(e.target.value)} placeholder={newStatus === 'SETTLED' ? "Enter settled amount" : "Enter approved amount"} />
             </div>
           )}
           {newStatus === 'REJECTED' && (
@@ -559,11 +554,17 @@ export default function ClaimDetail() {
           <div className="flex flex-wrap justify-end gap-2">
             <button className="btn-secondary" onClick={() => setStatusModal(false)}>Cancel</button>
             <button className="btn-primary" disabled={updateStatus.isPending}
-              onClick={() => updateStatus.mutate({
-                status: newStatus,
-                ...(approvedAmount ? { approvedAmount: Number(approvedAmount) } : {}),
-                ...(rejectionReason ? { rejectionReason } : {}),
-              })}>
+              onClick={() => {
+                if (newStatus === 'SETTLED' && (approvedAmount === '' || !Number.isFinite(Number(approvedAmount)) || Number(approvedAmount) < 0)) {
+                  toast.error('Enter the settled amount before saving a settled claim');
+                  return;
+                }
+                updateStatus.mutate({
+                  status: newStatus,
+                  ...(approvedAmount !== '' ? { approvedAmount: Number(approvedAmount) } : {}),
+                  ...(rejectionReason ? { rejectionReason } : {}),
+                });
+              }}>
               {updateStatus.isPending ? 'Saving…' : 'Update'}
             </button>
           </div>

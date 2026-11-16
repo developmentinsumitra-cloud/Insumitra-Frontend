@@ -487,6 +487,12 @@ export default function EmiTrackingView({ selectedMonth }: { selectedMonth: stri
           expectedInstAmt = expectedCount > 0 ? Math.round(netInstallmentBalance / expectedCount) : netInstallmentBalance;
         }
 
+        const installmentRoundingDiff = expectedCount * expectedInstAmt > 0 &&
+          Math.abs(expectedCount * expectedInstAmt - netInstallmentBalance) <= 1
+          ? netInstallmentBalance - expectedCount * expectedInstAmt
+          : 0;
+        const getInstallmentAmount = (index: number) =>
+          expectedInstAmt + (index === expectedCount - 1 ? installmentRoundingDiff : 0);
         const totalInstallmentAmount = (expectedCount * expectedInstAmt > 0 && Math.abs(expectedCount * expectedInstAmt - netInstallmentBalance) <= 1)
           ? netInstallmentBalance
           : (expectedCount * expectedInstAmt > 0 ? expectedCount * expectedInstAmt : netInstallmentBalance);
@@ -533,7 +539,7 @@ export default function EmiTrackingView({ selectedMonth }: { selectedMonth: stri
             );
             return {
               ...pmt,
-              amount: extra.installmentAmount || expectedInstAmt,
+              amount: getInstallmentAmount(idx),
               isPaid,
               paidDate: pmt.paidDate || (isPaid ? (extra.paymentDate || pmt.updatedAt || initialPaidDate.toISOString()) : undefined),
             };
@@ -549,35 +555,38 @@ export default function EmiTrackingView({ selectedMonth }: { selectedMonth: stri
           const preferredDay = instDayMatch ? parseInt(instDayMatch[0], 10) : null;
 
           for (let i = 0; i < expectedCount; i++) {
-            let curDate = new Date(firstDate);
-            if (i > 0) {
-              if (freq === 'MONTHLY' || (!['QUARTERLY', 'HALFYEARLY', 'SEMIANNUAL', 'YEARLY'].includes(freq))) {
-                curDate.setMonth(curDate.getMonth() + i);
-              } else if (freq === 'QUARTERLY') {
-                curDate.setMonth(curDate.getMonth() + i * 3);
-              } else if (freq === 'HALFYEARLY' || freq === 'SEMIANNUAL') {
-                curDate.setMonth(curDate.getMonth() + i * 6);
-              } else {
-                curDate.setFullYear(curDate.getFullYear() + i);
-              }
+            const monthsPerInstallment = freq === 'QUARTERLY'
+              ? 3
+              : freq === 'HALFYEARLY' || freq === 'SEMIANNUAL'
+                ? 6
+                : freq === 'YEARLY'
+                  ? 12
+                  : 1;
+            const targetMonthIndex = firstDate.getMonth() + i * monthsPerInstallment;
+            const targetYear = firstDate.getFullYear() + Math.floor(targetMonthIndex / 12);
+            const targetMonth = ((targetMonthIndex % 12) + 12) % 12;
+            const targetDay = preferredDay && preferredDay >= 1 && preferredDay <= 31
+              ? preferredDay
+              : firstDate.getDate();
+            const maxDays = new Date(targetYear, targetMonth + 1, 0).getDate();
+            let curDate = new Date(
+              targetYear,
+              targetMonth,
+              Math.min(targetDay, maxDays),
+              firstDate.getHours(),
+              firstDate.getMinutes(),
+              firstDate.getSeconds(),
+              firstDate.getMilliseconds(),
+            );
 
-              if (preferredDay && preferredDay >= 1 && preferredDay <= 31) {
-                const maxDays = new Date(curDate.getFullYear(), curDate.getMonth() + 1, 0).getDate();
-                curDate.setDate(Math.min(preferredDay, maxDays));
-              }
-
-              if (i === expectedCount - 1 && extra.lastInstallmentDate) {
-                const parsedLast = parseDateSafe(extra.lastInstallmentDate);
-                if (parsedLast) {
-                  const diffMonths = Math.abs((parsedLast.getFullYear() - firstDate.getFullYear()) * 12 + (parsedLast.getMonth() - firstDate.getMonth()));
-                  if (Math.abs(diffMonths - (expectedCount - 1)) <= 1) {
-                    curDate = parsedLast;
-                  }
+            if (i === expectedCount - 1 && extra.lastInstallmentDate) {
+              const parsedLast = parseDateSafe(extra.lastInstallmentDate);
+              if (parsedLast) {
+                const diffMonths = Math.abs((parsedLast.getFullYear() - firstDate.getFullYear()) * 12 + (parsedLast.getMonth() - firstDate.getMonth()));
+                if (Math.abs(diffMonths - (expectedCount - 1) * monthsPerInstallment) <= 1) {
+                  curDate = parsedLast;
                 }
               }
-            } else if (preferredDay && preferredDay >= 1 && preferredDay <= 31) {
-              const maxDays = new Date(curDate.getFullYear(), curDate.getMonth() + 1, 0).getDate();
-              curDate.setDate(Math.min(preferredDay, maxDays));
             }
 
             const dbPmt = dbPayments[i];
@@ -612,7 +621,7 @@ export default function EmiTrackingView({ selectedMonth }: { selectedMonth: stri
             payments.push({
               id: dbPmt?.id || dbPaidPayments[i]?.id || `syn-${p.id}-${i}`,
               policyId: p.id,
-              amount: expectedInstAmt,
+              amount: getInstallmentAmount(i),
               dueDate: safeIsoDate,
               isPaid,
               paidDate,
@@ -756,25 +765,7 @@ export default function EmiTrackingView({ selectedMonth }: { selectedMonth: stri
   const [drawerTab, setDrawerTab] = useState<'overview' | 'schedule' | 'communication' | 'notes'>('overview');
   const [newNoteInput, setNewNoteInput] = useState('');
   const [statusUpdateOpen, setStatusUpdateOpen] = useState(false);
-  const [selectedRecords, setSelectedRecords] = useState<string[]>([]);
   const [currentPage, setCurrentPage] = useState(1);
-
-  const handleSelectAll = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.checked) {
-      setSelectedRecords(sortedFilteredData.map(r => r.id));
-    } else {
-      setSelectedRecords([]);
-    }
-  };
-
-  const handleSelectRecord = (e: React.ChangeEvent<HTMLInputElement>, id: string) => {
-    e.stopPropagation();
-    if (e.target.checked) {
-      setSelectedRecords(prev => [...prev, id]);
-    } else {
-      setSelectedRecords(prev => prev.filter(rId => rId !== id));
-    }
-  };
 
   const [sortKey, setSortKey] = useState<string>('');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
@@ -1633,7 +1624,6 @@ export default function EmiTrackingView({ selectedMonth }: { selectedMonth: stri
             <thead className="sticky top-0 z-20 bg-slate-100 shadow-xs">
               <tr className="bg-slate-100 border-b border-slate-200 text-[11px] font-bold text-slate-700 uppercase tracking-wider">
                 {[
-                  { key: 'select', label: '' },
                   { key: 'customerName', label: 'Customer Name' },
                   { key: 'customerContactNo', label: 'Contact No.' },
                   { key: 'insuranceCompanyType', label: 'Insurance Type' },
@@ -1655,28 +1645,24 @@ export default function EmiTrackingView({ selectedMonth }: { selectedMonth: stri
                   <th key={h.key} 
                     className={clsx(
                       `px-4 py-3 border border-slate-200 select-none bg-slate-100 bg-clip-padding text-slate-700 ${h.align === 'right' ? 'text-right' : ''}`,
-                      h.key !== 'Actions' && h.key !== 'select' && 'cursor-pointer hover:text-slate-900 hover:bg-slate-200/70 transition-colors'
+                      h.key !== 'Actions' && 'cursor-pointer hover:text-slate-900 hover:bg-slate-200/70 transition-colors'
                     )}
                     onClick={() => {
-                      if (h.key === 'Actions' || h.key === 'select') return;
+                      if (h.key === 'Actions') return;
                       if (sortKey === h.key) setSortDir(d => d === 'asc' ? 'desc' : 'asc');
                       else { setSortKey(h.key); setSortDir('asc'); }
                     }}
                   >
-                    {h.key === 'select' ? (
-                      <input type="checkbox" onChange={handleSelectAll} checked={sortedFilteredData.length > 0 && selectedRecords.length === sortedFilteredData.length} className="w-3.5 h-3.5 rounded border-slate-300 text-blue-600 focus:ring-blue-500" />
-                    ) : (
-                      <span className={clsx("inline-flex items-center gap-1", h.align === 'right' && "justify-end w-full")}>
-                        {h.label}
-                        {h.key !== 'Actions' && (
-                          <span className="text-slate-400">
-                            {sortKey === h.key
-                              ? sortDir === 'asc' ? <ChevronUp size={13} className="text-slate-900 stroke-[3]" /> : <ChevronDown size={13} className="text-slate-900 stroke-[3]" />
-                              : <ChevronUp size={13} className="text-slate-500 stroke-[2.5]" />}
-                          </span>
-                        )}
-                      </span>
-                    )}
+                    <span className={clsx("inline-flex items-center gap-1", h.align === 'right' && "justify-end w-full")}>
+                      {h.label}
+                      {h.key !== 'Actions' && (
+                        <span className="text-slate-400">
+                          {sortKey === h.key
+                            ? sortDir === 'asc' ? <ChevronUp size={13} className="text-slate-900 stroke-[3]" /> : <ChevronDown size={13} className="text-slate-900 stroke-[3]" />
+                            : <ChevronUp size={13} className="text-slate-500 stroke-[2.5]" />}
+                        </span>
+                      )}
+                    </span>
                   </th>
                 ))}
               </tr>
@@ -1684,7 +1670,7 @@ export default function EmiTrackingView({ selectedMonth }: { selectedMonth: stri
             <tbody className="divide-y divide-slate-100 font-medium">
               {sortedFilteredData.length === 0 ? (
                 <tr>
-                  <td colSpan={18} className="px-5 py-12 text-center text-slate-400 font-semibold">
+                  <td colSpan={17} className="px-5 py-12 text-center text-slate-400 font-semibold">
                     No EMI records match the selected filters.
                   </td>
                 </tr>
@@ -1696,12 +1682,8 @@ export default function EmiTrackingView({ selectedMonth }: { selectedMonth: stri
                     className={clsx(
                       "transition-colors cursor-pointer group",
                       idx % 2 === 1 ? 'bg-slate-50/80' : 'bg-white',
-                      selectedRecords.includes(r.id) && 'bg-blue-50/50'
                     )}
                   >
-                    <td className="px-4 py-3.5 border border-slate-200" onClick={e => e.stopPropagation()}>
-                      <input type="checkbox" checked={selectedRecords.includes(r.id)} onChange={(e) => handleSelectRecord(e, r.id)} className="w-3.5 h-3.5 rounded border-slate-300 text-blue-600 focus:ring-blue-500 cursor-pointer" />
-                    </td>
                     <td className="px-4 py-3.5 border border-slate-200">
                       <span className="font-extrabold text-slate-900 text-xs hover:text-blue-600 transition-colors">
                         {r.customerName}

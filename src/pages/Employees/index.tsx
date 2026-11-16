@@ -143,9 +143,7 @@ export default function Employees() {
   ];
 
   const apiEmployees = data?.data ?? data ?? [];
-  const allEmployees = Array.isArray(apiEmployees) && apiEmployees.length > 0 
-    ? [...apiEmployees, ...MOCK_FALLBACK_EMPLOYEES.filter(m => !apiEmployees.some((a: any) => a.id === m.id))]
-    : MOCK_FALLBACK_EMPLOYEES;
+  const allEmployees = Array.isArray(apiEmployees) ? apiEmployees : [];
 
   const sortedEmployees = React.useMemo(() => {
     return sortData(Array.isArray(allEmployees) ? allEmployees : [], sortKey, sortDir, (row: any, key: string) => {

@@ -157,7 +157,7 @@ export default function Sidebar({ mobileOpen, setMobileOpen }: { mobileOpen: boo
 
       if (item.feature) {
         if (item.feature === 'workspace') {
-          return perms.includes('workspace') || perms.length === 0;
+          return perms.includes('workspace');
         }
         if (item.feature === 'employees') {
           return perms.includes('employees') || perms.includes('manage_employees') || perms.includes('view_employees');

@@ -1655,7 +1655,7 @@ export default function Contacts() {
     queryKey: ['contacts-policies-list'],
     queryFn: () => policiesService.list({ limit: 2000, sortBy: 'createdAt', sortOrder: 'desc' }),
     enabled: true,
-    staleTime: 0,
+    staleTime: 60_000,
   });
 
   const { data: claimsRes } = useClaims({ page: 1, limit: 500 });

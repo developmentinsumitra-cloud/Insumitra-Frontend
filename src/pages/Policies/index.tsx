@@ -4,7 +4,7 @@ import { useNavigate, useLocation, useSearchParams, useParams } from 'react-rout
 import { Plus, X, User, Shield, Pencil, Trash2, Upload, Filter, Search, Info, Save, ChevronDown, Settings, CreditCard, Building, CheckCircle2, AlertTriangle, Users, Activity, FileText, FileCheck2, Clock, Download, MessageCircle, History, Eye } from 'lucide-react';
 import EmiTrackingView, { MonthPickerDropdown } from './EmiTrackingView';
 import PhcTrackingView from './PhcTrackingView';
-import { usePolicies, useCreatePolicy, useUpdatePolicy, useDeletePolicy, useBulkAssignPolicies } from '@hooks/usePolicies';
+import { usePolicies, useCreatePolicy, useUpdatePolicy, useDeletePolicy } from '@hooks/usePolicies';
 import { useClaims, useCreateClaim } from '@hooks/useClaims';
 import { sortData } from '../../utils/sortUtils';
 import { formatIndianNumber } from '../../utils/numberUtils';
@@ -1311,11 +1311,6 @@ export default function Policies() {
   const [colPickerOpen, setColPickerOpen] = useState(false);
   const colPickerRef = useRef<HTMLDivElement>(null);
 
-  // Bulk assignment state
-  const [selectedIds, setSelectedIds] = useState<string[]>([]);
-  const [assignTarget, setAssignTarget] = useState('');
-  const bulkAssignMutation = useBulkAssignPolicies();
-
   const { data: employeeResults } = useQuery({
     queryKey: ['employees-list'],
     queryFn: () => employeesService.list({ limit: 100 }),
@@ -1431,22 +1426,6 @@ export default function Policies() {
     `);
     printWindow.document.close();
   };
-
-  const handleBulkAssign = async () => {
-    if (!assignTarget) return;
-    const assignedEmployeeId = assignTarget === 'unassigned' ? null : assignTarget;
-    try {
-      await bulkAssignMutation.mutateAsync({
-        ids: selectedIds,
-        assignedEmployeeId,
-      });
-      setSelectedIds([]);
-      setAssignTarget('');
-    } catch (e) {
-      console.error('[Bulk assign failed]', e);
-    }
-  };
-
 
   // Click outside handlers for filters
   useEffect(() => {
@@ -1641,17 +1620,12 @@ export default function Policies() {
           p.assignedEmployee?.userId,
           ...(Array.isArray(p.assignedEmployeeIds) ? p.assignedEmployeeIds : []),
         ].filter(Boolean);
-
-        if (policyAssigneeIds.length > 0) {
-          return policyAssigneeIds.some((id: string) => myIds.includes(id));
-        }
-
         const contactAssigneeIds = [
           p.contact?.assignedEmployeeId,
           ...(Array.isArray(p.contact?.assignedEmployeeIds) ? p.contact.assignedEmployeeIds : []),
         ].filter(Boolean);
 
-        return contactAssigneeIds.some((id: string) => myIds.includes(id));
+        return [...policyAssigneeIds, ...contactAssigneeIds].some((id: string) => myIds.includes(id));
       });
     }
     return list;
@@ -3384,44 +3358,6 @@ export default function Policies() {
   const COLS: Column<Policy>[] = useMemo(() => {
     const cols: Column<Policy>[] = [];
 
-    // Prepend checkbox selection column for OWNER
-    if (user?.role === 'OWNER') {
-      cols.push({
-        key: 'select',
-        label: (
-          <input
-            type="checkbox"
-            checked={rawPolicies.length > 0 && selectedIds.length === rawPolicies.length}
-            onChange={e => {
-              if (e.target.checked) {
-                setSelectedIds(rawPolicies.map((p: any) => p.id));
-              } else {
-                setSelectedIds([]);
-              }
-            }}
-            onClick={e => e.stopPropagation()}
-            className="rounded border-gray-300 text-primary-600 focus:ring-primary-500 cursor-pointer"
-          />
-        ) as any,
-        render: r => (
-          <input
-            type="checkbox"
-            checked={selectedIds.includes(r.id)}
-            onChange={e => {
-              e.stopPropagation();
-              if (e.target.checked) {
-                setSelectedIds(prev => [...prev, r.id]);
-              } else {
-                setSelectedIds(prev => prev.filter(id => id !== r.id));
-              }
-            }}
-            onClick={e => e.stopPropagation()}
-            className="rounded border-gray-300 text-primary-600 focus:ring-primary-500 cursor-pointer"
-          />
-        ),
-      });
-    }
-
     const colConfigs: { key: string; label: string; sortable?: boolean; render?: (r: Policy) => React.ReactNode }[] = [
       {
         key: 'proposerName',
@@ -3815,7 +3751,7 @@ export default function Policies() {
     });
 
     return cols;
-  }, [user?.role, data, selectedIds, allClaims, isColVisibleInSettings, allPolicyColumnsConfig]);
+  }, [user?.role, data, allClaims, isColVisibleInSettings, allPolicyColumnsConfig]);
 
   const submitEdit = async (body: EditForm) => {
     if (!editTarget) return;
@@ -4682,43 +4618,6 @@ export default function Policies() {
               >
                 Clear All
               </button>
-            </div>
-          )}
-
-          {selectedIds.length > 0 && user?.role === 'OWNER' && (
-            <div className="flex items-center justify-between p-3 bg-blue-50/50 border border-blue-100 rounded-lg text-sm transition-all animate-fadeIn">
-              <span className="font-medium text-blue-800">
-                {selectedIds.length} policies selected
-              </span>
-              <div className="flex flex-wrap items-center gap-2">
-                <select
-                  value={assignTarget}
-                  onChange={e => setAssignTarget(e.target.value)}
-                  className="input py-1.5 px-3 text-xs w-48 bg-white border-gray-300"
-                >
-                  <option value="">Select Assignee...</option>
-                  <option value="unassigned">Unassign</option>
-                  {employeeResults?.data?.map((emp: any) => (
-                    <option key={emp.id} value={emp.userId}>
-                      {emp.firstName || emp.employeeProfile?.firstName || 'Unknown'} {emp.lastName || emp.employeeProfile?.lastName || ''}
-                    </option>
-                  ))}
-                </select>
-                <button
-                  onClick={handleBulkAssign}
-                  disabled={!assignTarget || bulkAssignMutation.isPending}
-                  className="btn-primary py-1.5 px-3 text-[10px] sm:text-xs cursor-pointer disabled:opacity-50"
-                >
-                  {bulkAssignMutation.isPending ? 'Assigning...' : 'Assign'}
-                </button>
-                <button
-                  onClick={() => setSelectedIds([])}
-                  className="p-1 rounded hover:bg-blue-100 text-blue-600"
-                  title="Clear selection"
-                >
-                  <X size={16} />
-                </button>
-              </div>
             </div>
           )}
 

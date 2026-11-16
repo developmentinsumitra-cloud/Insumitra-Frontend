@@ -1278,6 +1278,11 @@ export function ClaimEditForm({ initial, isPending, onSave, onCancel, employees,
         return;
       }
 
+      if (getBackendStatusFromUi(uiClaimStatus) === 'SETTLED' && (approvedAmount === '' || !Number.isFinite(Number(approvedAmount)) || Number(approvedAmount) < 0)) {
+        toast.error('Enter the settled amount before saving a settled claim');
+        return;
+      }
+
       if (admissionAt && dischargeAt && formatDateForInput(admissionAt) && formatDateForInput(dischargeAt)) {
         if (formatDateForInput(dischargeAt) < formatDateForInput(admissionAt)) {
           toast.error('Date of Discharge cannot be earlier than Date of Admission');
@@ -1493,9 +1498,6 @@ export function ClaimEditForm({ initial, isPending, onSave, onCancel, employees,
                             value={uiClaimStatus}
                             onChange={val => {
                               setUiClaimStatus(val);
-                              if (val.toLowerCase().includes('settle') && !approvedAmount && claimAmount) {
-                                setApprovedAmount(String(claimAmount));
-                              }
                             }}
                             placeholder="Select Status"
                             options={getActiveDropdownOptions('Claim', 'Claim Status', CLAIM_STATUS_OPTIONS)}
@@ -3178,14 +3180,19 @@ export default function Claims({ contactId, contact, embedded = false }: ClaimsP
       if (myEmp?.userId) myIds.push(myEmp.userId);
 
       return list.filter((c: any) => {
-        const claimAssigneeIds = [
+        const assignedIds = [
           c.assignedEmployeeId,
           c.assignedEmployee?.id,
           c.assignedEmployee?.userId,
           ...(Array.isArray(c.assignedEmployeeIds) ? c.assignedEmployeeIds : []),
+          c.policy?.assignedEmployeeId,
+          c.policy?.assignedEmployee?.id,
+          c.policy?.assignedEmployee?.userId,
+          c.contact?.assignedEmployeeId,
+          ...(Array.isArray(c.contact?.assignedEmployeeIds) ? c.contact.assignedEmployeeIds : []),
         ].filter(Boolean);
 
-        return claimAssigneeIds.some((id: string) => myIds.includes(id));
+        return assignedIds.some((id: string) => myIds.includes(id));
       });
     }
     return list;
@@ -4457,13 +4464,11 @@ export default function Claims({ contactId, contact, embedded = false }: ClaimsP
       label: 'Settled Amt',
       render: r => {
         const notes = getClaimNotesData(r.notes);
-        const settledAmount = (r.approvedAmount !== undefined && r.approvedAmount !== null && Number(r.approvedAmount) > 0)
+        const settledAmount = (r.approvedAmount !== undefined && r.approvedAmount !== null && Number.isFinite(Number(r.approvedAmount)))
           ? Number(r.approvedAmount)
-          : (notes.amtPayableToInsured !== undefined && notes.amtPayableToInsured !== null && Number(notes.amtPayableToInsured) > 0)
+          : (notes.amtPayableToInsured !== undefined && notes.amtPayableToInsured !== null && Number(notes.amtPayableToInsured) > 0 && Number.isFinite(Number(notes.amtPayableToInsured)))
             ? Number(notes.amtPayableToInsured)
-            : (getClaimUiStatus(r) === 'Settled' && r.claimAmount > 0)
-              ? Number(r.claimAmount)
-              : undefined;
+            : undefined;
         return settledAmount !== undefined
           ? <span className="font-bold text-emerald-600 text-sm">₹{Number(settledAmount).toLocaleString('en-IN')}</span>
           : <span className="text-slate-400 text-sm font-medium">—</span>;
@@ -5849,9 +5854,6 @@ export default function Claims({ contactId, contact, embedded = false }: ClaimsP
                             value={watch('uiClaimStatus') || ''}
                             onChange={val => {
                               setValue('uiClaimStatus', val);
-                              if (val.toLowerCase().includes('settle') && !watch('approvedAmount') && watch('claimAmount')) {
-                                setValue('approvedAmount', Number(watch('claimAmount')));
-                              }
                             }}
                             placeholder="Select Status"
                             options={getActiveDropdownOptions('Claim', 'Claim Status', CLAIM_STATUS_OPTIONS)}
@@ -7568,10 +7570,11 @@ export function ClaimDetailView({ claim, onEdit }: { claim: any; onEdit?: () => 
             <span>Total Claim Amount:</span>
             <span>₹{Number(claim?.claimAmount || 0).toLocaleString('en-IN')}</span>
           </div>
-          {((claim?.approvedAmount != null && Number(claim.approvedAmount) > 0) || displayStatus === 'Settled') && (
+          {((claim?.approvedAmount != null && Number.isFinite(Number(claim.approvedAmount))) ||
+            (notesData.amtPayableToInsured != null && Number(notesData.amtPayableToInsured) > 0 && Number.isFinite(Number(notesData.amtPayableToInsured)))) && (
             <div className="flex justify-between col-span-2 pt-1 font-bold text-sm text-emerald-700">
               <span>Settled Amount:</span>
-              <span>₹{Number(claim?.approvedAmount ?? notesData.amtPayableToInsured ?? claim?.claimAmount ?? 0).toLocaleString('en-IN')}</span>
+              <span>₹{Number(claim?.approvedAmount ?? notesData.amtPayableToInsured).toLocaleString('en-IN')}</span>
             </div>
           )}
         </div>

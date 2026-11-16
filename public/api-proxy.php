@@ -8,7 +8,13 @@
 @set_time_limit(120);
 @ini_set('max_execution_time', '120');
 
-$backendBase = 'https://insumitrabackend-2w2y.onrender.com/api/v1';
+$backendBase = getenv('BACKEND_URL') ?: 'https://insumitrabackend-2w2y.onrender.com/api/v1';
+if (file_exists(__DIR__ . '/backend_url.txt')) {
+    $customUrl = trim(file_get_contents(__DIR__ . '/backend_url.txt'));
+    if (!empty($customUrl)) {
+        $backendBase = rtrim($customUrl, '/');
+    }
+}
 $allowedOriginHeader = 'https://insumitr.exportshub.in';
 
 // Handle CORS preflight if called cross-origin
@@ -25,17 +31,29 @@ if ($method === 'OPTIONS') {
     exit;
 }
 
-// Resolve endpoint path (support both __path and _path)
+// Resolve endpoint path (support __path, _path, and path)
 $rawPath = '';
 if (!empty($_GET['__path'])) {
     $rawPath = $_GET['__path'];
 } elseif (!empty($_GET['_path'])) {
     $rawPath = $_GET['_path'];
+} elseif (!empty($_GET['path'])) {
+    $rawPath = $_GET['path'];
 } elseif (!empty($_SERVER['PATH_INFO'])) {
     $rawPath = $_SERVER['PATH_INFO'];
 } else {
     $uri = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
     $rawPath = preg_replace('#^/(api-proxy\.php|api/v1)#', '', $uri);
+}
+
+// Handle cases where path contains embedded query parameters (e.g. "claims?page=1&limit=500")
+if (strpos($rawPath, '?') !== false) {
+    list($cleanPathPart, $extraQuery) = explode('?', $rawPath, 2);
+    $rawPath = $cleanPathPart;
+    if (!empty($extraQuery)) {
+        parse_str($extraQuery, $extraParams);
+        $_GET = array_merge($extraParams, $_GET);
+    }
 }
 
 $path = '/' . ltrim((string)$rawPath, '/');
@@ -45,7 +63,7 @@ if ($path === '/' || $path === '') {
 
 // Build query string excluding internal path parameters
 $queryParams = $_GET;
-unset($queryParams['__path'], $queryParams['_path']);
+unset($queryParams['__path'], $queryParams['_path'], $queryParams['path']);
 $queryString = http_build_query($queryParams);
 
 $targetUrl = rtrim($backendBase, '/') . $path . ($queryString ? '?' . $queryString : '');
