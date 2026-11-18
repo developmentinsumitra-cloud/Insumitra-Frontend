@@ -8,7 +8,7 @@
 @set_time_limit(120);
 @ini_set('max_execution_time', '120');
 
-$backendBase = getenv('BACKEND_URL') ?: 'https://insumitrabackend-2w2y.onrender.com/api/v1';
+$backendBase = getenv('BACKEND_URL') ?: 'https://insumitra-backend-z8et.onrender.com/api/v1';
 if (file_exists(__DIR__ . '/backend_url.txt')) {
     $customUrl = trim(file_get_contents(__DIR__ . '/backend_url.txt'));
     if (!empty($customUrl)) {

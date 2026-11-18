@@ -311,10 +311,41 @@
 
   /* ──────────────────────────── Scrollbar ─────────────────────────────────── */
 
-  .custom-scrollbar::-webkit-scrollbar        { width: 5px; height: 5px; }
-  .custom-scrollbar::-webkit-scrollbar-track  { background: transparent; }
-  .custom-scrollbar::-webkit-scrollbar-thumb  { background: #d1d5db; border-radius: 10px; }
-  .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #9ca3af; }
+  .custom-scrollbar::-webkit-scrollbar        { width: 10px; height: 11px; }
+  .custom-scrollbar::-webkit-scrollbar-track  { background: #f1f5f9; border-radius: 8px; }
+  .custom-scrollbar::-webkit-scrollbar-thumb  { background: #94a3b8; border-radius: 8px; border: 2px solid #f1f5f9; }
+  .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #64748b; }
+  .custom-scrollbar {
+    scrollbar-width: auto;
+    scrollbar-color: #94a3b8 #f1f5f9;
+  }
+
+  /* Table-specific scrollbars (Policy table, Installment tracking, PHC tracking, Contact list, etc.) */
+  div:has(> table)::-webkit-scrollbar,
+  div:has(> .modern-table)::-webkit-scrollbar {
+    width: 10px;
+    height: 12px;
+  }
+  div:has(> table)::-webkit-scrollbar-track,
+  div:has(> .modern-table)::-webkit-scrollbar-track {
+    background: #f1f5f9;
+    border-radius: 8px;
+  }
+  div:has(> table)::-webkit-scrollbar-thumb,
+  div:has(> .modern-table)::-webkit-scrollbar-thumb {
+    background: #94a3b8;
+    border-radius: 8px;
+    border: 2px solid #f1f5f9;
+  }
+  div:has(> table)::-webkit-scrollbar-thumb:hover,
+  div:has(> .modern-table)::-webkit-scrollbar-thumb:hover {
+    background: #64748b;
+  }
+  div:has(> table),
+  div:has(> .modern-table) {
+    scrollbar-width: auto;
+    scrollbar-color: #94a3b8 #f1f5f9;
+  }
 
   .tab-scrollbar::-webkit-scrollbar { height: 6px; }
   .tab-scrollbar::-webkit-scrollbar-track { background: rgba(226, 232, 240, 0.7); border-radius: 9999px; }

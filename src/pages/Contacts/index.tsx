@@ -1388,10 +1388,19 @@ export default function Contacts() {
         }
         toast.success(targetIdx !== null && targetIdx >= 0 ? 'Family member details updated and saved' : 'Family member added and saved');
 
+        qc.invalidateQueries({ queryKey: ['contacts-policies-list'] });
+        qc.invalidateQueries({ queryKey: ['policies'] });
+        qc.invalidateQueries({ queryKey: ['contacts'] });
+        if (editContactId) {
+          qc.invalidateQueries({ queryKey: ['contact', editContactId] });
+        }
+
         // Refresh contact relationships from server
         contactsService.get(editContactId).then(res => {
           const contact = res?.data?.data || res?.data || res;
-          if (contact && Array.isArray(contact.relationships)) {
+          if (contact) {
+            setLoadedContact(contact);
+            if (Array.isArray(contact.relationships)) {
             const rels1 = contact.relationships.map((r: any) => {
               const c = r.relatedContact || r.contact || {};
               const parsedNames = extractNameFields(c);
@@ -1470,7 +1479,8 @@ export default function Contacts() {
             });
             setFamilyMembers(rels1);
           }
-        }).catch(() => {});
+        }
+      }).catch(() => {});
       } catch (err: any) {
         console.error('Failed to save family member to backend:', err);
         toast.error(`Failed to save family member: ${err?.response?.data?.message || err?.message || 'Error'}`);
@@ -8185,7 +8195,7 @@ export default function Contacts() {
                               }
                             });
                           }
-                          if (pMembers.length === 0 && Array.isArray(familyMembers) && familyMembers.length > 0) {
+                          if (Array.isArray(familyMembers) && familyMembers.length > 0) {
                             familyMembers.forEach((fm: any, i: number) => {
                               const name = (fm.name || `${fm.firstName || ''} ${fm.lastName || ''}`).trim();
                               if (name && !seenPM.has(name.toLowerCase())) {
@@ -8199,7 +8209,7 @@ export default function Contacts() {
                               }
                             });
                           }
-                          if (pMembers.length === 0 && Array.isArray(loadedContact?.relationships) && loadedContact.relationships.length > 0) {
+                          if (Array.isArray(loadedContact?.relationships) && loadedContact.relationships.length > 0) {
                             loadedContact.relationships.forEach((rel: any, i: number) => {
                               const target = rel.relatedContact || rel.contact || rel;
                               const name = (target?.name || `${target?.firstName || ''} ${target?.lastName || ''}`).trim();
@@ -8282,7 +8292,9 @@ export default function Contacts() {
                     </p>
                     <button
                       type="button"
+                      disabled={isViewMode}
                       onClick={(e) => {
+                        if (isViewMode) return;
                         const contactId = editContactId || loadedContact?.id;
                         if (!contactId) {
                           toast.error('Please save the contact details first before adding a policy.');
@@ -8295,8 +8307,13 @@ export default function Contacts() {
                         setPolicyToEdit(null);
                         setCreatePolicyModalOpen(true);
                       }}
-                      className="flex items-center justify-center gap-2 px-4 py-2.5 border-2 border-blue-400 text-blue-600 text-xs font-semibold rounded-lg hover:bg-blue-50 cursor-pointer transition-colors"
-                      title="Add New Policy (Ctrl+Click to open in new tab)"
+                      className={clsx(
+                        "flex items-center justify-center gap-2 px-4 py-2.5 border-2 text-xs font-semibold rounded-lg transition-colors",
+                        isViewMode
+                          ? "border-slate-300 text-slate-400 bg-slate-100 cursor-not-allowed opacity-60"
+                          : "border-blue-400 text-blue-600 hover:bg-blue-50 cursor-pointer"
+                      )}
+                      title={isViewMode ? "Click 'Edit' above to add a new policy" : "Add New Policy (Ctrl+Click to open in new tab)"}
                     >
                       + Add New Policy
                     </button>

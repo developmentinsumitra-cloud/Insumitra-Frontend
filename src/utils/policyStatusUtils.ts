@@ -10,36 +10,65 @@ export function getPolicyStatusDisplay(policy: any): { label: string; badgeClass
   if (rawStatus === 'INACTIVE_OLD' || lifecycleRaw === 'INACTIVE_OLD') {
     return { label: 'Inactive(Old)', badgeClass: 'bg-slate-100 text-slate-600 border-slate-300' };
   }
+  if (rawStatus === 'SURRENDERED' || lifecycleRaw === 'SURRENDERED') {
+    return { label: 'Surrendered', badgeClass: 'bg-rose-100 text-rose-800 border-rose-300' };
+  }
+  if (rawStatus === 'EXPIRED' || lifecycleRaw === 'EXPIRED') {
+    return { label: 'Expired', badgeClass: 'bg-slate-100 text-slate-600 border-slate-300' };
+  }
+  if (rawStatus === 'LAPSED' || lifecycleRaw === 'LAPSED') {
+    return { label: 'Lapsed', badgeClass: 'bg-rose-100 text-rose-800 border-rose-300' };
+  }
+  if (rawStatus === 'GRACE_PERIOD' || lifecycleRaw === 'GRACE_PERIOD') {
+    let label = 'Grace Period';
+    if (policy.displayStatus && String(policy.displayStatus).toLowerCase().includes('grace period')) {
+      label = policy.displayStatus;
+    } else if (policy.endDate) {
+      const end = new Date(policy.endDate);
+      const now = new Date();
+      const todayMs = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+      const endMs = new Date(end.getFullYear(), end.getMonth(), end.getDate()).getTime();
+      const diffDays = Math.round((todayMs - endMs) / (1000 * 60 * 60 * 24));
+      if (diffDays >= 1 && diffDays <= 30) {
+        label = `Grace Period - Day ${diffDays} of 30`;
+      }
+    }
+    return { label, badgeClass: 'bg-orange-100 text-orange-800 border-orange-300' };
+  }
+  if (rawStatus === 'RENEWAL_DUE' || lifecycleRaw === 'RENEWAL_DUE') {
+    return { label: 'Renewal Due', badgeClass: 'bg-amber-100 text-amber-800 border-amber-300' };
+  }
 
+  // If there's a backend-provided displayStatus for an active/inforce policy
   if (policy.displayStatus) {
     let badgeClass = 'bg-emerald-100 text-emerald-800 border-emerald-300';
-    if (lifecycleRaw === 'RENEWAL_DUE' || rawStatus === 'RENEWAL_DUE') badgeClass = 'bg-amber-100 text-amber-800 border-amber-300';
-    else if (lifecycleRaw === 'GRACE_PERIOD' || rawStatus === 'GRACE_PERIOD') badgeClass = 'bg-orange-100 text-orange-800 border-orange-300';
-    else if (lifecycleRaw === 'LAPSED' || rawStatus === 'LAPSED') badgeClass = 'bg-rose-100 text-rose-800 border-rose-300';
-    else if (lifecycleRaw === 'CANCELLED' || rawStatus === 'CANCELLED') badgeClass = 'bg-red-100 text-red-800 border-red-300';
-    else if (lifecycleRaw === 'INACTIVE_OLD' || rawStatus === 'INACTIVE_OLD') badgeClass = 'bg-slate-100 text-slate-600 border-slate-300';
-    else badgeClass = 'bg-emerald-100 text-emerald-800 border-emerald-300';
+    const dispUpper = String(policy.displayStatus).toUpperCase();
+    if (dispUpper.includes('RENEWAL')) badgeClass = 'bg-amber-100 text-amber-800 border-amber-300';
+    else if (dispUpper.includes('GRACE')) badgeClass = 'bg-orange-100 text-orange-800 border-orange-300';
+    else if (dispUpper.includes('LAPSED')) badgeClass = 'bg-rose-100 text-rose-800 border-rose-300';
+    else if (dispUpper.includes('CANCELLED')) badgeClass = 'bg-red-100 text-red-800 border-red-300';
+    else if (dispUpper.includes('INACTIVE')) badgeClass = 'bg-slate-100 text-slate-600 border-slate-300';
 
     return { label: policy.displayStatus, badgeClass };
   }
 
-  if (rawStatus === 'INFORCE') return { label: 'Inforce', badgeClass: 'bg-emerald-100 text-emerald-800 border-emerald-300' };
-  if (rawStatus === 'RENEWAL_DUE') return { label: 'Renewal Due', badgeClass: 'bg-amber-100 text-amber-800 border-amber-300' };
-  if (rawStatus === 'GRACE_PERIOD') return { label: 'Grace Period', badgeClass: 'bg-orange-100 text-orange-800 border-orange-300' };
-  if (rawStatus === 'LAPSED') return { label: 'Lapsed', badgeClass: 'bg-rose-100 text-rose-800 border-rose-300' };
+  if (rawStatus === 'INFORCE' || rawStatus === 'ACTIVE') {
+    if (!policy.endDate) return { label: 'Inforce', badgeClass: 'bg-emerald-100 text-emerald-800 border-emerald-300' };
 
-  if (!policy.endDate) return { label: 'Inforce', badgeClass: 'bg-emerald-100 text-emerald-800 border-emerald-300' };
+    const end = new Date(policy.endDate);
+    const now = new Date();
+    const todayMs = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+    const endMs = new Date(end.getFullYear(), end.getMonth(), end.getDate()).getTime();
+    const diffDays = Math.round((todayMs - endMs) / (1000 * 60 * 60 * 24));
 
-  const end = new Date(policy.endDate);
-  const now = new Date();
-  const todayMs = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
-  const endMs = new Date(end.getFullYear(), end.getMonth(), end.getDate()).getTime();
-  const diffDays = Math.round((todayMs - endMs) / (1000 * 60 * 60 * 24));
+    if (diffDays < -45) return { label: 'Inforce', badgeClass: 'bg-emerald-100 text-emerald-800 border-emerald-300' };
+    if (diffDays >= -45 && diffDays <= 0) return { label: 'Renewal Due', badgeClass: 'bg-amber-100 text-amber-800 border-amber-300' };
+    if (diffDays >= 1 && diffDays <= 30) return { label: `Grace Period - Day ${diffDays} of 30`, badgeClass: 'bg-orange-100 text-orange-800 border-orange-300' };
+    return { label: 'Lapsed', badgeClass: 'bg-rose-100 text-rose-800 border-rose-300' };
+  }
 
-  if (diffDays < -45) return { label: 'Inforce', badgeClass: 'bg-emerald-100 text-emerald-800 border-emerald-300' };
-  if (diffDays >= -45 && diffDays <= 0) return { label: 'Renewal Due', badgeClass: 'bg-amber-100 text-amber-800 border-amber-300' };
-  if (diffDays >= 1 && diffDays <= 30) return { label: `Grace Period - Day ${diffDays} of 30`, badgeClass: 'bg-orange-100 text-orange-800 border-orange-300' };
-  return { label: 'Lapsed', badgeClass: 'bg-rose-100 text-rose-800 border-rose-300' };
+  const formattedRaw = rawStatus.charAt(0).toUpperCase() + rawStatus.slice(1).toLowerCase().replace(/_/g, ' ');
+  return { label: formattedRaw, badgeClass: 'bg-slate-100 text-slate-700 border-slate-300' };
 }
 
 export function calculateLastInstallmentDate(

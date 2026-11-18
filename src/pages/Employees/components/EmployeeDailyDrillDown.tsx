@@ -1,9 +1,5 @@
 import React from 'react';
-import { 
-  Clock, X, CheckCircle2, User, Calendar, 
-  TrendingUp, CreditCard, HeartPulse, FileCheck2, RefreshCw, IndianRupee, ShieldCheck 
-} from 'lucide-react';
-import { format } from 'date-fns';
+import { Clock, X, Calendar } from 'lucide-react';
 
 export interface DailyDrillDownRecord {
   date: string;
@@ -83,70 +79,6 @@ export default function EmployeeDailyDrillDown({ isOpen, onClose, record }: Empl
 
         {/* Scrollable Body */}
         <div className="p-4 sm:p-5 overflow-y-auto space-y-5 custom-scrollbar">
-          
-          {/* Shift Time & Break Statistics */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
-            <div className="bg-slate-50 p-2.5 rounded-xl border border-slate-200/80">
-              <span className="text-[10px] font-bold text-slate-400 block uppercase">Clock-In / Out</span>
-              <span className="text-xs font-black text-slate-800 font-mono">
-                {record.clockInTime} – {record.clockOutTime}
-              </span>
-            </div>
-
-            <div className="bg-slate-50 p-2.5 rounded-xl border border-slate-200/80">
-              <span className="text-[10px] font-bold text-slate-400 block uppercase">Breaks (Deducted)</span>
-              <span className="text-xs font-black text-amber-700 font-mono">
-                {record.breakDuration}
-              </span>
-            </div>
-
-            <div className="bg-emerald-50/60 p-2.5 rounded-xl border border-emerald-200">
-              <span className="text-[10px] font-bold text-emerald-600 block uppercase">Net Productive Time</span>
-              <span className="text-xs font-black text-emerald-900 font-mono">
-                {record.netWorkingHours}
-              </span>
-            </div>
-
-            <div className="bg-blue-50/60 p-2.5 rounded-xl border border-blue-200">
-              <span className="text-[10px] font-bold text-blue-600 block uppercase">Attendance Status</span>
-              <span className="text-xs font-black text-blue-900">
-                {record.attendanceStatus}
-              </span>
-            </div>
-          </div>
-
-          {/* Daily Deliverables Counter Strip */}
-          <div className="p-3 bg-slate-50/70 rounded-xl border border-slate-200/80">
-            <h4 className="text-[11px] font-extrabold text-slate-700 uppercase tracking-wider mb-2">
-              Deliverables Completed on {record.date}
-            </h4>
-            <div className="grid grid-cols-3 sm:grid-cols-6 gap-2 text-center text-xs">
-              <div className="bg-white p-2 rounded-lg border border-slate-200/80">
-                <span className="text-base font-black text-slate-800 block">{record.tasksCompleted}</span>
-                <span className="text-[10px] text-slate-500 font-semibold">Tasks Done</span>
-              </div>
-              <div className="bg-white p-2 rounded-lg border border-slate-200/80">
-                <span className="text-base font-black text-blue-800 block">{record.leadMovements}</span>
-                <span className="text-[10px] text-slate-500 font-semibold">Leads Moved</span>
-              </div>
-              <div className="bg-white p-2 rounded-lg border border-slate-200/80">
-                <span className="text-base font-black text-purple-800 block">{record.installmentsClosed}</span>
-                <span className="text-[10px] text-slate-500 font-semibold">EMIs Closed</span>
-              </div>
-              <div className="bg-white p-2 rounded-lg border border-slate-200/80">
-                <span className="text-base font-black text-rose-800 block">{record.phcsCompleted}</span>
-                <span className="text-[10px] text-slate-500 font-semibold">PHC Checkups</span>
-              </div>
-              <div className="bg-white p-2 rounded-lg border border-slate-200/80">
-                <span className="text-base font-black text-amber-800 block">{record.claimsHandled}</span>
-                <span className="text-[10px] text-slate-500 font-semibold">Claims Handled</span>
-              </div>
-              <div className="bg-white p-2 rounded-lg border border-slate-200/80">
-                <span className="text-base font-black text-emerald-800 block">₹{(record.premiumGenerated / 1000).toFixed(0)}k</span>
-                <span className="text-[10px] text-slate-500 font-semibold">Premium (₹)</span>
-              </div>
-            </div>
-          </div>
 
           {/* Activity Event Timeline */}
           <div>
@@ -194,26 +126,32 @@ export default function EmployeeDailyDrillDown({ isOpen, onClose, record }: Empl
             </div>
           </div>
 
-          {/* EOD Remarks & Next Day Plan */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2 border-t border-slate-100">
-            <div className="p-3 bg-slate-50 rounded-xl border border-slate-200/80">
-              <span className="text-[10px] font-bold text-slate-400 block uppercase mb-1">
-                EOD Accomplishments &amp; Remarks
-              </span>
-              <p className="text-xs text-slate-700 whitespace-pre-wrap font-medium">
-                {record.eodNotes || 'No notes submitted for this shift.'}
-              </p>
-            </div>
+          {/* EOD Remarks & Next Day Plan (if recorded) */}
+          {(record.eodNotes || record.nextDayPlan) && (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2 border-t border-slate-100">
+              {record.eodNotes ? (
+                <div className="p-3 bg-slate-50 rounded-xl border border-slate-200/80">
+                  <span className="text-[10px] font-bold text-slate-400 block uppercase mb-1">
+                    EOD Accomplishments &amp; Remarks
+                  </span>
+                  <p className="text-xs text-slate-700 whitespace-pre-wrap font-medium">
+                    {record.eodNotes}
+                  </p>
+                </div>
+              ) : null}
 
-            <div className="p-3 bg-purple-50/50 rounded-xl border border-purple-200/80">
-              <span className="text-[10px] font-bold text-purple-700 block uppercase mb-1">
-                Next Day Working Plan
-              </span>
-              <p className="text-xs text-purple-900 whitespace-pre-wrap font-medium">
-                {record.nextDayPlan || 'No next-day plan recorded.'}
-              </p>
+              {record.nextDayPlan ? (
+                <div className="p-3 bg-purple-50/50 rounded-xl border border-purple-200/80">
+                  <span className="text-[10px] font-bold text-purple-700 block uppercase mb-1">
+                    Next Day Working Plan
+                  </span>
+                  <p className="text-xs text-purple-900 whitespace-pre-wrap font-medium">
+                    {record.nextDayPlan}
+                  </p>
+                </div>
+              ) : null}
             </div>
-          </div>
+          )}
 
         </div>
 

@@ -271,7 +271,7 @@ export default function EmployeeEodReports() {
               }}
               onDateChange={(iso) => setDateFrom(iso)}
               placeholder="From Date"
-              className="w-full"
+              className="w-full px-3 py-1.5 text-xs rounded-xl border border-slate-200 bg-white font-semibold text-slate-800 focus:outline-none focus:border-blue-500 shadow-2xs"
             />
           </div>
 
@@ -286,7 +286,7 @@ export default function EmployeeEodReports() {
               }}
               onDateChange={(iso) => setDateTo(iso)}
               placeholder="To Date"
-              className="w-full"
+              className="w-full px-3 py-1.5 text-xs rounded-xl border border-slate-200 bg-white font-semibold text-slate-800 focus:outline-none focus:border-blue-500 shadow-2xs"
             />
           </div>
         </div>

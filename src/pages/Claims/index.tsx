@@ -286,9 +286,9 @@ export function formatDateForInput(dateVal?: string | null | Date): string {
   return '';
 }
 
-export function getClaimNotesData(notesField?: string | null) {
-  const defaultNotes = { 
-    diagnosis: '', hospital: '', hospitalAddress: '', patientName: '', deductionsNotes: '', admissionAt: '', dischargeAt: '', notes: '', statusOverride: '', amtHospital: 0, amtMedicine: 0, amtLab: 0, amtPreHosp: 0, amtPostHosp: 0, amtOthers: 0, subClaimNo: '', uiClaimStatus: '', comment: '', insuranceCompanyCategory: '', insuranceCompany: '', insuranceProductName: '', agentName: '',
+export function getClaimNotesData(notesField?: string | null): Record<string, any> {
+  const defaultNotes: Record<string, any> = { 
+    diagnosis: '', hospital: '', hospitalAddress: '', patientName: '', proposerName: '', policyNumber: '', sumInsured: '', deductionsNotes: '', admissionAt: '', dischargeAt: '', notes: '', statusOverride: '', amtHospital: 0, amtMedicine: 0, amtLab: 0, amtPreHosp: 0, amtPostHosp: 0, amtOthers: 0, subClaimNo: '', uiClaimStatus: '', comment: '', insuranceCompanyCategory: '', insuranceCompany: '', insuranceProductName: '', agentName: '',
     deathAdmissionDate: '', causeOfDeath: '', dateOfOccurance: '', dateOfDeath: '', wasInComa: '', deathSumInsured: '', deathTotalClaimedAmount: '', deathComment: '', nominees: '[]',
     hospitalName: '', hospitalState: '', hospitalCity: '', hospitalPincode: '', hospitalContactNo: '', hospitalEmail: '', hospitalRating: '', hospitalType: '', claimsPerson1Name: '', claimsPerson1Contact: '', claimsPerson2Name: '', claimsPerson2Contact: '', hospitalComment: '', hospitalDoctors: '[]',
     diagnosisSimple: '', roomCategory: '', typeOfManagement: '', typeOfAdmission: '', isMedicoLegalCase: '', isFirLegalDocAvailable: '', hospitalisationComment: '', amtAnesthesia: 0, billingComment: '',
@@ -300,6 +300,10 @@ export function getClaimNotesData(notesField?: string | null) {
       const parsed = JSON.parse(notesField);
       return {
         ...defaultNotes,
+        ...parsed,
+        proposerName: parsed.proposerName || '',
+        policyNumber: parsed.policyNumber || '',
+        sumInsured: parsed.sumInsured || '',
         diagnosis: parsed.diagnosis || parsed.diagnosisExact || '',
         hospital: parsed.hospital || parsed.hospitalName || '',
         hospitalAddress: parsed.hospitalAddress || '',
@@ -413,7 +417,7 @@ export const claimFormSchema = z.object({
   amtPostHosp: z.coerce.number().default(0),
   amtOthers: z.coerce.number().default(0),
   notes: z.string().optional(),
-  approvedAmount: z.coerce.number().optional().default(0),
+  approvedAmount: z.preprocess(v => (v === '' || v === null || v === undefined ? undefined : Number(v)), z.number().optional()),
   deductionsNotes: z.string().optional(),
   subClaimNo: z.string().optional(),
   uiClaimStatus: z.string().optional(),
@@ -544,6 +548,130 @@ const normalizeNomineeRelationship = (rawRel?: string, name?: string, gender?: s
   return rel;
 };
 
+export function invertRelationship(rel?: string, targetGender?: string): string {
+  if (!rel) return '';
+  const r = rel.trim().toUpperCase().replace(/\s+/g, '_');
+  const isMale = (targetGender || '').toUpperCase() === 'MALE';
+  const isFemale = (targetGender || '').toUpperCase() === 'FEMALE';
+  if (r === 'SON' || r === 'DAUGHTER' || r === 'CHILD') {
+    return isFemale ? 'Mother' : isMale ? 'Father' : 'Parent';
+  }
+  if (r === 'FATHER' || r === 'MOTHER' || r === 'PARENT') {
+    return isFemale ? 'Daughter' : isMale ? 'Son' : 'Child';
+  }
+  if (r === 'HUSBAND') return 'Wife';
+  if (r === 'WIFE') return 'Husband';
+  if (r === 'SPOUSE') return isFemale ? 'Wife' : isMale ? 'Husband' : 'Spouse';
+  if (r === 'BROTHER' || r === 'SISTER' || r === 'SIBLING') {
+    return isFemale ? 'Sister' : isMale ? 'Brother' : 'Sibling';
+  }
+  return rel;
+}
+
+export function isSamePerson(p1: any, p2: any): boolean {
+  if (!p1 || !p2) return false;
+  const name1 = (p1.name || p1.nomineeName || p1.fullName || '').trim().toLowerCase();
+  const name2 = (p2.name || p2.nomineeName || p2.fullName || '').trim().toLowerCase();
+
+  const phone1 = cleanConnectedPhone(p1.phone || p1.contactNo || p1.contact || p1.mobile);
+  const phone2 = cleanConnectedPhone(p2.phone || p2.contactNo || p2.contact || p2.mobile);
+
+  // If both have 10-digit phone numbers and they match
+  if (phone1 && phone2 && phone1.length >= 10 && phone2.length >= 10 && phone1 === phone2) {
+    if (!name1 || !name2) return true;
+    const words1 = name1.split(/\s+/).filter(Boolean);
+    const words2 = name2.split(/\s+/).filter(Boolean);
+    const hasCommonWord = words1.some((w: string) => words2.includes(w));
+    if (hasCommonWord) return true;
+    if (words1[0] && words2[0] && (words1[0].startsWith(words2[0]) || words2[0].startsWith(words1[0]))) {
+      return true;
+    }
+    return true;
+  }
+
+  // Exact name match
+  if (name1 && name2 && name1 === name2) {
+    return true;
+  }
+
+  // Name word containment / middle name differences (e.g. "Ajaysingh Sulhyan" vs "Ajaysingh Vijaysingh Sulhyan")
+  if (name1 && name2) {
+    const words1 = name1.split(/\s+/).filter((w: string) => w.length > 1);
+    const words2 = name2.split(/\s+/).filter((w: string) => w.length > 1);
+    if (words1.length > 0 && words2.length > 0) {
+      if (words1[0] === words2[0] && words1[words1.length - 1] === words2[words2.length - 1]) {
+        return true;
+      }
+      const [shorter, longer] = words1.length <= words2.length ? [words1, words2] : [words2, words1];
+      if (shorter.length >= 2 && shorter.every((w: string) => longer.includes(w))) {
+        return true;
+      }
+    }
+  }
+
+  // DOB match with first name match
+  const dob1 = (p1.dob || p1.dateOfBirth || '').trim();
+  const dob2 = (p2.dob || p2.dateOfBirth || '').trim();
+  if (dob1 && dob2 && dob1 === dob2 && name1 && name2) {
+    const w1 = name1.split(/\s+/)[0];
+    const w2 = name2.split(/\s+/)[0];
+    if (w1 && w2 && (w1 === w2 || w1.startsWith(w2) || w2.startsWith(w1))) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+export function deduplicateNomineeList(list: any[]): any[] {
+  if (!Array.isArray(list)) return [];
+  const result: any[] = [];
+  list.forEach(item => {
+    const rawName = (item.name || item.nomineeName || item.fullName || '').trim();
+    if (!rawName || rawName.toLowerCase() === 'n/a') return;
+
+    const existingIdx = result.findIndex(ex => isSamePerson(ex, item));
+    if (existingIdx === -1) {
+      result.push({
+        ...item,
+        name: rawName,
+        phone: cleanConnectedPhone(item.phone || item.contactNo || item.contact || item.mobile),
+        relationship: normalizeNomineeRelationship(item.relationship || item.relation || item.relationshipType, rawName, item.gender),
+        percentage: item.percentage ?? item.sharePercent ?? item.share ?? '',
+        dob: item.dob || item.dateOfBirth ? formatDateForInput(item.dob || item.dateOfBirth) : '',
+        comment: item.comment || '',
+      });
+    } else {
+      const existing = result[existingIdx];
+      if (rawName.length > (existing.name || '').length) {
+        existing.name = rawName;
+      }
+      const cleanPhone = cleanConnectedPhone(item.phone || item.contactNo || item.contact || item.mobile);
+      if (!existing.phone && cleanPhone) {
+        existing.phone = cleanPhone;
+      }
+      const cleanDob = item.dob || item.dateOfBirth ? formatDateForInput(item.dob || item.dateOfBirth) : '';
+      if (!existing.dob && cleanDob) {
+        existing.dob = cleanDob;
+      }
+      const newPct = item.percentage ?? item.sharePercent ?? item.share ?? '';
+      if ((existing.percentage === '' || existing.percentage == null) && newPct !== '' && newPct != null) {
+        existing.percentage = newPct;
+      }
+      if (!existing.comment && item.comment) {
+        existing.comment = item.comment;
+      }
+      const incomingRel = normalizeNomineeRelationship(item.relationship || item.relation || item.relationshipType, existing.name, item.gender);
+      const genericRels = ['dependent', 'nominee', 'member', 'other', 'in_law', 'in law', 'in-law', ''];
+      const curRelLower = (existing.relationship || '').trim().toLowerCase();
+      if ((genericRels.includes(curRelLower) || !existing.relationship) && incomingRel && !genericRels.includes(incomingRel.toLowerCase())) {
+        existing.relationship = incomingRel;
+      }
+    }
+  });
+  return result;
+}
+
 export function extractConnectedPersonsAndNominees(policy?: any, contact?: any): ConnectedPersonOption[] {
   const result: ConnectedPersonOption[] = [];
 
@@ -559,7 +687,6 @@ export function extractConnectedPersonsAndNominees(policy?: any, contact?: any):
   }) => {
     const cleanName = (person.name || '').trim();
     if (!cleanName || cleanName.toLowerCase() === 'n/a') return;
-    const nameKey = cleanName.toLowerCase();
 
     const cleanPhone = cleanConnectedPhone(person.phone);
     let cleanDob = '';
@@ -568,8 +695,11 @@ export function extractConnectedPersonsAndNominees(policy?: any, contact?: any):
     }
     const cleanRel = normalizeNomineeRelationship(person.relationship, cleanName, person.gender);
 
-    const existing = result.find(p => p.name.trim().toLowerCase() === nameKey);
+    const existing = result.find(p => isSamePerson(p, { name: cleanName, phone: cleanPhone, dob: cleanDob }));
     if (existing) {
+      if (cleanName.length > existing.name.length) {
+        existing.name = cleanName;
+      }
       if (!existing.phone && cleanPhone) {
         existing.phone = cleanPhone;
       }
@@ -594,7 +724,9 @@ export function extractConnectedPersonsAndNominees(policy?: any, contact?: any):
         (existingRelLower === 'daughter' && newRelLower === 'son') ||
         (existingRelLower === 'wife' && newRelLower === 'husband');
 
-      if (person.source === 'contact_family' && newRel) {
+      if (existing.source === 'contact_family' && !genericRels.includes(existingRelLower) && person.source !== 'contact_family') {
+        // Authoritative family relationship is preserved
+      } else if (person.source === 'contact_family' && newRel && !genericRels.includes(newRelLower)) {
         existing.relationship = newRel;
       } else if (isGenderContradiction && newRel) {
         existing.relationship = newRel;
@@ -645,7 +777,7 @@ export function extractConnectedPersonsAndNominees(policy?: any, contact?: any):
       const fullName = [c.firstName, c.middleName, c.lastName].filter(Boolean).join(' ').trim() || c.name || '';
       addPerson({
         name: fullName,
-        relationship: r.relationshipType || r.relation || r.relationship || '',
+        relationship: invertRelationship(r.relationshipType || r.relation || r.relationship || '', c.gender),
         phone: c.phone || c.alternatePhone || c.mobile || c.whatsappNumber || '',
         dob: c.dateOfBirth || c.dob || '',
         gender: c.gender,
@@ -819,10 +951,11 @@ export function ClaimEditForm({ initial, isPending, onSave, onCancel, employees,
     formatDateForInput(initial.intimatedAt || (notesData as any).intimatedAt || (initial as any).createdAt) || getTodayDateInputValue()
   );
   const [claimAmount, setClaimAmount] = useState(String((initial as any).claimAmount ?? ''));
+  const isInitiallySettled = (initial.status === 'SETTLED' || (notesData.uiClaimStatus || '').toLowerCase().includes('settle'));
   const [approvedAmount, setApprovedAmount] = useState(
     (initial as any).approvedAmount != null && (initial as any).approvedAmount !== ''
       ? String((initial as any).approvedAmount)
-      : (notesData as any).amtPayableToInsured != null && (notesData as any).amtPayableToInsured !== '' && Number((notesData as any).amtPayableToInsured) > 0
+      : (isInitiallySettled && (notesData as any).amtPayableToInsured != null && (notesData as any).amtPayableToInsured !== '' && Number((notesData as any).amtPayableToInsured) > 0)
         ? String((notesData as any).amtPayableToInsured)
         : ''
   );
@@ -839,10 +972,11 @@ export function ClaimEditForm({ initial, isPending, onSave, onCancel, employees,
     queryFn: () => contactsService.activity(claimHistoryContactId!, { page: 1, limit: 100 }),
     enabled: !!claimHistoryContactId && activeClaimTab === 'History',
   });
+  const initialIsDeath = ((initial as any).claimType || notesData.uiClaimStatus || '').trim().toLowerCase().includes('death');
   const [collapsedSections, setCollapsedSections] = useState<Record<string, boolean>>({
     proposer: false,
     claim: false,
-    death: false,
+    death: !initialIsDeath,
     nominee: false,
     amounts: false,
     documents: false,
@@ -878,7 +1012,7 @@ export function ClaimEditForm({ initial, isPending, onSave, onCancel, employees,
   const [nominees, setNominees] = useState<any[]>(() => {
     try {
       const parsed = JSON.parse(notesData.nominees || '[]');
-      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      if (Array.isArray(parsed) && parsed.length > 0) return deduplicateNomineeList(parsed);
     } catch {
       // fallback
     }
@@ -889,7 +1023,8 @@ export function ClaimEditForm({ initial, isPending, onSave, onCancel, employees,
   useEffect(() => {
     if (availableConnectedPersons.length === 0) return;
     setNominees(prev => {
-      const hasValid = prev.some(n => (n?.name || '').trim() !== '');
+      const deduplicatedPrev = deduplicateNomineeList(prev);
+      const hasValid = deduplicatedPrev.some(n => (n?.name || '').trim() !== '');
       if (!hasValid) {
         return availableConnectedPersons.map(p => ({
           name: p.name,
@@ -900,10 +1035,8 @@ export function ClaimEditForm({ initial, isPending, onSave, onCancel, employees,
           comment: p.comment || '',
         }));
       }
-      return prev.map(n => {
-        const match = availableConnectedPersons.find(
-          p => p.name.trim().toLowerCase() === (n.name || '').trim().toLowerCase()
-        );
+      return deduplicatedPrev.map(n => {
+        const match = availableConnectedPersons.find(p => isSamePerson(p, n));
         const curRel = (n.relationship || '').trim();
         const normCurRel = normalizeNomineeRelationship(curRel, n.name);
         if (match && match.relationship) {
@@ -913,7 +1046,13 @@ export function ClaimEditForm({ initial, isPending, onSave, onCancel, employees,
               (curRel.toLowerCase() === 'father' && matchRel.toLowerCase() === 'mother') ||
               (curRel.toLowerCase() === 'sister' && matchRel.toLowerCase() === 'brother') ||
               (curRel.toLowerCase() === 'brother' && matchRel.toLowerCase() === 'sister')) {
-            return { ...n, relationship: matchRel, phone: n.phone || match.phone, dob: n.dob || match.dob };
+            return {
+              ...n,
+              name: (match.name && match.name.length > (n.name || '').length) ? match.name : n.name,
+              relationship: matchRel,
+              phone: n.phone || match.phone,
+              dob: n.dob || match.dob
+            };
           }
         }
         return { ...n, relationship: normCurRel || n.relationship };
@@ -1053,6 +1192,16 @@ export function ClaimEditForm({ initial, isPending, onSave, onCancel, employees,
   const [insuranceProductName, setInsuranceProductName] = useState(notesData.insuranceProductName || '');
   const [agentName, setAgentName] = useState(notesData.agentName || '');
 
+  // Incident & Death claim status check
+  const isDeathClaim = Boolean(
+    (claimType || '').trim().toLowerCase().includes('death') ||
+    (uiClaimStatus || '').trim().toLowerCase().includes('death')
+  );
+
+  useEffect(() => {
+    setCollapsedSections(prev => ({ ...prev, death: !isDeathClaim }));
+  }, [isDeathClaim]);
+
   // Death claim state
   const [deathAdmissionDate, setDeathAdmissionDate] = useState(formatDateForInput(notesData.deathAdmissionDate || (initial as any).deathAdmissionDate || notesData.admissionAt));
   const [causeOfDeath, setCauseOfDeath] = useState(notesData.causeOfDeath || '');
@@ -1128,8 +1277,10 @@ export function ClaimEditForm({ initial, isPending, onSave, onCancel, employees,
   // Auto calculate total claim amount and auto-fetch to final bill amount
   useEffect(() => {
     const tot = Number(amtHospital || 0) + Number(amtMedicine || 0) + Number(amtLab || 0) + Number(amtPreHosp || 0) + Number(amtPostHosp || 0) + Number(amtOthers || 0) + Number(amtAnesthesia || 0);
-    setClaimAmount(String(tot));
-    setAmtFinalBill(tot);
+    if (tot > 0) {
+      setClaimAmount(String(tot));
+      setAmtFinalBill(tot);
+    }
   }, [amtHospital, amtMedicine, amtLab, amtPreHosp, amtPostHosp, amtOthers, amtAnesthesia]);
 
   // Auto calculate sum for Claim Approval Details
@@ -1278,7 +1429,8 @@ export function ClaimEditForm({ initial, isPending, onSave, onCancel, employees,
         return;
       }
 
-      if (getBackendStatusFromUi(uiClaimStatus) === 'SETTLED' && (approvedAmount === '' || !Number.isFinite(Number(approvedAmount)) || Number(approvedAmount) < 0)) {
+      const isSettled = getBackendStatusFromUi(uiClaimStatus) === 'SETTLED' || (uiClaimStatus || '').toLowerCase().includes('settle');
+      if (isSettled && (approvedAmount === '' || !Number.isFinite(Number(approvedAmount)) || Number(approvedAmount) < 0)) {
         toast.error('Enter the settled amount before saving a settled claim');
         return;
       }
@@ -1290,13 +1442,17 @@ export function ClaimEditForm({ initial, isPending, onSave, onCancel, employees,
         }
       }
 
+      const finalClaimAmount = (amtFinalBill !== undefined && amtFinalBill !== null && amtFinalBill !== '' && !isNaN(Number(amtFinalBill)) && Number(amtFinalBill) > 0)
+        ? Number(amtFinalBill)
+        : (claimAmount !== '' && !isNaN(Number(claimAmount)) ? Number(claimAmount) : 0);
+
       onSave({
         status: getBackendStatusFromUi(uiClaimStatus),
         claimType,
         claimNumber: claimNumber || initial.claimNumber,
         intimatedAt: intimatedAt ? new Date(intimatedAt).toISOString() : (initial.intimatedAt ? new Date(initial.intimatedAt).toISOString() : new Date().toISOString()),
-        claimAmount: Number(claimAmount),
-        approvedAmount: (approvedAmount !== '' && !isNaN(Number(approvedAmount))) ? Number(approvedAmount) : undefined,
+        claimAmount: finalClaimAmount,
+        approvedAmount: (isSettled && approvedAmount !== '' && !isNaN(Number(approvedAmount))) ? Number(approvedAmount) : undefined,
         rejectionReason: rejectionReason || undefined,
         assignedEmployeeId: assignedEmployeeId || null,
         notes: serializeNotes({
@@ -1336,7 +1492,7 @@ export function ClaimEditForm({ initial, isPending, onSave, onCancel, employees,
           hospitalDoctors: JSON.stringify(doctors),
           diagnosisSimple, roomCategory, typeOfManagement: typeOfManagement === 'Other' ? (otherManagementDetail || 'Other') : typeOfManagement, typeOfAdmission, isMedicoLegalCase, isFirLegalDocAvailable, hospitalisationComment, amtAnesthesia, billingComment,
           amtFinalBill, amtNonPayables, amtCopay, amtDeductible, amtBalanceEMIs, amtNcdRecovery, amtExcessSumInsured, amtExcessAilmentLimit, amtHigherRoomRent, amtReasonableCost, amtOtherRecoveries, amtPatientToPay, amtExcessAgreedPackage, amtNetworkDiscount, amtNotCollected,
-          amtPayableToInsured: (approvedAmount !== '' && !isNaN(Number(approvedAmount))) ? Number(approvedAmount) : amtPayableToInsured,
+          amtPayableToInsured: (isSettled && approvedAmount !== '' && !isNaN(Number(approvedAmount))) ? Number(approvedAmount) : amtPayableToInsured,
           approvalComment, fileUploadComment
 
         })
@@ -1488,7 +1644,7 @@ export function ClaimEditForm({ initial, isPending, onSave, onCancel, employees,
                   </div>
 
                   {(() => {
-                    const isSettledStatus = (uiClaimStatus || '').toLowerCase().includes('settle');
+                    const isSettledStatus = (uiClaimStatus || '').toLowerCase().includes('settle') || getBackendStatusFromUi(uiClaimStatus) === 'SETTLED';
                     return (
                       <div className={clsx('grid grid-cols-1 gap-2.5', user?.role !== 'EMPLOYEE' ? 'sm:grid-cols-4' : 'sm:grid-cols-3')}>
                         <div>
@@ -1583,19 +1739,30 @@ export function ClaimEditForm({ initial, isPending, onSave, onCancel, employees,
         <div className="border border-slate-200/90 rounded-xl bg-white shadow-2xs overflow-hidden">
           <div
             className="min-h-8 px-3 py-2 bg-slate-50 border-b border-slate-100 flex items-center justify-between cursor-pointer select-none"
-            onClick={() => toggleCollapse('death')}
+            onClick={() => {
+              if (!isDeathClaim) {
+                toast("Incident & Death details open only when claim type or status is selected as Death Claim.");
+                return;
+              }
+              toggleCollapse('death');
+            }}
           >
             <h4 className="text-[10px] font-extrabold text-slate-700 uppercase tracking-wide flex items-center gap-2">
-              <span className="w-4 h-4 rounded-full bg-indigo-500 text-white text-[9px] font-black flex items-center justify-center">3</span>
+              <span className={clsx("w-4 h-4 rounded-full text-white text-[9px] font-black flex items-center justify-center", isDeathClaim ? "bg-indigo-600" : "bg-slate-400")}>3</span>
               Incident &amp; Death Details <span className="text-[10px] lowercase text-slate-400 font-normal">(optional)</span>
+              {isDeathClaim && (
+                <span className="text-[9px] font-semibold text-indigo-700 bg-indigo-50 border border-indigo-200 px-1.5 py-0.2 rounded-full normal-case">
+                  Death Claim Active
+                </span>
+              )}
             </h4>
             <div className="flex items-center gap-2">
-              <span className="text-[9px] text-slate-500 font-semibold">Only for Death claims</span>
-              <ChevronDown size={12} className={`text-slate-500 transition-transform duration-200 ${collapsedSections['death'] ? 'rotate-180' : ''}`} />
+              <span className="text-[9px] text-slate-500 font-semibold">{isDeathClaim ? 'Death Claim Active' : 'Only for Death claims'}</span>
+              <ChevronDown size={12} className={`text-slate-500 transition-transform duration-200 ${(!collapsedSections['death'] && isDeathClaim) ? 'rotate-180' : ''}`} />
             </div>
           </div>
-          {!collapsedSections['death'] && (
-            <fieldset disabled={claimType.trim().toLowerCase() !== 'death claim'} className="p-2.5 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5 border-0 min-w-0">
+          {!collapsedSections['death'] && isDeathClaim && (
+            <fieldset className="p-2.5 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5 border-0 min-w-0">
                       <div>
                         <label className="label text-gray-500">Date of Admission <br/><span className="text-[10px] font-normal">(In case of hosp.)</span></label>
                         <input
@@ -1717,14 +1884,14 @@ export function ClaimEditForm({ initial, isPending, onSave, onCancel, employees,
                     <button
                       type="button"
                       onClick={() => {
-                        setNominees(availableConnectedPersons.map(p => ({
+                        setNominees(deduplicateNomineeList(availableConnectedPersons.map(p => ({
                           name: p.name,
                           relationship: p.relationship,
                           phone: p.phone,
                           dob: p.dob,
                           percentage: p.percentage || (availableConnectedPersons.length === 1 ? '100' : ''),
                           comment: p.comment || '',
-                        })));
+                        }))));
                       }}
                       className="text-[9px] font-bold text-blue-700 bg-white hover:bg-blue-100 px-2 py-0.5 rounded-md border border-blue-200 shadow-2xs transition-colors"
                     >
@@ -1738,6 +1905,8 @@ export function ClaimEditForm({ initial, isPending, onSave, onCancel, employees,
                         type="button"
                         onClick={() => {
                           setNominees(prev => {
+                            const alreadyExists = prev.some(n => isSamePerson(n, p));
+                            if (alreadyExists) return prev;
                             const emptyIdx = prev.findIndex(n => !(n.name || '').trim());
                             if (emptyIdx !== -1) {
                               const updated = [...prev];
@@ -1785,7 +1954,7 @@ export function ClaimEditForm({ initial, isPending, onSave, onCancel, employees,
                           value=""
                           onChange={e => {
                             const selectedName = e.target.value;
-                            const found = availableConnectedPersons.find(p => p.name === selectedName);
+                            const found = availableConnectedPersons.find(p => isSamePerson(p, { name: selectedName }) || p.name === selectedName);
                             if (found) {
                               handleNomineeChange(index, 'name', found.name);
                               handleNomineeChange(index, 'relationship', found.relationship);
@@ -1809,7 +1978,7 @@ export function ClaimEditForm({ initial, isPending, onSave, onCancel, employees,
                       onChange={e => {
                         const val = e.target.value;
                         handleNomineeChange(index, 'name', val);
-                        const match = availableConnectedPersons.find(p => p.name.toLowerCase() === val.trim().toLowerCase());
+                        const match = availableConnectedPersons.find(p => isSamePerson(p, { name: val }));
                         if (match) {
                           if (match.relationship && !nom.relationship) handleNomineeChange(index, 'relationship', match.relationship);
                           if (match.phone && !nom.phone) handleNomineeChange(index, 'phone', match.phone);
@@ -2507,7 +2676,11 @@ export function ClaimEditForm({ initial, isPending, onSave, onCancel, employees,
                         type="number"
                         className="input mt-1 py-1 text-xs"
                         value={amtFinalBill !== undefined && amtFinalBill !== null && amtFinalBill !== 0 ? amtFinalBill : ''}
-                        onChange={e => setAmtFinalBill(e.target.value === '' ? '' : Number(e.target.value))}
+                        onChange={e => {
+                          const val = e.target.value === '' ? '' : Number(e.target.value);
+                          setAmtFinalBill(val);
+                          setClaimAmount(val === '' ? '' : String(val));
+                        }}
                         placeholder="0"
                       />
                     </div>
@@ -3338,14 +3511,16 @@ export default function Claims({ contactId, contact, embedded = false }: ClaimsP
         if (!isMatch) return false;
       }
 
-      // 1. Text Search (Client Full Name, Patient Name, Claim Number, Phone)
+      // 1. Text Search (Client Full Name, Patient Name, Proposer Name, Claim Number, Policy Number, Phone)
       const clientName = `${c.contact?.firstName || ''} ${c.contact?.lastName || ''}`.trim().toLowerCase();
       const patientName = `${notes.patientName || c.patientName || ''}`.trim().toLowerCase();
+      const proposerName = `${notes.proposerName || ''}`.trim().toLowerCase();
       const claimNo = (c.claimNumber || '').toLowerCase();
+      const policyNo = (c.policy?.policyNumber || notes.policyNumber || '').toLowerCase();
       const phone = (c.contact?.phone || '').toLowerCase();
-      const matchesPersonName = [clientName, patientName]
-        .some(name => searchTokens.every(token => name.includes(token)));
-      if (sTerm && !matchesPersonName && !claimNo.includes(sTerm) && !phone.includes(sTerm)) return false;
+      const matchesPersonName = [clientName, patientName, proposerName]
+        .some(name => name && searchTokens.every(token => name.includes(token)));
+      if (sTerm && !matchesPersonName && !claimNo.includes(sTerm) && !policyNo.includes(sTerm) && !phone.includes(sTerm)) return false;
 
       // 2. Status Filter (Analytics Top Bar)
       if (filterStatus !== 'All') {
@@ -3360,7 +3535,8 @@ export default function Claims({ contactId, contact, embedded = false }: ClaimsP
         const pTerm = filterProposerName.toLowerCase();
         const contactName = `${c.contact?.firstName || ''} ${c.contact?.lastName || ''}`.toLowerCase();
         const pName = (notes.patientName || '').toLowerCase();
-        if (!contactName.includes(pTerm) && !pName.includes(pTerm)) return false;
+        const propName = (notes.proposerName || '').toLowerCase();
+        if (!contactName.includes(pTerm) && !pName.includes(pTerm) && !propName.includes(pTerm)) return false;
       }
 
       // 2. Company Name Filter
@@ -3831,7 +4007,7 @@ export default function Claims({ contactId, contact, embedded = false }: ClaimsP
   ];
 
   const extractNomineesFromPolicy = (p: any, contactOverride?: any) => {
-    const activeContact = contactOverride || selectedContact || contactDetail?.data;
+    const activeContact = contactOverride || contactDetail?.data || selectedContact;
     const extracted = extractConnectedPersonsAndNominees(p, activeContact);
     return extracted.map(item => ({
       name: item.name,
@@ -3856,14 +4032,15 @@ export default function Claims({ contactId, contact, embedded = false }: ClaimsP
   });
 
   const availableConnectedPersonsInCreate = useMemo(() => {
-    return extractConnectedPersonsAndNominees(selectedPolicy, selectedContact || contactDetail?.data);
+    return extractConnectedPersonsAndNominees(selectedPolicy, contactDetail?.data || selectedContact);
   }, [selectedPolicy, selectedContact, contactDetail]);
 
   // Auto-populate newNominees if empty when connected persons become available
   useEffect(() => {
     if (availableConnectedPersonsInCreate.length === 0) return;
     setNewNominees(prev => {
-      const hasValid = prev.some(n => (n?.name || '').trim() !== '');
+      const deduplicatedPrev = deduplicateNomineeList(prev);
+      const hasValid = deduplicatedPrev.some(n => (n?.name || '').trim() !== '');
       if (!hasValid) {
         return availableConnectedPersonsInCreate.map(p => ({
           name: p.name,
@@ -3874,10 +4051,8 @@ export default function Claims({ contactId, contact, embedded = false }: ClaimsP
           comment: p.comment || '',
         }));
       }
-      return prev.map(n => {
-        const match = availableConnectedPersonsInCreate.find(
-          p => p.name.trim().toLowerCase() === (n.name || '').trim().toLowerCase()
-        );
+      return deduplicatedPrev.map(n => {
+        const match = availableConnectedPersonsInCreate.find(p => isSamePerson(p, n));
         const curRel = (n.relationship || '').trim();
         const normCurRel = normalizeNomineeRelationship(curRel, n.name);
         if (match && match.relationship) {
@@ -3887,7 +4062,13 @@ export default function Claims({ contactId, contact, embedded = false }: ClaimsP
               (curRel.toLowerCase() === 'father' && matchRel.toLowerCase() === 'mother') ||
               (curRel.toLowerCase() === 'sister' && matchRel.toLowerCase() === 'brother') ||
               (curRel.toLowerCase() === 'brother' && matchRel.toLowerCase() === 'sister')) {
-            return { ...n, relationship: matchRel, phone: n.phone || match.phone, dob: n.dob || match.dob };
+            return {
+              ...n,
+              name: (match.name && match.name.length > (n.name || '').length) ? match.name : n.name,
+              relationship: matchRel,
+              phone: n.phone || match.phone,
+              dob: n.dob || match.dob
+            };
           }
         }
         return { ...n, relationship: normCurRel || n.relationship };
@@ -4061,7 +4242,7 @@ export default function Claims({ contactId, contact, embedded = false }: ClaimsP
       amtPostHosp: isFieldRequired('amtPostHosp', false) ? z.coerce.number().min(1, 'Required') : z.coerce.number().default(0),
       amtOthers: isFieldRequired('amtOthers', false) ? z.coerce.number().min(1, 'Required') : z.coerce.number().default(0),
       notes: isFieldRequired('notes', false) ? z.string().min(1, 'Required') : z.string().optional(),
-      approvedAmount: isFieldRequired('approvedAmount', false) ? z.coerce.number().min(1, 'Required') : z.coerce.number().optional().default(0),
+      approvedAmount: isFieldRequired('approvedAmount', false) ? z.coerce.number().min(1, 'Required') : z.preprocess(v => (v === '' || v === null || v === undefined ? undefined : Number(v)), z.number().optional()),
       deductionsNotes: isFieldRequired('deductionsNotes', false) ? z.string().min(1, 'Required') : z.string().optional(),
       subClaimNo: isFieldRequired('subClaimNo', false) ? z.string().min(1, 'Required') : z.string().optional(),
       uiClaimStatus: isFieldRequired('uiClaimStatus', false) ? z.string().min(1, 'Required') : z.string().optional(),
@@ -4104,6 +4285,17 @@ export default function Claims({ contactId, contact, embedded = false }: ClaimsP
     resolver: zodResolver(activeSchema),
     defaultValues: { claimType: 'Cashless', intimatedAt: getTodayDateInputValue() },
   });
+
+  const createWatchClaimType = watch('claimType');
+  const watchUiClaimStatus = watch('uiClaimStatus');
+  const isDeathClaimCreate = Boolean(
+    (createWatchClaimType || '').trim().toLowerCase().includes('death') ||
+    (watchUiClaimStatus || '').trim().toLowerCase().includes('death')
+  );
+
+  useEffect(() => {
+    setCollapsedSections(prev => ({ ...prev, newDeath: !isDeathClaimCreate }));
+  }, [isDeathClaimCreate]);
 
   useEffect(() => {
     if (selectedContact && activeContactPolicies.length > 0 && !selectedPolicy) {
@@ -4161,8 +4353,10 @@ export default function Claims({ contactId, contact, embedded = false }: ClaimsP
 
   useEffect(() => {
     const tot = Number(amtHospital || 0) + Number(amtMedicine || 0) + Number(amtLab || 0) + Number(amtPreHosp || 0) + Number(amtPostHosp || 0) + Number(amtOthers || 0) + Number(amtAnesthesia || 0);
-    setValue('claimAmount', tot);
-    setValue('amtFinalBill', tot);
+    if (tot > 0) {
+      setValue('claimAmount', tot);
+      setValue('amtFinalBill', tot);
+    }
   }, [amtHospital, amtMedicine, amtLab, amtPreHosp, amtPostHosp, amtOthers, amtAnesthesia, setValue]);
 
   useEffect(() => {
@@ -4335,11 +4529,21 @@ export default function Claims({ contactId, contact, embedded = false }: ClaimsP
         diagnosisSimple, roomCategory, typeOfManagement: typeOfManagement === 'Other' ? (otherManagementDetail || 'Other') : typeOfManagement, typeOfAdmission, isMedicoLegalCase, isFirLegalDocAvailable, hospitalisationComment, amtAnesthesia, billingComment,
         amtFinalBill, amtNonPayables, amtCopay, amtDeductible, amtBalanceEMIs, amtNcdRecovery, amtExcessSumInsured, amtExcessAilmentLimit, amtHigherRoomRent, amtReasonableCost, amtOtherRecoveries, amtPatientToPay, amtExcessAgreedPackage, amtNetworkDiscount, amtNotCollected, amtPayableToInsured, approvalComment
       });
-      const finalApprovedAmount = (body.approvedAmount !== undefined && body.approvedAmount !== null && (body.approvedAmount as any) !== '' && !isNaN(Number(body.approvedAmount)))
+      const isNewSettled = (uiClaimStatus || '').toLowerCase().includes('settle') || getBackendStatusFromUi(uiClaimStatus) === 'SETTLED';
+      if (isNewSettled && (body.approvedAmount === undefined || body.approvedAmount === null || (body.approvedAmount as any) === '' || isNaN(Number(body.approvedAmount)) || Number(body.approvedAmount) < 0)) {
+        setActiveClaimTab('Claim Details');
+        toast.error('Enter the settled amount before saving a settled claim');
+        return;
+      }
+      const finalApprovedAmount = (isNewSettled && body.approvedAmount !== undefined && body.approvedAmount !== null && (body.approvedAmount as any) !== '' && !isNaN(Number(body.approvedAmount)))
         ? Number(body.approvedAmount)
         : undefined;
+      const finalClaimAmount = (body.amtFinalBill !== undefined && body.amtFinalBill !== null && (body.amtFinalBill as any) !== '' && !isNaN(Number(body.amtFinalBill)) && Number(body.amtFinalBill) > 0)
+        ? Number(body.amtFinalBill)
+        : (body.claimAmount !== undefined && !isNaN(Number(body.claimAmount)) ? Number(body.claimAmount) : 0);
       const res = await createClaim.mutateAsync({
         ...rest,
+        claimAmount: finalClaimAmount,
         approvedAmount: finalApprovedAmount,
         status: getBackendStatusFromUi(uiClaimStatus),
         assignedEmployeeId: assignedEmployeeId || undefined,
@@ -4394,10 +4598,10 @@ export default function Claims({ contactId, contact, embedded = false }: ClaimsP
     try {
       let fileToUpload = file;
       if (/\.(xlsx|xls)$/i.test(file.name)) {
-        const workbook = XLSX.read(await file.arrayBuffer(), { type: 'array', cellDates: false });
+        const workbook = XLSX.read(await file.arrayBuffer(), { type: 'array', cellDates: true });
         const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
         if (!firstSheet) throw new Error('The Excel file does not contain a worksheet');
-        const csvContent = XLSX.utils.sheet_to_csv(firstSheet);
+        const csvContent = XLSX.utils.sheet_to_csv(firstSheet, { dateNF: 'yyyy-mm-dd' });
         fileToUpload = new File([`\uFEFF${csvContent}`], file.name.replace(/\.[^/.]+$/, '.csv'), { type: 'text/csv;charset=utf-8' });
       }
       const res = await claimsService.importCsv(fileToUpload);
@@ -4415,6 +4619,10 @@ export default function Claims({ contactId, contact, embedded = false }: ClaimsP
       qc.refetchQueries({ queryKey: ['claims'] });
       qc.invalidateQueries({ queryKey: ['policies'] });
       qc.invalidateQueries({ queryKey: ['contacts'] });
+      setPage(1);
+      setSearch('');
+      setFilterStatus('All');
+      resetAllModalFilters();
       if (fileInputRef.current) fileInputRef.current.value = '';
     } catch (err: any) {
       toast.error(err?.response?.data?.message || err?.message || 'Failed to import claims', { id: toastId });
@@ -4440,11 +4648,15 @@ export default function Claims({ contactId, contact, embedded = false }: ClaimsP
           ? (r.policy as any).sumAssured
           : ((r.policy as any)?.sumInsured != null
             ? (r.policy as any).sumInsured
-            : (notes.deathSumInsured || null));
+            : (notes.sumInsured || notes.deathSumInsured || null));
+        const clientDisplayName = (notes.proposerName && notes.proposerName.trim())
+          || (r.contact ? `${r.contact.firstName || ''} ${r.contact.lastName || ''}`.trim() : '')
+          || (notes.patientName || '—');
+        const policyNum = r.policy?.policyNumber || notes.policyNumber || '—';
         return (
           <div className="flex flex-col">
-            <span className="font-extrabold text-slate-900 text-sm">{r.contact ? `${r.contact.firstName} ${r.contact.lastName}` : '—'}</span>
-            <span className="text-xs text-slate-500 font-medium">Policy: {r.policy?.policyNumber ? `${r.policy.policyNumber}${getPolicyYearString(r.policy) ? ` (${getPolicyYearString(r.policy)})` : ''}` : '—'}</span>
+            <span className="font-extrabold text-slate-900 text-sm">{clientDisplayName}</span>
+            <span className="text-xs text-slate-500 font-medium">Policy: {policyNum !== '—' ? `${policyNum}${getPolicyYearString(r.policy) ? ` (${getPolicyYearString(r.policy)})` : ''}` : '—'}</span>
             {sa != null && sa !== '' && !isNaN(Number(sa)) && Number(sa) > 0 && (
               <span className="text-xs font-semibold text-emerald-700">
                 Sum Assured: ₹{Number(sa).toLocaleString('en-IN')}
@@ -4457,18 +4669,34 @@ export default function Claims({ contactId, contact, embedded = false }: ClaimsP
     {
       key: 'claimAmount',
       label: 'Claimed Amt',
-      render: r => <span className="font-bold text-slate-900 text-sm">₹{Number(r.claimAmount).toLocaleString('en-IN')}</span>
+      render: r => {
+        const notes = getClaimNotesData(r.notes);
+        const amt = (r.claimAmount !== undefined && r.claimAmount !== null && Number(r.claimAmount) > 0)
+          ? Number(r.claimAmount)
+          : (notes.amtFinalBill !== undefined && notes.amtFinalBill !== null && Number(notes.amtFinalBill) > 0)
+            ? Number(notes.amtFinalBill)
+            : Number(r.claimAmount || 0);
+        return <span className="font-bold text-slate-900 text-sm">₹{Number(amt).toLocaleString('en-IN')}</span>;
+      }
     },
     {
       key: 'approvedAmount',
       label: 'Settled Amt',
       render: r => {
         const notes = getClaimNotesData(r.notes);
-        const settledAmount = (r.approvedAmount !== undefined && r.approvedAmount !== null && Number.isFinite(Number(r.approvedAmount)))
+        const display = getClaimUiStatus(r);
+        const isSettled = display === 'Settled' || (r.status || '').toUpperCase() === 'SETTLED' || (notes.uiClaimStatus || '').toLowerCase().includes('settle');
+
+        if (!isSettled) {
+          return <span className="text-slate-400 text-sm font-medium">—</span>;
+        }
+
+        const settledAmount = (r.approvedAmount !== undefined && r.approvedAmount !== null && (r.approvedAmount as any) !== '' && Number.isFinite(Number(r.approvedAmount)))
           ? Number(r.approvedAmount)
           : (notes.amtPayableToInsured !== undefined && notes.amtPayableToInsured !== null && Number(notes.amtPayableToInsured) > 0 && Number.isFinite(Number(notes.amtPayableToInsured)))
             ? Number(notes.amtPayableToInsured)
             : undefined;
+
         return settledAmount !== undefined
           ? <span className="font-bold text-emerald-600 text-sm">₹{Number(settledAmount).toLocaleString('en-IN')}</span>
           : <span className="text-slate-400 text-sm font-medium">—</span>;
@@ -5844,7 +6072,7 @@ export default function Claims({ contactId, contact, embedded = false }: ClaimsP
 
                   {/* Row: Status | Settled Amount | Intimation Date */}
                   {(() => {
-                    const isNewSettled = (watch('uiClaimStatus') || '').toLowerCase().includes('settle');
+                    const isNewSettled = (watch('uiClaimStatus') || '').toLowerCase().includes('settle') || getBackendStatusFromUi(watch('uiClaimStatus')) === 'SETTLED';
                     return (
                       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                         <div>
@@ -5905,19 +6133,30 @@ export default function Claims({ contactId, contact, embedded = false }: ClaimsP
                 <div className="border border-slate-200/90 rounded-2xl bg-white shadow-2xs hover:shadow-xs transition-all overflow-hidden mt-4">
                   <div
                     className="bg-gradient-to-r from-blue-50/80 via-slate-50 to-indigo-50/30 px-4 py-2.5 border-b border-slate-100 flex items-center justify-between cursor-pointer select-none"
-                    onClick={() => toggleCollapse('newDeath')}
+                    onClick={() => {
+                      if (!isDeathClaimCreate) {
+                        toast("Incident & Death details open only when claim type or status is selected as Death Claim.");
+                        return;
+                      }
+                      toggleCollapse('newDeath');
+                    }}
                   >
                     <h4 className="text-xs font-extrabold text-slate-800 uppercase tracking-wider flex items-center gap-2">
-                      <span className="w-5 h-5 rounded-full bg-slate-200 text-slate-700 text-[10px] font-bold flex items-center justify-center shadow-2xs">3</span>
+                      <span className={clsx("w-5 h-5 rounded-full text-[10px] font-bold flex items-center justify-center shadow-2xs", isDeathClaimCreate ? "bg-indigo-600 text-white" : "bg-slate-200 text-slate-700")}>3</span>
                       Incident &amp; Death Details <span className="text-[10px] lowercase text-slate-400 font-normal">(optional)</span>
+                      {isDeathClaimCreate && (
+                        <span className="text-[10px] font-semibold text-indigo-700 bg-indigo-50 border border-indigo-200 px-2 py-0.5 rounded-full normal-case">
+                          Death Claim Active
+                        </span>
+                      )}
                     </h4>
                     <div className="flex items-center gap-2">
-                      <span className="text-[10px] text-slate-400 font-semibold">Only for Death claims</span>
-                      <ChevronDown size={16} className={`text-slate-500 transition-transform duration-200 ${collapsedSections['newDeath'] ? 'rotate-180' : ''}`} />
+                      <span className="text-[10px] text-slate-400 font-semibold">{isDeathClaimCreate ? 'Death Claim Active' : 'Only for Death claims'}</span>
+                      <ChevronDown size={16} className={`text-slate-500 transition-transform duration-200 ${(!collapsedSections['newDeath'] && isDeathClaimCreate) ? 'rotate-180' : ''}`} />
                     </div>
                   </div>
-                  {!collapsedSections['newDeath'] && (
-                    <fieldset disabled={(watch('claimType') || '').trim().toLowerCase() !== 'death claim'} className="p-4 bg-slate-50/40 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 border-0 min-w-0">
+                  {!collapsedSections['newDeath'] && isDeathClaimCreate && (
+                    <fieldset className="p-4 bg-slate-50/40 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 border-0 min-w-0">
                       <div>
                         <label className="label text-slate-700 font-bold">Date of Admission <br/><span className="text-[10px] font-normal text-slate-500">(In case of hosp.)</span></label>
                         <input
@@ -6045,14 +6284,14 @@ export default function Claims({ contactId, contact, embedded = false }: ClaimsP
                             <button
                               type="button"
                               onClick={() => {
-                                setNewNominees(availableConnectedPersonsInCreate.map(p => ({
+                                setNewNominees(deduplicateNomineeList(availableConnectedPersonsInCreate.map(p => ({
                                   name: p.name,
                                   relationship: p.relationship,
                                   phone: p.phone,
                                   dob: p.dob,
                                   percentage: p.percentage || (availableConnectedPersonsInCreate.length === 1 ? '100' : ''),
                                   comment: p.comment || '',
-                                })));
+                                }))));
                               }}
                               className="text-[10px] font-bold text-blue-700 bg-white hover:bg-blue-100 px-2.5 py-1 rounded-md border border-blue-200 shadow-2xs transition-colors"
                             >
@@ -6066,6 +6305,8 @@ export default function Claims({ contactId, contact, embedded = false }: ClaimsP
                                 type="button"
                                 onClick={() => {
                                   setNewNominees(prev => {
+                                    const alreadyExists = prev.some(n => isSamePerson(n, p));
+                                    if (alreadyExists) return prev;
                                     const emptyIdx = prev.findIndex(n => !(n.name || '').trim());
                                     if (emptyIdx !== -1) {
                                       const updated = [...prev];
@@ -6124,7 +6365,7 @@ export default function Claims({ contactId, contact, embedded = false }: ClaimsP
                                     value=""
                                     onChange={e => {
                                       const selectedName = e.target.value;
-                                      const found = availableConnectedPersonsInCreate.find(p => p.name === selectedName);
+                                      const found = availableConnectedPersonsInCreate.find(p => isSamePerson(p, { name: selectedName }) || p.name === selectedName);
                                       if (found) {
                                         handleNewNomineeChange(index, 'name', found.name);
                                         handleNewNomineeChange(index, 'relationship', found.relationship);
@@ -6148,7 +6389,7 @@ export default function Claims({ contactId, contact, embedded = false }: ClaimsP
                                 onChange={e => {
                                   const val = e.target.value;
                                   handleNewNomineeChange(index, 'name', val);
-                                  const match = availableConnectedPersonsInCreate.find(p => p.name.toLowerCase() === val.trim().toLowerCase());
+                                  const match = availableConnectedPersonsInCreate.find(p => isSamePerson(p, { name: val }));
                                   if (match) {
                                     if (match.relationship && !nom.relationship) handleNewNomineeChange(index, 'relationship', match.relationship);
                                     if (match.phone && !nom.phone) handleNewNomineeChange(index, 'phone', match.phone);
@@ -6203,14 +6444,14 @@ export default function Claims({ contactId, contact, embedded = false }: ClaimsP
                           <button 
                             type="button" 
                             onClick={() => {
-                              setNewNominees(availableConnectedPersonsInCreate.map(p => ({
+                              setNewNominees(deduplicateNomineeList(availableConnectedPersonsInCreate.map(p => ({
                                 name: p.name,
                                 relationship: p.relationship,
                                 phone: p.phone,
                                 dob: p.dob,
                                 percentage: p.percentage || (availableConnectedPersonsInCreate.length === 1 ? '100' : ''),
                                 comment: p.comment || '',
-                              })));
+                              }))));
                             }}
                             className="text-xs font-medium text-slate-600 bg-slate-100 px-3 py-1.5 rounded-lg hover:bg-slate-200 transition-colors border border-slate-200"
                           >
@@ -7439,10 +7680,10 @@ export function ClaimDetailView({ claim, onEdit }: { claim: any; onEdit?: () => 
   const parsedNominees: any[] = (() => {
     try {
       const list = JSON.parse(notesData.nominees || '[]');
-      if (Array.isArray(list) && list.length > 0) return list;
+      if (Array.isArray(list) && list.length > 0) return deduplicateNomineeList(list);
     } catch {}
     if (Array.isArray(claim?.policy?.nominees) && claim.policy.nominees.length > 0) {
-      return claim.policy.nominees;
+      return deduplicateNomineeList(claim.policy.nominees);
     }
     return [];
   })();
@@ -7472,7 +7713,15 @@ export function ClaimDetailView({ claim, onEdit }: { claim: any; onEdit?: () => 
             {statusIcons[displayStatus] || <Clock/>}
           </div>
           <div>
-            <h2 className="text-lg font-bold text-gray-900">₹{Number(claim?.claimAmount || 0).toLocaleString('en-IN')}</h2>
+            <h2 className="text-lg font-bold text-gray-900">
+              ₹{(
+                (claim?.claimAmount !== undefined && claim?.claimAmount !== null && Number(claim?.claimAmount) > 0)
+                  ? Number(claim?.claimAmount)
+                  : (notesData.amtFinalBill !== undefined && notesData.amtFinalBill !== null && Number(notesData.amtFinalBill) > 0)
+                    ? Number(notesData.amtFinalBill)
+                    : Number(claim?.claimAmount || 0)
+              ).toLocaleString('en-IN')}
+            </h2>
             <div className="flex gap-2 items-center mt-1">
               <span className={clsx('text-[10px] px-2 py-0.5 rounded-full font-bold uppercase tracking-wider border', statusColors[displayStatus])}>
                 {displayStatus}
@@ -7568,10 +7817,19 @@ export function ClaimDetailView({ claim, onEdit }: { claim: any; onEdit?: () => 
           </div>
           <div className="flex justify-between col-span-2 pt-2 border-t font-semibold text-sm text-blue-800">
             <span>Total Claim Amount:</span>
-            <span>₹{Number(claim?.claimAmount || 0).toLocaleString('en-IN')}</span>
+            <span>
+              ₹{(
+                (claim?.claimAmount !== undefined && claim?.claimAmount !== null && Number(claim?.claimAmount) > 0)
+                  ? Number(claim?.claimAmount)
+                  : (notesData.amtFinalBill !== undefined && notesData.amtFinalBill !== null && Number(notesData.amtFinalBill) > 0)
+                    ? Number(notesData.amtFinalBill)
+                    : Number(claim?.claimAmount || 0)
+              ).toLocaleString('en-IN')}
+            </span>
           </div>
-          {((claim?.approvedAmount != null && Number.isFinite(Number(claim.approvedAmount))) ||
-            (notesData.amtPayableToInsured != null && Number(notesData.amtPayableToInsured) > 0 && Number.isFinite(Number(notesData.amtPayableToInsured)))) && (
+          {((displayStatus === 'Settled' || claim?.status === 'SETTLED' || (notesData.uiClaimStatus || '').toLowerCase().includes('settle')) &&
+            ((claim?.approvedAmount != null && Number.isFinite(Number(claim.approvedAmount))) ||
+             (notesData.amtPayableToInsured != null && Number(notesData.amtPayableToInsured) > 0 && Number.isFinite(Number(notesData.amtPayableToInsured))))) && (
             <div className="flex justify-between col-span-2 pt-1 font-bold text-sm text-emerald-700">
               <span>Settled Amount:</span>
               <span>₹{Number(claim?.approvedAmount ?? notesData.amtPayableToInsured).toLocaleString('en-IN')}</span>
@@ -7645,6 +7903,65 @@ export function ClaimDetailView({ claim, onEdit }: { claim: any; onEdit?: () => 
                 </div>
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* Incident & Death Details in ClaimDetailView (only when death claim or death data exists) */}
+      {((claim.claimType || '').toLowerCase().includes('death') || (notesData.uiClaimStatus || '').toLowerCase().includes('death') || notesData.causeOfDeath || notesData.dateOfDeath) && (
+        <div className="space-y-2">
+          <label className="text-[11px] font-bold text-gray-400 uppercase tracking-wider block">Incident &amp; Death Details</label>
+          <div className="bg-slate-50 border border-slate-200/80 rounded-xl p-3 text-xs space-y-2">
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-2">
+              {notesData.deathAdmissionDate && (
+                <div className="bg-white border border-slate-200 rounded-lg p-2.5 shadow-2xs">
+                  <span className="text-gray-400 block text-[10px] uppercase font-bold">Date of Admission</span>
+                  <span className="font-semibold text-slate-800">{formatPreview(notesData.deathAdmissionDate)}</span>
+                </div>
+              )}
+              {notesData.causeOfDeath && (
+                <div className="bg-white border border-slate-200 rounded-lg p-2.5 shadow-2xs">
+                  <span className="text-gray-400 block text-[10px] uppercase font-bold">Cause of Death</span>
+                  <span className="font-bold text-slate-800">{notesData.causeOfDeath}</span>
+                </div>
+              )}
+              {notesData.dateOfOccurance && (
+                <div className="bg-white border border-slate-200 rounded-lg p-2.5 shadow-2xs">
+                  <span className="text-gray-400 block text-[10px] uppercase font-bold">Date of Occurrence</span>
+                  <span className="font-semibold text-slate-800">{formatPreview(notesData.dateOfOccurance)}</span>
+                </div>
+              )}
+              {notesData.dateOfDeath && (
+                <div className="bg-white border border-slate-200 rounded-lg p-2.5 shadow-2xs">
+                  <span className="text-gray-400 block text-[10px] uppercase font-bold">Date of Death</span>
+                  <span className="font-bold text-red-700">{formatPreview(notesData.dateOfDeath)}</span>
+                </div>
+              )}
+              {notesData.wasInComa && (
+                <div className="bg-white border border-slate-200 rounded-lg p-2.5 shadow-2xs">
+                  <span className="text-gray-400 block text-[10px] uppercase font-bold">Patient in Coma?</span>
+                  <span className="font-semibold text-slate-800">{notesData.wasInComa}</span>
+                </div>
+              )}
+              {notesData.deathSumInsured && (
+                <div className="bg-white border border-slate-200 rounded-lg p-2.5 shadow-2xs">
+                  <span className="text-gray-400 block text-[10px] uppercase font-bold">Death Sum Insured</span>
+                  <span className="font-bold text-emerald-700">₹{Number(notesData.deathSumInsured).toLocaleString('en-IN')}</span>
+                </div>
+              )}
+              {notesData.deathTotalClaimedAmount && (
+                <div className="bg-white border border-slate-200 rounded-lg p-2.5 shadow-2xs">
+                  <span className="text-gray-400 block text-[10px] uppercase font-bold">Total Claimed Amount</span>
+                  <span className="font-bold text-blue-700">₹{Number(notesData.deathTotalClaimedAmount).toLocaleString('en-IN')}</span>
+                </div>
+              )}
+              {notesData.deathComment && (
+                <div className="bg-white border border-slate-200 rounded-lg p-2.5 shadow-2xs col-span-full">
+                  <span className="text-gray-400 block text-[10px] uppercase font-bold">Remarks / Notes</span>
+                  <span className="text-slate-700 italic">{notesData.deathComment}</span>
+                </div>
+              )}
+            </div>
           </div>
         </div>
       )}

@@ -297,6 +297,9 @@ export const DatePicker = forwardRef<HTMLInputElement, DatePickerProps>(
       }
     };
 
+    const hasBoxStyling = className && (className.includes('border') || className.includes('input'));
+    const defaultBox = hasBoxStyling ? '' : 'border border-slate-200 bg-white rounded-lg py-1.5';
+
     return (
       <div className="relative w-full min-w-[130px] flex items-center group">
         {/* Editable visible input */}
@@ -310,7 +313,7 @@ export const DatePicker = forwardRef<HTMLInputElement, DatePickerProps>(
           onKeyDown={handleKeyDown}
           onBlur={handleTextBlur}
           onFocus={() => setIsTyping(true)}
-          className={`${className} cursor-text pl-2.5 pr-8 text-gray-900 text-xs min-w-[130px]`}
+          className={`${defaultBox} ${className || ''} cursor-text pl-2.5 pr-8 text-gray-900 text-xs min-w-[130px]`}
           maxLength={10}
           autoComplete="off"
         />

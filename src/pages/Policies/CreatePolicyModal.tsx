@@ -10,7 +10,7 @@ import { isFieldRequired as isFieldRequiredHelper, COMPULSORY_RULES_UPDATED_EVEN
 import { DatePicker } from '@comps/common/DatePicker';
 import { insuranceService, policiesService, documentsService, contactsService } from '@api/index';
 import toast from 'react-hot-toast';
-import { Shield, CreditCard, Users, Activity, FileText, Plus, Trash2, ChevronDown, UserCircle2, Pencil, RotateCw, History, CheckCircle2, AlertTriangle, Info, CalendarDays, Eye, Download, MessageCircle, Search, User, FileCheck2, Upload } from 'lucide-react';
+import { Shield, CreditCard, Users, Activity, FileText, Plus, Trash2, ChevronDown, ChevronUp, UserCheck, UserCircle2, Pencil, RotateCw, History, CheckCircle2, AlertTriangle, Info, CalendarDays, Eye, Download, MessageCircle, Search, User, FileCheck2, Upload } from 'lucide-react';
 import { format } from 'date-fns';
 import clsx from 'clsx';
 import { useLookupStore } from '@store/lookup.store';
@@ -369,7 +369,14 @@ export default function CreatePolicyModal({
         setPolicyNumber(policyToEdit.policyNumber || '');
         setAgentCode(policyToEdit.agentCode || '');
         setStatus((policyToEdit.status === 'ACTIVE' ? 'INFORCE' : policyToEdit.status) || 'INFORCE');
-        setAssignedEmployeeId(policyToEdit.assignedEmployeeId || '');
+        const initialEmpIds: string[] = [];
+        if (Array.isArray((policyToEdit as any).assignedEmployeeIds)) initialEmpIds.push(...(policyToEdit as any).assignedEmployeeIds);
+        if (policyToEdit.assignedEmployeeId) initialEmpIds.push(policyToEdit.assignedEmployeeId);
+        if (Array.isArray((policyToEdit.contact as any)?.assignedEmployeeIds)) initialEmpIds.push(...(policyToEdit.contact as any).assignedEmployeeIds);
+        if ((policyToEdit.contact as any)?.assignedEmployeeId) initialEmpIds.push((policyToEdit.contact as any).assignedEmployeeId);
+        const uniqueEmpIds = Array.from(new Set(initialEmpIds.filter(Boolean)));
+        setAssignedEmployeeIds(uniqueEmpIds);
+        setAssignedEmployeeId(uniqueEmpIds[0] || policyToEdit.assignedEmployeeId || '');
         setSumAssured(policyToEdit.sumAssured != null ? String(policyToEdit.sumAssured) : '');
         setPremiumAmount(policyToEdit.premiumAmount != null ? String(policyToEdit.premiumAmount) : '');
         setPaymentFrequency(policyToEdit.paymentFrequency || 'YEARLY');
@@ -377,7 +384,7 @@ export default function CreatePolicyModal({
         setEndDate(policyToEdit.endDate ? String(policyToEdit.endDate).split('T')[0] : '');
         setNextDueDate(policyToEdit.nextDueDate ? String(policyToEdit.nextDueDate).split('T')[0] : '');
         setMaturityDate(policyToEdit.maturityDate ? String(policyToEdit.maturityDate).split('T')[0] : '');
-        setNotes(extra.cleanNotes || policyToEdit.notes || '');
+        setNotes(extra.cleanNotes || '');
         const matchCity = (policyToEdit.notes || '').match(/(?:Policy Zone(?: Location)? City|Policy City|Zone City|City):\s*(.*)/i);
         const editCity = matchCity ? matchCity[1].trim() : (
           (policyToEdit as any).contactCity ||
@@ -417,6 +424,23 @@ export default function CreatePolicyModal({
                 nomineePercentage: m.nomineePercentage && Number(m.nomineePercentage) > 0 ? m.nomineePercentage : '',
               };
             });
+
+          if (policyToEdit.contact?.relationships && Array.isArray(policyToEdit.contact.relationships) && policyToEdit.contact.relationships.length > 0) {
+            const validRelNames = new Set<string>(policyToEdit.contact.relationships.map((r: any) => {
+              const rc = r.relatedContact || r.contact;
+              return String(`${rc?.firstName || ''} ${rc?.lastName || ''}`).trim().toLowerCase();
+            }));
+            const notesCpNames = new Set<string>((extra.connectedPersons || []).map((cp: any) => String(cp.name || '').trim().toLowerCase()));
+            initialMembers = initialMembers.filter(m => {
+              const mNameLower = String(m.name || '').trim().toLowerCase();
+              if (validRelNames.has(mNameLower)) return true;
+              if (notesCpNames.has(mNameLower)) return true;
+              for (const relName of (Array.from(validRelNames) as string[])) {
+                if (relName && (mNameLower.includes(relName) || relName.includes(mNameLower))) return true;
+              }
+              return false;
+            });
+          }
         }
 
         const noteLines = (policyToEdit.notes || '').split('\n');
@@ -460,23 +484,31 @@ export default function CreatePolicyModal({
           });
         }
 
-        // If members was still empty, check initialData familyMembers or relationships
-        if (initialMembers.length === 0 && Array.isArray(initialData?.familyMembers) && initialData.familyMembers.length > 0) {
-          initialData.familyMembers.forEach((fm: any, idx: number) => {
-            const fmName = (fm.name || `${fm.firstName || ''} ${fm.lastName || ''}`).trim();
-            const isSelf = String(fm.relation || fm.relationship || '').toLowerCase() === 'self';
-            if (fmName && !isSelf && (!proposerNameLower || fmName.toLowerCase() !== proposerNameLower)) {
+        // Check initialData familyMembers or relationships and merge any that aren't already included
+        const famList = Array.isArray(initialData?.familyMembers) && initialData.familyMembers.length > 0
+          ? initialData.familyMembers
+          : (Array.isArray(initialData?.contact?.relationships) ? initialData.contact.relationships : (Array.isArray(selectedContact?.relationships) ? selectedContact.relationships : []));
+
+        if (famList.length > 0) {
+          const existingNames = new Set(initialMembers.map(m => m.name.trim().toLowerCase()));
+          famList.forEach((fm: any, idx: number) => {
+            const target = fm.relatedContact || fm.contact || fm;
+            const fmName = (target.name || `${target.firstName || ''} ${target.lastName || ''}`).trim();
+            const rawRel = fm.relation || fm.relationship || fm.relationshipType || '';
+            const isSelf = String(rawRel).toLowerCase() === 'self';
+            if (fmName && !isSelf && (!proposerNameLower || fmName.toLowerCase() !== proposerNameLower) && !existingNames.has(fmName.toLowerCase())) {
+              existingNames.add(fmName.toLowerCase());
               initialMembers.push({
-                id: fm.id || fm.contactId ? `contact-${fm.id || fm.contactId}` : `member-${idx}`,
+                id: target.id || target.contactId ? `contact-${target.id || target.contactId}` : `member-${idx}`,
                 name: fmName,
-                relationship: formatPolicyRelationship(fm.relation || fm.relationship, fm.gender, true),
-                contactNo: cleanConnectedPhone(fm.phone || fm.contactNo || fm.whatsapp),
-                dob: fm.dob ? String(fm.dob).slice(0, 10) : '',
-                gender: ['MALE', 'FEMALE', 'OTHER'].includes(String(fm.gender).toUpperCase()) ? String(fm.gender).toUpperCase() : 'MALE',
+                relationship: formatPolicyRelationship(rawRel, target.gender, true),
+                contactNo: cleanConnectedPhone(target.phone || target.contactNo || target.whatsapp),
+                dob: target.dateOfBirth ? String(target.dateOfBirth).slice(0, 10) : (target.dob ? String(target.dob).slice(0, 10) : ''),
+                gender: ['MALE', 'FEMALE', 'OTHER'].includes(String(target.gender).toUpperCase()) ? String(target.gender).toUpperCase() : 'MALE',
                 isCovered: true,
                 isNominee: false,
                 nomineeName: '',
-                nomineeRelation: formatPolicyRelationship(fm.relation || fm.relationship, fm.gender, true) || 'Spouse',
+                nomineeRelation: formatPolicyRelationship(rawRel, target.gender, true) || 'Spouse',
                 nomineeContact: '',
                 nomineeDob: '',
                 nomineePercentage: '',
@@ -681,7 +713,20 @@ export default function CreatePolicyModal({
         const agentNameFromLead = initialData?.assignedEmployee ? `${initialData.assignedEmployee.firstName || ''} ${initialData.assignedEmployee.lastName || ''}`.trim() : '';
         const defaultAgent = agentNameFromLead || (user ? `${user.firstName || ''} ${user.lastName || ''}`.trim() || 'Rahul Mehta' : 'Rahul Mehta');
         setSelectedAgentName(defaultAgent);
-        setAssignedEmployeeId(initialData?.assignedEmployeeId || initialData?.assignedTo || user?.id || '');
+        const initEmpIds: string[] = [];
+        if (Array.isArray((initialData as any)?.assignedEmployeeIds)) initEmpIds.push(...(initialData as any).assignedEmployeeIds);
+        if (initialData?.assignedEmployeeId) initEmpIds.push(initialData.assignedEmployeeId);
+        if (Array.isArray((initialData?.contact as any)?.assignedEmployeeIds)) initEmpIds.push(...(initialData.contact as any).assignedEmployeeIds);
+        if ((initialData?.contact as any)?.assignedEmployeeId) initEmpIds.push((initialData.contact as any).assignedEmployeeId);
+        const uniqueInitEmpIds = Array.from(new Set(initEmpIds.filter(Boolean)));
+        if (uniqueInitEmpIds.length > 0) {
+          setAssignedEmployeeIds(uniqueInitEmpIds);
+          setAssignedEmployeeId(uniqueInitEmpIds[0]);
+        } else {
+          const fallbackEmp = initialData?.assignedEmployeeId || initialData?.assignedTo || user?.id || '';
+          setAssignedEmployeeId(fallbackEmp);
+          if (fallbackEmp) setAssignedEmployeeIds([fallbackEmp]);
+        }
 
         setSelectedFamilySize('1');
         setSelectedZoneTier('ZONE_1');
@@ -830,6 +875,20 @@ export default function CreatePolicyModal({
   const [agentCode, setAgentCode] = useState('');
   const [status, setStatus] = useState('INFORCE');
   const [assignedEmployeeId, setAssignedEmployeeId] = useState('');
+  const [assignedEmployeeIds, setAssignedEmployeeIds] = useState<string[]>([]);
+  const [isEmployeePickerOpen, setIsEmployeePickerOpen] = useState(false);
+  const [employeePickerSearch, setEmployeePickerSearch] = useState('');
+  const employeePickerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (employeePickerRef.current && !employeePickerRef.current.contains(e.target as Node)) {
+        setIsEmployeePickerOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
   const [policyZoneCity, setPolicyZoneCity] = useState('');
   const [policyZonePincode, setPolicyZonePincode] = useState('');
   const [selectedZoneTier, setSelectedZoneTier] = useState('ZONE_1');
@@ -1263,22 +1322,28 @@ export default function CreatePolicyModal({
     (contact?.familyMembers || []).forEach((rel: any) => processRelationshipItem(rel, true));
 
     setMembers(previous => {
-      // Remove any previously auto-populated contact members, self entries, or matching contact's name
-      const manualPrevious = previous.filter(p =>
-        !p.id.startsWith('contact-') &&
-        p.name.trim().toLowerCase() !== contactFullName &&
-        p.relationship?.toLowerCase() !== 'self'
-      );
-      const manualNames = new Set(manualPrevious.map(p => p.name.trim().toLowerCase()));
-      const uniqueFamily = familyMembers.filter(p => !manualNames.has(p.name.trim().toLowerCase()));
-      const combined = [...manualPrevious, ...uniqueFamily];
       const seen = new Set<string>();
-      return combined.filter(p => {
+      const result: ConnectedPersonItem[] = [];
+
+      // 1. Preserve existing members in the policy
+      previous.forEach(p => {
         const k = p.name.trim().toLowerCase();
-        if (!k || seen.has(k)) return false;
-        seen.add(k);
-        return true;
+        if (k && !seen.has(k) && k !== contactFullName && p.relationship?.toLowerCase() !== 'self') {
+          seen.add(k);
+          result.push(p);
+        }
       });
+
+      // 2. Append newly added family members from contact
+      familyMembers.forEach(f => {
+        const k = f.name.trim().toLowerCase();
+        if (k && !seen.has(k) && k !== contactFullName && f.relationship?.toLowerCase() !== 'self') {
+          seen.add(k);
+          result.push(f);
+        }
+      });
+
+      return result;
     });
   }, []);
 
@@ -1310,22 +1375,28 @@ export default function CreatePolicyModal({
       }
     }
 
-    if (!initialData?.relationships?.length && !initialData?.familyMembers?.length && !found?.relationships?.length && !found?.familyMembers?.length) {
-      contactsService.get(cId)
-        .then((res: any) => {
-          const c = res?.data?.data || res?.data || res;
-          if (c) {
-            setSelectedContact((prev: any) => prev ? { ...prev, ...c } : c);
-            if (!selectedContactId) setSelectedContactId(c.id || cId);
-            syncContactFamilyMembers(c);
-            const cCity = c?.addresses?.find((a: any) => a.isPrimary)?.city || c?.addresses?.[0]?.city || c?.city || '';
-            if (cCity && cCity !== 'N/A') {
-              setPolicyZoneCity(prev => prev || cCity);
-            }
+    // Always fetch latest contact details with fresh relationships so new family members reflect immediately
+    contactsService.get(cId)
+      .then((res: any) => {
+        const c = res?.data?.data || res?.data || res;
+        if (c) {
+          setSelectedContact((prev: any) => prev ? { ...prev, ...c } : c);
+          if (!selectedContactId) setSelectedContactId(c.id || cId);
+          syncContactFamilyMembers(c);
+          const contactEmps = Array.isArray(c.assignedEmployeeIds) && c.assignedEmployeeIds.length > 0
+            ? c.assignedEmployeeIds
+            : (c.assignedEmployeeId ? [c.assignedEmployeeId] : []);
+          if (contactEmps.length > 0) {
+            setAssignedEmployeeIds(prev => Array.from(new Set([...prev, ...contactEmps])));
+            setAssignedEmployeeId(prev => prev || contactEmps[0]);
           }
-        })
-        .catch(() => {});
-    }
+          const cCity = c?.addresses?.find((a: any) => a.isPrimary)?.city || c?.addresses?.[0]?.city || c?.city || '';
+          if (cCity && cCity !== 'N/A') {
+            setPolicyZoneCity(prev => prev || cCity);
+          }
+        }
+      })
+      .catch(() => {});
   }, [open, selectedContactId, contactId, initialData, policyToEdit, syncContactFamilyMembers, contactsList]);
 
   // Tab 4: PHC Details
@@ -2017,6 +2088,18 @@ export default function CreatePolicyModal({
       }
 
       const targetPolicyId = policyToEdit?.id || savedPolicy?.id;
+      if (targetPolicyId && policyToEdit?.members && Array.isArray(policyToEdit.members)) {
+        for (const oldM of policyToEdit.members) {
+          const stillExists = validMembers.some(
+            p => p.name.trim().toLowerCase() === (oldM.name || '').trim().toLowerCase()
+          );
+          if (!stillExists && oldM.id) {
+            try {
+              await policiesService.removeMember(targetPolicyId, oldM.id);
+            } catch { /* ignore */ }
+          }
+        }
+      }
       if (targetPolicyId && validMembers.length > 0) {
         for (const person of validMembers) {
           if (person.name.trim()) {
@@ -2287,6 +2370,13 @@ export default function CreatePolicyModal({
                                   const fullContact = res?.data?.data || res?.data || res;
                                   if (fullContact) {
                                     syncContactFamilyMembers(fullContact);
+                                    const contactEmps = Array.isArray(fullContact.assignedEmployeeIds) && fullContact.assignedEmployeeIds.length > 0
+                                      ? fullContact.assignedEmployeeIds
+                                      : (fullContact.assignedEmployeeId ? [fullContact.assignedEmployeeId] : []);
+                                    if (contactEmps.length > 0) {
+                                      setAssignedEmployeeIds(contactEmps);
+                                      setAssignedEmployeeId(contactEmps[0]);
+                                    }
                                   }
                                 }).catch(() => {});
                               }}
@@ -2748,22 +2838,154 @@ export default function CreatePolicyModal({
 
                       {/* Assigned To */}
                       {user?.role !== 'EMPLOYEE' && (
-                        <div>
+                        <div className="relative" ref={employeePickerRef}>
                           <label className="label text-[10px] font-extrabold text-slate-900 uppercase tracking-wider block mb-1">
                             Assigned To
                           </label>
-                          <CustomSelect
-                            value={assignedEmployeeId || ''}
-                            onChange={val => setAssignedEmployeeId(val)}
-                            placeholder="Select Employee"
-                            options={[
-                              { value: '', label: 'Select Employee' },
-                              ...(employees || []).map((emp: any) => ({
-                                value: emp.userId || emp.id,
-                                label: `${emp.firstName || emp.employeeProfile?.firstName || ''} ${emp.lastName || emp.employeeProfile?.lastName || ''}`.trim()
-                              }))
-                            ]}
-                          />
+                          {(() => {
+                            const employeesList: any[] = employees || [];
+                            const selectedIds = assignedEmployeeIds.length > 0
+                              ? assignedEmployeeIds
+                              : (assignedEmployeeId ? [assignedEmployeeId] : []);
+                            const isEmpSelected = (emp: any) => {
+                              const ids = [emp.userId, emp.id, emp.user?.id].filter(Boolean);
+                              return selectedIds.some((id: string) => ids.includes(id));
+                            };
+                            const selectedEmployees = employeesList.filter(isEmpSelected);
+                            const searchTerm = employeePickerSearch.trim().toLowerCase();
+                            const filteredEmployees = employeesList.filter((emp: any) => {
+                              const name = `${emp.firstName || emp.employeeProfile?.firstName || ''} ${emp.lastName || emp.employeeProfile?.lastName || ''}`.trim() || emp.name || emp.email || 'Employee';
+                              return !searchTerm || name.toLowerCase().includes(searchTerm) || (emp.email || '').toLowerCase().includes(searchTerm);
+                            });
+
+                            const updateAssignedEmployees = (newIds: string[]) => {
+                              setAssignedEmployeeIds(newIds);
+                              setAssignedEmployeeId(newIds[0] || '');
+                            };
+
+                            return (
+                              <>
+                                <button
+                                  type="button"
+                                  disabled={isViewOnly}
+                                  onClick={() => !isViewOnly && setIsEmployeePickerOpen(prev => !prev)}
+                                  className={clsx(
+                                    'w-full min-h-[40px] px-3 py-2 rounded-xl border bg-white text-left transition-colors flex items-center justify-between gap-2',
+                                    isViewOnly
+                                      ? 'border-slate-200 cursor-default bg-slate-50/50'
+                                      : 'border-slate-200 hover:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500'
+                                  )}
+                                >
+                                  <span className="min-w-0 flex items-center gap-2">
+                                    <Users size={14} className="shrink-0 text-blue-600" />
+                                    <span className="truncate text-xs font-semibold text-slate-700">
+                                      {selectedEmployees.length > 0
+                                        ? selectedEmployees.map((emp: any) =>
+                                            `${emp.firstName || emp.employeeProfile?.firstName || ''} ${emp.lastName || emp.employeeProfile?.lastName || ''}`.trim() || emp.name || 'Employee'
+                                          ).join(', ')
+                                        : 'Select Employee'}
+                                    </span>
+                                  </span>
+                                  <span className="shrink-0 flex items-center gap-1.5">
+                                    {selectedIds.length > 0 && (
+                                      <span className="rounded-full bg-blue-50 px-2 py-0.5 text-[10px] font-bold text-blue-700">
+                                        {selectedIds.length} selected
+                                      </span>
+                                    )}
+                                    {!isViewOnly && (isEmployeePickerOpen ? <ChevronUp size={14} /> : <ChevronDown size={14} />)}
+                                  </span>
+                                </button>
+
+                                {selectedEmployees.length > 0 && (
+                                  <div className="mt-1.5 flex flex-wrap gap-1">
+                                    {selectedEmployees.map((emp: any) => {
+                                      const empId = emp.userId || emp.id;
+                                      const name = `${emp.firstName || emp.employeeProfile?.firstName || ''} ${emp.lastName || emp.employeeProfile?.lastName || ''}`.trim() || emp.name || 'Employee';
+                                      return (
+                                        <span key={empId} className="inline-flex items-center gap-1 rounded-full border border-blue-100 bg-blue-50 px-2 py-0.5 text-[10px] font-semibold text-blue-800">
+                                          <UserCheck size={10} />
+                                          <span className="max-w-[140px] truncate">{name}</span>
+                                        </span>
+                                      );
+                                    })}
+                                  </div>
+                                )}
+
+                                {isEmployeePickerOpen && !isViewOnly && (
+                                  <div className="absolute z-50 left-0 right-0 mt-1 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xl">
+                                    <div className="border-b border-slate-100 p-2">
+                                      <div className="relative">
+                                        <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
+                                        <input
+                                          type="search"
+                                          value={employeePickerSearch}
+                                          onChange={e => setEmployeePickerSearch(e.target.value)}
+                                          placeholder="Search employee..."
+                                          className="w-full rounded-lg border border-slate-200 py-1.5 pl-8 pr-2.5 text-xs outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-500/20"
+                                        />
+                                      </div>
+                                      <div className="mt-1.5 flex items-center justify-between text-[10px]">
+                                        <span className="font-semibold text-slate-500">
+                                          {selectedIds.length} of {employeesList.length} selected
+                                        </span>
+                                        <div className="flex items-center gap-2">
+                                          <button
+                                            type="button"
+                                            className="font-bold text-blue-600 hover:text-blue-800 cursor-pointer"
+                                            onClick={() => updateAssignedEmployees(employeesList.map((emp: any) => emp.userId || emp.id))}
+                                          >
+                                            Select all
+                                          </button>
+                                          <button
+                                            type="button"
+                                            className="font-bold text-slate-500 hover:text-slate-800 cursor-pointer"
+                                            onClick={() => updateAssignedEmployees([])}
+                                          >
+                                            Clear
+                                          </button>
+                                        </div>
+                                      </div>
+                                    </div>
+                                    <div className="max-h-48 overflow-y-auto p-1">
+                                      {filteredEmployees.length === 0 ? (
+                                        <p className="px-3 py-4 text-center text-xs text-slate-400">No employees found.</p>
+                                      ) : filteredEmployees.map((emp: any) => {
+                                        const empId = emp.userId || emp.id;
+                                        const name = `${emp.firstName || emp.employeeProfile?.firstName || ''} ${emp.lastName || emp.employeeProfile?.lastName || ''}`.trim() || emp.name || 'Employee';
+                                        const isSelected = isEmpSelected(emp);
+                                        return (
+                                          <label key={empId} className={clsx(
+                                            'flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 transition-colors',
+                                            isSelected ? 'bg-blue-50' : 'hover:bg-slate-50'
+                                          )}>
+                                            <input
+                                              type="checkbox"
+                                              checked={isSelected}
+                                              onChange={e => {
+                                                const empIds = [emp.userId, emp.id].filter(Boolean);
+                                                updateAssignedEmployees(
+                                                  e.target.checked
+                                                    ? Array.from(new Set([...selectedIds, empId]))
+                                                    : selectedIds.filter(id => !empIds.includes(id))
+                                                );
+                                              }}
+                                              className="h-3.5 w-3.5 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                                            />
+                                            <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-slate-100 text-[10px] font-bold text-slate-600">
+                                              {name.charAt(0).toUpperCase()}
+                                            </span>
+                                            <span className="min-w-0 flex-1 truncate text-xs font-semibold text-slate-700">
+                                              {name}
+                                            </span>
+                                          </label>
+                                        );
+                                      })}
+                                    </div>
+                                  </div>
+                                )}
+                              </>
+                            );
+                          })()}
                         </div>
                       )}
                     </div>

@@ -5,10 +5,9 @@ import { z } from 'zod';
 import { useNavigate } from 'react-router-dom';
 import { authService } from '@api/auth.service';
 import toast from 'react-hot-toast';
-import clsx from 'clsx';
 import { 
   Mail, Lock, Eye, EyeOff, ShieldCheck, 
-  ArrowRight, Users, Layers, User, Phone, CheckCircle2, AlertCircle, ArrowLeft, KeyRound
+  ArrowRight, User, Phone, CheckCircle2, AlertCircle, ArrowLeft, KeyRound
 } from 'lucide-react';
 
 const loginSchema = z.object({
@@ -48,7 +47,6 @@ export default function Login() {
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [showResetNewPassword, setShowResetNewPassword] = useState(false);
   const [showResetConfirmPassword, setShowResetConfirmPassword] = useState(false);
-  const [selectedRole, setSelectedRole] = useState<'OWNER' | 'EMPLOYEE'>('OWNER');
   const [isRegistering, setIsRegistering] = useState(false);
   const [isResetting, setIsResetting] = useState(false);
   const [pendingApprovalMsg, setPendingApprovalMsg] = useState<string | null>(null);
@@ -57,7 +55,6 @@ export default function Login() {
     register: registerLogin, 
     handleSubmit: handleLoginSubmit, 
     setValue: setLoginValue, 
-    reset: resetLogin, 
     formState: { errors: loginErrors } 
   } = useForm<LoginForm>({ 
     resolver: zodResolver(loginSchema),
@@ -354,46 +351,6 @@ export default function Login() {
           ) : !isRegistering ? (
             /* MODE 2: Normal Sign In View */
             <>
-              {/* Role Switcher */}
-              <div className="space-y-1">
-                <div className="flex items-center justify-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setSelectedRole('OWNER');
-                      setPendingApprovalMsg(null);
-                      resetLogin({ email: '', password: '' });
-                    }}
-                    className={clsx(
-                      "px-3.5 py-1.5 rounded-xl border text-[11px] font-semibold transition-all flex items-center gap-1.5 cursor-pointer shadow-2xs",
-                      selectedRole === 'OWNER'
-                        ? "bg-teal-600 text-white border-teal-700 shadow-teal-600/20"
-                        : "bg-teal-50 hover:bg-teal-100 border-teal-200/80 text-teal-800"
-                    )}
-                  >
-                    <Users className={clsx("w-3.5 h-3.5", selectedRole === 'OWNER' ? "text-white" : "text-teal-600")} /> 
-                    Owner
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setSelectedRole('EMPLOYEE');
-                      setPendingApprovalMsg(null);
-                      resetLogin({ email: '', password: '' });
-                    }}
-                    className={clsx(
-                      "px-3.5 py-1.5 rounded-xl border text-[11px] font-semibold transition-all flex items-center gap-1.5 cursor-pointer shadow-2xs",
-                      selectedRole === 'EMPLOYEE'
-                        ? "bg-indigo-600 text-white border-indigo-700 shadow-indigo-600/20"
-                        : "bg-indigo-50 hover:bg-indigo-100 border-indigo-200/80 text-indigo-800"
-                    )}
-                  >
-                    <Layers className={clsx("w-3.5 h-3.5", selectedRole === 'EMPLOYEE' ? "text-white" : "text-indigo-600")} /> 
-                    Employee
-                  </button>
-                </div>
-              </div>
-
               {/* Sign In Form */}
               <form onSubmit={handleLoginSubmit(onLoginSubmit)} className="space-y-3">
                 {/* Email Field */}
@@ -490,7 +447,6 @@ export default function Login() {
                     type="button"
                     onClick={() => {
                       setIsRegistering(true);
-                      setSelectedRole('EMPLOYEE');
                       setIsResetting(false);
                       setPendingApprovalMsg(null);
                     }}
