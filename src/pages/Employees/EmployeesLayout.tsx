@@ -180,6 +180,7 @@ export default function EmployeesLayout() {
     mutationFn: (body: CreateForm) => employeesService.create(body),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['employees'] });
+      qc.invalidateQueries({ queryKey: ['contacts'] });
       setModalOpen(false);
       reset();
       setSelectedContactId('');

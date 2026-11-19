@@ -1010,6 +1010,18 @@ export default function Policies() {
     return getCustomDropdowns('Policy');
   }, [getCustomDropdowns, dropdownMenus]);
 
+  const familySizeOptions = useMemo(() => {
+    return getOptions('Policy', 'Family Size', [
+      { value: '1', label: '1 Adult (Individual)' },
+      { value: '2', label: '2 Adults (1A + 1A)' },
+      { value: '2_1', label: '2 Adults + 1 Child' },
+      { value: '2_2', label: '2 Adults + 2 Children' },
+      { value: '2_3', label: '2 Adults + 3 Children' },
+      { value: '1_1', label: '1 Adult + 1 Child' },
+      { value: '1_2', label: '1 Adult + 2 Children' },
+    ]);
+  }, [getOptions, dropdownMenus]);
+
   const [customDropdownValues, setCustomDropdownValues] = useState<Record<string, string>>({});
   const [emiSelectedMonth, setEmiSelectedMonth] = useState(() =>
     new Date().toLocaleDateString('en-US', { month: 'long', year: 'numeric' })
@@ -2696,12 +2708,23 @@ export default function Policies() {
       const seen = new Set<string>();
       const result: ConnectedPersonItem[] = [];
 
-      // 1. Preserve existing members in the policy
+      // 1. Preserve existing members in the policy, but update relationship if matched in familyMembers
       prev.forEach(p => {
         const k = p.name.trim().toLowerCase();
         if (k && !seen.has(k) && k !== contactFullName && p.relationship?.toLowerCase() !== 'self') {
           seen.add(k);
-          result.push(p);
+          const fresh = familyMembers.find(f => f.name.trim().toLowerCase() === k);
+          if (fresh && fresh.relationship && fresh.relationship.toLowerCase() !== 'other') {
+            result.push({
+              ...p,
+              relationship: fresh.relationship,
+              gender: fresh.gender || p.gender,
+              contactNo: p.contactNo || fresh.contactNo,
+              dob: p.dob || fresh.dob,
+            });
+          } else {
+            result.push(p);
+          }
         }
       });
 
@@ -3064,18 +3087,19 @@ export default function Policies() {
         let contactNoToUse = cleanConnectedPhone(m.contactNo || m.phone || '');
         let dobToUse = m.dateOfBirth ? m.dateOfBirth.slice(0, 10) : (m.dob || '');
         const mNameLower = (m.name || `${m.firstName || ''} ${m.lastName || ''}`).trim().toLowerCase();
+        let matchedRel: any = null;
         if ((p as any).contact?.relationships) {
-          const matchedRel = (p as any).contact.relationships.find((r: any) => {
+          matchedRel = (p as any).contact.relationships.find((r: any) => {
             const rc = r.relatedContact || r.contact;
             const rNameLower = `${rc?.firstName || ''} ${rc?.lastName || ''}`.trim().toLowerCase();
             return rNameLower && (rNameLower === mNameLower || mNameLower.includes(rNameLower) || rNameLower.includes(mNameLower));
           });
           if (matchedRel) {
             const rc = matchedRel.relatedContact || matchedRel.contact;
-            if (!relToUse || relToUse.toUpperCase() === 'OTHER') {
+            if (matchedRel.relationshipType) {
               relToUse = matchedRel.relationshipType;
             }
-            if (!genToUse && rc?.gender) {
+            if (rc?.gender) {
               genToUse = rc.gender;
             }
             if (!contactNoToUse && (rc?.phone || rc?.alternatePhone || rc?.dependentNo)) {
@@ -3083,6 +3107,23 @@ export default function Policies() {
             }
             if (!dobToUse && rc?.dateOfBirth) {
               dobToUse = String(rc.dateOfBirth).slice(0, 10);
+            }
+          }
+        }
+        if (!matchedRel && (p as any).contact?.relatedTo) {
+          const matchedRev = (p as any).contact.relatedTo.find((r: any) => {
+            const pc = r.primaryContact || r.contact;
+            const rNameLower = `${pc?.firstName || ''} ${pc?.lastName || ''}`.trim().toLowerCase();
+            return rNameLower && (rNameLower === mNameLower || mNameLower.includes(rNameLower) || rNameLower.includes(mNameLower));
+          });
+          if (matchedRev) {
+            const pc = matchedRev.primaryContact || matchedRev.contact;
+            if (matchedRev.relationshipType) {
+              relToUse = formatPolicyRelationship(matchedRev.relationshipType, genToUse || m.gender, false);
+            }
+            if (pc?.gender) genToUse = pc.gender;
+            if (!contactNoToUse && (pc?.phone || pc?.alternatePhone)) {
+              contactNoToUse = cleanConnectedPhone(pc.phone || pc.alternatePhone);
             }
           }
         }
@@ -3188,6 +3229,34 @@ export default function Policies() {
           contactNo: rc.phone || rc.alternatePhone || '',
           dob: rc.dateOfBirth ? String(rc.dateOfBirth).slice(0, 10) : (rc.dob ? String(rc.dob).slice(0, 10) : ''),
           gender: rc.gender || 'MALE',
+          isCovered: true,
+          isNominee: false,
+          nomineeName: '',
+          nomineeRelation: formattedRel || 'Spouse',
+          nomineeContact: '',
+          nomineeDob: '',
+          nomineePercentage: 100,
+        });
+      });
+    }
+
+    if ((p as any).contact?.relatedTo && Array.isArray((p as any).contact.relatedTo)) {
+      const existingNames = new Set(initialPersons.map(ip => ip.name.trim().toLowerCase()));
+      (p as any).contact.relatedTo.forEach((rel: any) => {
+        const pc = rel.primaryContact || rel.contact || rel;
+        const name = [pc?.firstName, pc?.middleName, pc?.lastName].filter(Boolean).join(' ').trim() || (pc?.name || '').trim();
+        if (!name || existingNames.has(name.toLowerCase())) return;
+        existingNames.add(name.toLowerCase());
+        const relType = rel.relationshipType || rel.relation || pc.relation || '';
+        const formattedRel = formatPolicyRelationship(relType, pc.gender, false);
+        initialPersons.push({
+          id: String(Math.random()),
+          addedAt: rel.createdAt || pc.createdAt || p.createdAt || new Date().toISOString(),
+          name,
+          relationship: formattedRel,
+          contactNo: pc.phone || pc.alternatePhone || '',
+          dob: pc.dateOfBirth ? String(pc.dateOfBirth).slice(0, 10) : (pc.dob ? String(pc.dob).slice(0, 10) : ''),
+          gender: pc.gender || 'MALE',
           isCovered: true,
           isNominee: false,
           nomineeName: '',
@@ -5637,15 +5706,15 @@ export default function Policies() {
                             <CustomSelect
                               value={selectedFamilySize}
                               onChange={val => setSelectedFamilySize(val)}
-                              options={[
-                                { value: '1', label: '1 Adult (Individual)' },
-                                { value: '2', label: '2 Adults (1A + 1A)' },
-                                { value: '2_1', label: '2 Adults + 1 Child' },
-                                { value: '2_2', label: '2 Adults + 2 Children' },
-                                { value: '2_3', label: '2 Adults + 3 Children' },
-                                { value: '1_1', label: '1 Adult + 1 Child' },
-                                { value: '1_2', label: '1 Adult + 2 Children' },
-                              ]}
+                              options={familySizeOptions.map(opt =>
+                                opt.value === '1' ? { value: '1', label: '1 Adult (Individual)' } :
+                                opt.value === '2' ? { value: '2', label: '2 Adults (1A + 1A)' } :
+                                opt.value === '2_1' ? { value: '2_1', label: '2 Adults + 1 Child' } :
+                                opt.value === '2_2' ? { value: '2_2', label: '2 Adults + 2 Children' } :
+                                opt.value === '2_3' ? { value: '2_3', label: '2 Adults + 3 Children' } :
+                                opt.value === '1_1' ? { value: '1_1', label: '1 Adult + 1 Child' } :
+                                opt.value === '1_2' ? { value: '1_2', label: '1 Adult + 2 Children' } : opt
+                              )}
                             />
                           </div>
 

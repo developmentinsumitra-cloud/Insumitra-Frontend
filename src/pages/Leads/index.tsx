@@ -30,6 +30,7 @@ import { DatePicker } from '@comps/common/DatePicker';
 import { CountryPhoneInput } from '@comps/common/CountryPhoneInput';
 import { DatalistInput } from '@comps/common/DatalistInput';
 import { sortData } from '../../utils/sortUtils';
+import { useMasterDropdowns } from '../../hooks/useMasterDropdowns';
 
 const LEAD_DOC_TYPES = [
   { value: 'IDENTITY_PROOF', label: 'Aadhaar / PAN / Identity Proof' },
@@ -708,6 +709,20 @@ function ContactSearchSelect({
 
 // ── Main Component ────────────────────────────────────────────────────────────
 export default function Leads() {
+  const { dropdownMenus, getOptions } = useMasterDropdowns();
+  const leadStatusOptions = useMemo(() => getOptions('Lead', 'Lead Status', [
+    { value: 'NOT_INTERESTED', label: 'Not Interested' },
+    { value: 'LEAD_LOST', label: 'Lead Lost' },
+    { value: 'INTERESTED', label: 'Interested' },
+    { value: 'HOT', label: 'Hot' },
+    { value: 'VERY_HOT', label: 'Very Hot' },
+  ]), [getOptions, dropdownMenus]);
+  const leadSourceOptions = useMemo(() => getOptions('Lead', 'Lead Source', [
+    'Social Media', 'Our Customer Self', 'Refered by our customer', 'Walkin', 'BNI',
+  ]), [getOptions, dropdownMenus]);
+  const leadTypeOptions = useMemo(() => getOptions('Lead', 'Lead Type', [
+    'Fresh', 'Renewal', 'Porting', 'Renewal/Porting',
+  ]), [getOptions, dropdownMenus]);
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
 
@@ -3894,8 +3909,10 @@ export default function Leads() {
               className="input text-xs font-semibold w-full bg-white shadow-2xs"
             >
               <option value="">All Sources</option>
-              {LEAD_SOURCES.map(src => (
-                <option key={src} value={src}>{src}</option>
+              {leadSourceOptions.map(src => (
+                <option key={typeof src === 'string' ? src : src.value} value={typeof src === 'string' ? src : src.value}>
+                  {typeof src === 'string' ? src : src.label}
+                </option>
               ))}
             </select>
           </div>
@@ -7576,6 +7593,20 @@ function LeadDetailPopup({
 }) {
   const qc = useQueryClient();
   const [commentText, setCommentText] = useState('');
+  const { dropdownMenus, getOptions } = useMasterDropdowns();
+  const leadStatusOptions = useMemo(() => getOptions('Lead', 'Lead Status', [
+    { value: 'NOT_INTERESTED', label: 'Not Interested' },
+    { value: 'LEAD_LOST', label: 'Lead Lost' },
+    { value: 'INTERESTED', label: 'Interested' },
+    { value: 'HOT', label: 'Hot' },
+    { value: 'VERY_HOT', label: 'Very Hot' },
+  ]), [getOptions, dropdownMenus]);
+  const leadSourceOptions = useMemo(() => getOptions('Lead', 'Lead Source', [
+    'Social Media', 'Our Customer Self', 'Refered by our customer', 'Walkin', 'BNI',
+  ]), [getOptions, dropdownMenus]);
+  const leadTypeOptions = useMemo(() => getOptions('Lead', 'Lead Type', [
+    'Fresh', 'Renewal', 'Porting', 'Renewal/Porting',
+  ]), [getOptions, dropdownMenus]);
 
   const { data: fullLeadData, refetch } = useQuery({
     queryKey: ['lead-detail-popup', lead.id],
@@ -8061,11 +8092,16 @@ function LeadDetailPopup({
                     onChange={e => setEditStatus(e.target.value)}
                     className="input text-xs font-semibold bg-slate-50/50 border-slate-200 focus:bg-white"
                   >
-                    {!LEAD_STATUS_OPTIONS.some(option => option.value === editStatus) && (
+                    {!leadStatusOptions.some(option => (typeof option === 'string' ? option : option.value) === editStatus) && (
                       <option value={editStatus} hidden>{editStatus}</option>
                     )}
-                    {LEAD_STATUS_OPTIONS.map(option => (
-                      <option key={option.value} value={option.value}>{option.label}</option>
+                    {leadStatusOptions.map(option => (
+                      <option
+                        key={typeof option === 'string' ? option : option.value}
+                        value={typeof option === 'string' ? option : option.value}
+                      >
+                        {typeof option === 'string' ? option : option.label}
+                      </option>
                     ))}
                   </select>
                 </div>
@@ -8078,10 +8114,14 @@ function LeadDetailPopup({
                     onChange={e => setEditType(e.target.value)}
                     className="input text-xs font-semibold bg-slate-50/50 border-slate-200 focus:bg-white"
                   >
-                    <option value="Fresh">Fresh</option>
-                    <option value="Renewal">Renewal</option>
-                    <option value="Porting">Porting</option>
-                    <option value="Renewal/Porting">Renewal/Porting</option>
+                    {leadTypeOptions.map(option => (
+                      <option
+                        key={typeof option === 'string' ? option : option.value}
+                        value={typeof option === 'string' ? option : option.value}
+                      >
+                        {typeof option === 'string' ? option : option.label}
+                      </option>
+                    ))}
                   </select>
                 </div>
 
@@ -8103,10 +8143,15 @@ function LeadDetailPopup({
                     onChange={e => setEditSource(e.target.value)}
                     className={`input text-xs font-semibold bg-slate-50/50 border-slate-200 focus:bg-white ${!isAdminOrSuperadmin ? 'opacity-75 bg-slate-100 cursor-not-allowed' : ''}`}
                   >
-                    {leadSourcesList.map((src: string) => (
-                      <option key={src} value={src}>{src}</option>
+                    {leadSourceOptions.map(src => (
+                      <option
+                        key={typeof src === 'string' ? src : src.value}
+                        value={typeof src === 'string' ? src : src.value}
+                      >
+                        {typeof src === 'string' ? src : src.label}
+                      </option>
                     ))}
-                    {editSource && !leadSourcesList.includes(editSource) && (
+                    {editSource && !leadSourceOptions.some(src => (typeof src === 'string' ? src : src.value) === editSource) && (
                       <option value={editSource}>{editSource}</option>
                     )}
                   </select>

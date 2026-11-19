@@ -24,8 +24,8 @@ export function useMasterDropdowns() {
       .then(res => {
         if (!isMounted) return;
         if (res?.data && Array.isArray(res.data) && res.data.length > 0) {
-          setDropdownMenusState(res.data);
           saveStoredDropdownMenus(res.data, false);
+          setDropdownMenusState(getStoredDropdownMenus());
         }
       })
       .catch(() => {});
@@ -34,8 +34,8 @@ export function useMasterDropdowns() {
       .then(res => {
         if (!isMounted) return;
         if (res?.data && Array.isArray(res.data) && res.data.length > 0) {
-          setUsageMappingsState(res.data);
           saveStoredUsageMappings(res.data);
+          setUsageMappingsState(getStoredUsageMappings());
         }
       })
       .catch(() => {});

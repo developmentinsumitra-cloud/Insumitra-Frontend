@@ -596,14 +596,16 @@ export default function Insurance() {
   const [riderCategoryFilter, setRiderCategoryFilter] = useState('');
   const [riderModalOpen, setRiderModalOpen] = useState(false);
   const [editRider, setEditRider]         = useState<any | null>(null);
+  const [openedFromRider, setOpenedFromRider] = useState(false);
   const [riderForm, setRiderForm]         = useState({
     name: '',
     description: '',
     category: 'Health',
+    companyId: '',
     status: 'Active' as 'Active' | 'Inactive',
   });
 
-  const [ridersList, setRidersList] = useState<Array<{ id: string; name: string; description: string; category: string; status: 'Active' | 'Inactive' }>>(() => {
+  const [ridersList, setRidersList] = useState<Array<{ id: string; name: string; description: string; category: string; companyId?: string; status: 'Active' | 'Inactive' }>>(() => {
     try {
       const stored = localStorage.getItem('insumitra_master_riders');
       if (stored) return JSON.parse(stored);
@@ -652,13 +654,15 @@ export default function Insurance() {
 
   const openAddRider = () => {
     setEditRider(null);
-    setRiderForm({ name: '', description: '', category: 'Health', status: 'Active' });
+    setRiderForm({ name: '', description: '', category: 'Health', companyId: '', status: 'Active' });
+    setOpenedFromRider(false);
     setRiderModalOpen(true);
   };
 
   const openEditRider = (r: any) => {
     setEditRider(r);
-    setRiderForm({ name: r.name, description: r.description || '', category: r.category || 'Health', status: r.status || 'Active' });
+    setRiderForm({ name: r.name, description: r.description || '', category: r.category || 'Health', companyId: r.companyId || '', status: r.status || 'Active' });
+    setOpenedFromRider(false);
     setRiderModalOpen(true);
   };
 
@@ -668,7 +672,7 @@ export default function Insurance() {
       toast.error('Rider Name is required');
       return;
     }
-    let updatedList: Array<{ id: string; name: string; description: string; category: string; status: 'Active' | 'Inactive' }>;
+    let updatedList: Array<{ id: string; name: string; description: string; category: string; companyId?: string; status: 'Active' | 'Inactive' }>;
     if (editRider) {
       updatedList = ridersList.map(r => r.id === editRider.id ? { ...r, ...riderForm } : r);
       setRidersList(updatedList);
@@ -679,6 +683,7 @@ export default function Insurance() {
         name: riderForm.name.trim(),
         description: riderForm.description.trim(),
         category: riderForm.category || 'Health',
+        companyId: riderForm.companyId || undefined,
         status: riderForm.status,
       };
       updatedList = [newRider, ...ridersList];
@@ -691,6 +696,7 @@ export default function Insurance() {
     } catch {}
     setRiderModalOpen(false);
     setEditRider(null);
+    setOpenedFromRider(false);
   };
 
   const handleDeleteRider = (id: string, name: string) => {
@@ -723,6 +729,7 @@ export default function Insurance() {
 
   const [hospitalModal, setHospitalModal] = useState(false);
   const [editHospitalId, setEditHospitalId] = useState<string | null>(null);
+  const [hospitalDoctorSearch, setHospitalDoctorSearch] = useState('');
 
   // Add/Edit Hospital form states
   const [hospitalForm, setHospitalForm] = useState({
@@ -747,24 +754,65 @@ export default function Insurance() {
   }>>([]);
   const [agentModal, setAgentModal] = useState(false);
   const [agentModalTab, setAgentModalTab] = useState<'details' | 'payout'>('details');
-  const [agentsList, setAgentsList] = useState([
-    {
-      id: 1,
-      agencyName: 'Avinash Insu Agency',
-      agentName: 'Avinash Kumar',
-      phone: '+91 98765 43210',
-      email: 'avinash@example.com',
-      status: 'Active'
-    },
-    {
-      id: 2,
-      agencyName: 'PAT Assurance Services',
-      agentName: 'Prashant Patil',
-      phone: '+91 98123 45678',
-      email: 'prashant.pat@example.com',
-      status: 'Active'
-    }
-  ]);
+  const [editAgent, setEditAgent] = useState<any | null>(null);
+  const [isAgentViewMode, setIsAgentViewMode] = useState(false);
+  const [agentsList, setAgentsList] = useState<any[]>(() => {
+    try {
+      const stored = localStorage.getItem('insumitra_agents_list');
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
+    } catch {}
+    return [
+      {
+        id: 1,
+        category: 'General',
+        companyId: '',
+        agencyName: 'Avinash Insu Agency',
+        agencyCode: 'AVINASH01',
+        agentName: 'Avinash Kumar',
+        startDate: '',
+        homeBranch: 'Mumbai',
+        homeBranchCode: '',
+        rmName: '',
+        rmContact: '',
+        bmName: '',
+        bmContact: '',
+        phone: '+91 98765 43210',
+        email: 'avinash@example.com',
+        bankName: '',
+        bankBranch: '',
+        bankIfsc: '',
+        bankAccount: '',
+        comment: '',
+        status: 'Active'
+      },
+      {
+        id: 2,
+        category: 'Health - SAHI',
+        companyId: '',
+        agencyName: 'PAT Assurance Services',
+        agencyCode: 'PAT002',
+        agentName: 'Prashant Patil',
+        startDate: '',
+        homeBranch: 'Pune',
+        homeBranchCode: '',
+        rmName: '',
+        rmContact: '',
+        bmName: '',
+        bmContact: '',
+        phone: '+91 98123 45678',
+        email: 'prashant.pat@example.com',
+        bankName: '',
+        bankBranch: '',
+        bankIfsc: '',
+        bankAccount: '',
+        comment: '',
+        status: 'Active'
+      }
+    ];
+  });
   const [agentForm, setAgentForm] = useState({
     category: '',
     companyId: '',
@@ -778,12 +826,63 @@ export default function Insurance() {
     rmContact: '',
     bmName: '',
     bmContact: '',
+    phone: '',
+    email: '',
     bankName: '',
     bankBranch: '',
     bankIfsc: '',
     bankAccount: '',
     comment: ''
   });
+
+  const populateAgentForm = (ag: any) => {
+    setEditAgent(ag);
+    setAgentForm({
+      category: ag.category || '',
+      companyId: ag.companyId || '',
+      agentName: ag.agentName || '',
+      agencyNameDisplay: ag.agencyName || ag.agencyNameDisplay || '',
+      agencyCode: ag.agencyCode || '',
+      startDate: ag.startDate || '',
+      homeBranch: ag.homeBranch || '',
+      homeBranchCode: ag.homeBranchCode || '',
+      rmName: ag.rmName || '',
+      rmContact: ag.rmContact || '',
+      bmName: ag.bmName || '',
+      bmContact: ag.bmContact || '',
+      phone: ag.phone || '',
+      email: ag.email || '',
+      bankName: ag.bankName || '',
+      bankBranch: ag.bankBranch || '',
+      bankIfsc: ag.bankIfsc || '',
+      bankAccount: ag.bankAccount || '',
+      comment: ag.comment || ''
+    });
+    setAgentModalTab('details');
+  };
+
+  const openViewAgent = (ag: any) => {
+    populateAgentForm(ag);
+    setIsAgentViewMode(true);
+    setAgentModal(true);
+  };
+
+  const openEditAgent = (ag: any) => {
+    populateAgentForm(ag);
+    setIsAgentViewMode(false);
+    setAgentModal(true);
+  };
+
+  const handleDeleteAgent = (agentId: any) => {
+    setAgentsList(prev => {
+      const updated = prev.filter(a => a.id !== agentId);
+      try {
+        localStorage.setItem('insumitra_agents_list', JSON.stringify(updated));
+      } catch {}
+      return updated;
+    });
+    toast.success('Agent removed');
+  };
 
 
 
@@ -850,8 +949,13 @@ export default function Insurance() {
       setAgentModalTab('details');
       return;
     }
-    if (isFieldRequired('Agent', 'phone', false) && !agentForm.rmContact?.trim()) {
+    if (isFieldRequired('Agent', 'phone', false) && !agentForm.phone?.trim()) {
       toast.error('Agent Contact Phone is required');
+      setAgentModalTab('details');
+      return;
+    }
+    if (agentForm.phone?.trim() && !/^\d{10}$/.test(agentForm.phone.trim())) {
+      toast.error('Agent Contact No must be a valid 10-digit number');
       setAgentModalTab('details');
       return;
     }
@@ -859,17 +963,54 @@ export default function Insurance() {
       // Checked if email is configured
     }
     const newAgent = {
-      id: Date.now(),
+      id: editAgent ? editAgent.id : Date.now(),
+      category: agentForm.category || '',
+      companyId: agentForm.companyId || '',
       agencyName: agentForm.agencyNameDisplay || `${agentForm.agentName} Agency`,
+      agencyCode: agentForm.agencyCode || '',
       agentName: agentForm.agentName,
-      phone: agentForm.rmContact || '+91 99999 88888',
-      email: `${agentForm.agentName.toLowerCase().replace(/\s+/g, '')}@example.com`,
-      status: 'Active'
+      startDate: agentForm.startDate || '',
+      homeBranch: agentForm.homeBranch || '',
+      homeBranchCode: agentForm.homeBranchCode || '',
+      rmName: agentForm.rmName || '',
+      rmContact: agentForm.rmContact || '',
+      bmName: agentForm.bmName || '',
+      bmContact: agentForm.bmContact || '',
+      phone: agentForm.phone || agentForm.rmContact || '',
+      email: agentForm.email || '',
+      bankName: agentForm.bankName || '',
+      bankBranch: agentForm.bankBranch || '',
+      bankIfsc: agentForm.bankIfsc || '',
+      bankAccount: agentForm.bankAccount || '',
+      comment: agentForm.comment || '',
+      status: editAgent?.status || 'Active'
     };
-    setAgentsList(prev => [newAgent, ...prev]);
-    toast.success('Agent saved successfully (mock)');
+    if (editAgent) {
+      // Update existing agent in-place
+      setAgentsList(prev => {
+        const updated = prev.map(ag =>
+          ag.id === editAgent.id ? { ...ag, ...newAgent } : ag
+        );
+        try {
+          localStorage.setItem('insumitra_agents_list', JSON.stringify(updated));
+        } catch {}
+        return updated;
+      });
+      toast.success('Agent updated successfully');
+    } else {
+      setAgentsList(prev => {
+        const updated = [newAgent, ...prev];
+        try {
+          localStorage.setItem('insumitra_agents_list', JSON.stringify(updated));
+        } catch {}
+        return updated;
+      });
+      toast.success('Agent saved successfully');
+    }
     setAgentModal(false);
     setAgentModalTab('details');
+    setEditAgent(null);
+    setIsAgentViewMode(false);
     setAgentForm({
       category: '',
       companyId: '',
@@ -883,6 +1024,8 @@ export default function Insurance() {
       rmContact: '',
       bmName: '',
       bmContact: '',
+      phone: '',
+      email: '',
       bankName: '',
       bankBranch: '',
       bankIfsc: '',
@@ -929,9 +1072,38 @@ export default function Insurance() {
     return hospitalsRes?.data ?? [];
   }, [hospitalsRes?.data]);
 
+  const filteredMappingHospitals = useMemo(() => {
+    const query = hospitalDoctorSearch.trim().toLowerCase();
+    if (!query) return hospitals;
+
+    return hospitals.flatMap((hospital: any) => {
+      const hospitalMatches = [
+        hospital.name,
+        hospital.city,
+        hospital.pincode,
+        hospital.address,
+        hospital.phone,
+        hospital.claimsPerson1Name,
+        hospital.claimsPerson2Name,
+      ].some(value => String(value || '').toLowerCase().includes(query));
+      const doctors = Array.isArray(hospital.doctors) ? hospital.doctors : [];
+      const matchingDoctors = doctors.filter((doctor: any) =>
+        [doctor.name, doctor.degree, doctor.specialty, doctor.speciality, doctor.phone, doctor.contactNo]
+          .some(value => String(value || '').toLowerCase().includes(query))
+      );
+
+      if (hospitalMatches) return [hospital];
+      return matchingDoctors.length > 0 ? [{ ...hospital, doctors: matchingDoctors }] : [];
+    });
+  }, [hospitals, hospitalDoctorSearch]);
+
   const totalDoctors = useMemo(() => {
     return hospitals.reduce((sum: number, h: any) => sum + (h.doctors?.length || 0), 0);
   }, [hospitals]);
+  const visibleDoctorCount = useMemo(
+    () => filteredMappingHospitals.reduce((sum: number, h: any) => sum + (h.doctors?.length || 0), 0),
+    [filteredMappingHospitals],
+  );
 
   const { data: plans } = useQuery({
     queryKey: ['insurance-plans', expandedCompany],
@@ -953,6 +1125,7 @@ export default function Insurance() {
     return rawCompanyList.filter((co: any) =>
       co.name?.toLowerCase().includes(q) ||
       co.code?.toLowerCase().includes(q) ||
+      co.shortCode?.toLowerCase().includes(q) ||
       co.phone?.includes(q)
     );
   }, [rawCompanyList, companySearch]);
@@ -977,12 +1150,16 @@ export default function Insurance() {
   }, [rawCompanyList, planCompanyFilter, planSearch]);
 
   useEffect(() => {
+    if (isAgentViewMode) return;
+    if (!agentForm.category && !agentForm.companyId && editAgent?.agencyName) return;
     const catLabel = agentForm.category === 'Health - SAHI' ? 'Health' : (agentForm.category === 'General' ? 'General' : (agentForm.category === 'Life' ? 'Life' : 'Other'));
     const companyObj = rawCompanyList.find(c => c.id === agentForm.companyId);
     const coName = companyObj?.code || companyObj?.name?.split(' ')[0] || '';
     const displayVal = [catLabel, coName, agentForm.agentName].filter(Boolean).join(' - ');
-    setAgentForm(p => ({ ...p, agencyNameDisplay: displayVal }));
-  }, [agentForm.category, agentForm.companyId, agentForm.agentName, rawCompanyList]);
+    if (displayVal) {
+      setAgentForm(p => ({ ...p, agencyNameDisplay: displayVal }));
+    }
+  }, [agentForm.category, agentForm.companyId, agentForm.agentName, rawCompanyList, isAgentViewMode, editAgent]);
 
   const getCompanyMeta = (c: any) => {
     if (c?.notes && typeof c.notes === 'string' && c.notes.trim().startsWith('{')) {
@@ -1089,10 +1266,30 @@ export default function Insurance() {
           resources: extraCompanyFields.resources || [],
           comment: companyForm.getValues('notes') || ''
         });
+
+        // Optimistically update React Query cache so the new company reflects immediately in all lists
+        qc.setQueryData(['insurance-companies'], (old: any) => {
+          if (!old) return { data: [createdCo] };
+          if (Array.isArray(old)) {
+            const exists = old.some((c: any) => c.id === createdCo.id);
+            return exists ? old : [...old, createdCo];
+          }
+          if (old?.data && Array.isArray(old.data)) {
+            const exists = old.data.some((c: any) => c.id === createdCo.id);
+            return exists ? old : { ...old, data: [...old.data, createdCo] };
+          }
+          return old;
+        });
       }
       qc.invalidateQueries({ queryKey: ['insurance-companies'] });
       qc.invalidateQueries({ queryKey: ['plans-all'] });
       window.dispatchEvent(new CustomEvent('insumitra_companies_updated'));
+
+      if (openedFromRider && createdCo?.id) {
+        setRiderForm(p => ({ ...p, companyId: createdCo.id }));
+        setOpenedFromRider(false);
+      }
+
       closeCompanyModal();
       toast.success('Company created');
     },
@@ -1206,6 +1403,7 @@ export default function Insurance() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['hospitals-list'] });
       qc.invalidateQueries({ queryKey: ['hospitals'] });
+      qc.invalidateQueries({ queryKey: ['contacts'] });
       toast.success('Hospital created successfully');
       setHospitalModal(false);
       setEditHospitalId(null);
@@ -1233,6 +1431,7 @@ export default function Insurance() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['hospitals-list'] });
       qc.invalidateQueries({ queryKey: ['hospitals'] });
+      qc.invalidateQueries({ queryKey: ['contacts'] });
       toast.success('Hospital updated successfully');
       setHospitalModal(false);
       setEditHospitalId(null);
@@ -1795,6 +1994,7 @@ export default function Insurance() {
                       <thead>
                         <tr className="bg-slate-50/75 border-b text-slate-500 font-bold uppercase tracking-wider text-[10px]">
                           <th className="p-3">Rider Name</th>
+                          <th className="p-3">Insurance Company</th>
                           <th className="p-3">Category</th>
                           <th className="p-3">Description</th>
                           <th className="p-3">Status</th>
@@ -1804,7 +2004,7 @@ export default function Insurance() {
                       <tbody className="divide-y divide-slate-100">
                         {filteredRiders.length === 0 ? (
                           <tr>
-                            <td colSpan={5} className="p-8 text-center text-slate-400 text-xs">
+                            <td colSpan={6} className="p-8 text-center text-slate-400 text-xs">
                               No riders / add-ons found. Click "Add Rider" to create one.
                             </td>
                           </tr>
@@ -1812,6 +2012,9 @@ export default function Insurance() {
                           filteredRiders.map((r: any) => (
                             <tr key={r.id} className="hover:bg-slate-50/50 transition-colors">
                               <td className="p-3 font-semibold text-slate-800">{r.name}</td>
+                              <td className="p-3 text-slate-600">
+                                {rawCompanyList.find((company: any) => company.id === r.companyId)?.name || 'All companies'}
+                              </td>
                               <td className="p-3 text-slate-500">
                                 <span className="inline-block px-2 py-0.5 rounded-full text-[10px] font-bold bg-purple-50 text-purple-700 border border-purple-100">
                                   {r.category || 'General'}
@@ -1859,8 +2062,20 @@ export default function Insurance() {
               {currentView === 'agents' && (
                 <div className="space-y-4">
                   <div className="flex items-center justify-between gap-3">
-                    <h3 className="text-sm font-black text-slate-900 uppercase tracking-wide">Agents & Agencies</h3>
-
+                    <h3 className="text-sm font-black text-slate-900 uppercase tracking-wide">Agents &amp; Agencies</h3>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setEditAgent(null);
+                        setIsAgentViewMode(false);
+                        setAgentForm({ category: '', companyId: '', agentName: '', agencyNameDisplay: '', agencyCode: '', startDate: '', homeBranch: '', homeBranchCode: '', rmName: '', rmContact: '', bmName: '', bmContact: '', phone: '', email: '', bankName: '', bankBranch: '', bankIfsc: '', bankAccount: '', comment: '' });
+                        setAgentModalTab('details');
+                        setAgentModal(true);
+                      }}
+                      className="btn-primary text-xs py-1.5 px-3 rounded-xl flex items-center gap-1.5 cursor-pointer shadow-sm"
+                    >
+                      <Plus size={14} /> Add Agent
+                    </button>
                   </div>
 
                   <div className="overflow-x-auto border border-slate-100 rounded-xl bg-white shadow-2xs">
@@ -1872,16 +2087,50 @@ export default function Insurance() {
                           <th className="p-3">Phone</th>
                           <th className="p-3">Email</th>
                           <th className="p-3">Status</th>
+                          <th className="p-3">Actions</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100 text-slate-600">
+                        {agentsList.length === 0 && (
+                          <tr>
+                            <td colSpan={6} className="p-6 text-center text-slate-400 italic">No agents added yet. Click &ldquo;Add Agent&rdquo; to get started.</td>
+                          </tr>
+                        )}
                         {agentsList.map((ag) => (
-                          <tr key={ag.id} className="hover:bg-slate-50/50">
+                          <tr
+                            key={ag.id}
+                            onClick={() => openViewAgent(ag)}
+                            className="hover:bg-slate-50/75 cursor-pointer transition-colors"
+                          >
                             <td className="p-3 font-semibold text-slate-800">{ag.agencyName}</td>
                             <td className="p-3">{ag.agentName}</td>
                             <td className="p-3">{ag.phone}</td>
                             <td className="p-3">{ag.email}</td>
-                            <td className="p-3"><span className="badge-green">{ag.status}</span></td>
+                            <td className="p-3"><span className="badge-green">{ag.status || 'Active'}</span></td>
+                            <td className="p-3" onClick={(e) => e.stopPropagation()}>
+                              <div className="flex items-center gap-2">
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    openEditAgent(ag);
+                                  }}
+                                  className="text-xs font-semibold text-blue-600 hover:text-blue-800 cursor-pointer px-2 py-1 rounded-lg hover:bg-blue-50 transition-all"
+                                >
+                                  Edit
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleDeleteAgent(ag.id);
+                                  }}
+                                  className="text-xs font-semibold text-red-500 hover:text-red-700 cursor-pointer px-2 py-1 rounded-lg hover:bg-red-50 transition-all"
+                                >
+                                  Delete
+                                </button>
+                              </div>
+                            </td>
                           </tr>
                         ))}
                       </tbody>
@@ -1918,13 +2167,26 @@ export default function Insurance() {
               {/* 10. MAPPING */}
               {currentView === 'mapping' && (
                 <div className="space-y-4">
-                  <div className="flex items-center justify-between">
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                     <div>
                       <h3 className="text-sm font-black text-slate-900 uppercase tracking-wide">Hospital List &amp; Doctors Mapping</h3>
                       <p className="text-[11px] text-slate-500">Registered hospitals &amp; consulting providers available across Claims</p>
                     </div>
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs bg-slate-100 text-slate-600 font-bold px-2 py-1 rounded-full">{hospitals.length} Hospitals</span>
+                    <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+                      <div className="relative sm:w-72">
+                        <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                        <input
+                          type="search"
+                          value={hospitalDoctorSearch}
+                          onChange={e => setHospitalDoctorSearch(e.target.value)}
+                          placeholder="Search hospitals or doctors..."
+                          aria-label="Search hospitals or doctors"
+                          className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-9 pr-3 py-2 text-xs font-semibold text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:bg-white transition-all"
+                        />
+                      </div>
+                      <span className="text-xs bg-slate-100 text-slate-600 font-bold px-2 py-1 rounded-full text-center whitespace-nowrap">
+                        {hospitalDoctorSearch.trim() ? `${filteredMappingHospitals.length} of ${hospitals.length}` : hospitals.length} Hospitals
+                      </span>
                       <button
                         type="button"
                         onClick={() => {
@@ -1974,13 +2236,19 @@ export default function Insurance() {
                             <tr className="bg-slate-50/80 border-b border-slate-200 text-xs font-black text-slate-700 uppercase tracking-wider">
                               <th className="py-4 px-5">Hospital Info</th>
                               <th className="py-4 px-5">Claims Department</th>
-                              <th className="py-4 px-5">Doctors ({totalDoctors})</th>
+                              <th className="py-4 px-5">Doctors ({hospitalDoctorSearch.trim() ? visibleDoctorCount : totalDoctors})</th>
                               <th className="py-4 px-5">Comment</th>
                               <th className="py-4 px-5 text-right">Actions</th>
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-slate-100">
-                            {hospitals.map((h: any) => (
+                            {filteredMappingHospitals.length === 0 ? (
+                              <tr>
+                                <td colSpan={5} className="py-8 px-5 text-center text-xs text-slate-500">
+                                  No hospitals or doctors match your search.
+                                </td>
+                              </tr>
+                            ) : filteredMappingHospitals.map((h: any) => (
                               <tr key={h.id} className="hover:bg-slate-50/60 transition-colors">
                                 <td className="py-4 px-5 space-y-1.5 align-top">
                                   <div className="flex items-center gap-2.5 flex-wrap">
@@ -2025,20 +2293,22 @@ export default function Insurance() {
                                 </td>
                                 <td className="py-4 px-5 align-top">
                                   {h.doctors && h.doctors.length > 0 ? (
-                                    <div className="space-y-2 min-w-[220px] max-w-[300px]">
+                                    <div className="max-h-64 min-w-[220px] max-w-[320px] space-y-1.5 overflow-y-auto pr-1">
                                       {h.doctors.map((d: any, idx: number) => (
-                                        <div key={d.id || idx} className="text-xs bg-slate-50 border border-slate-200/80 rounded-xl p-2.5 shadow-2xs">
-                                          <div className="font-extrabold text-slate-900 flex items-center justify-between gap-1">
-                                            <span className="text-xs">{d.name}</span>
+                                        <div key={d.id || idx} className="rounded-lg border border-slate-200 bg-white px-2.5 py-2">
+                                          <div className="flex items-center justify-between gap-2">
+                                            <span className="truncate text-xs font-bold text-slate-800">{d.name}</span>
                                             {d.degree && (
-                                              <span className="text-[10px] font-black text-blue-700 bg-blue-50 border border-blue-200/80 px-1.5 py-0.5 rounded-md">
-                                                ({d.degree})
+                                              <span className="shrink-0 rounded-md bg-blue-50 px-1.5 py-0.5 text-[10px] font-semibold text-blue-700">
+                                                {d.degree}
                                               </span>
                                             )}
                                           </div>
-                                          <div className="text-slate-600 text-xs mt-1 font-semibold flex items-center gap-1.5 flex-wrap">
+                                          <div className="mt-1 flex flex-wrap items-center gap-x-2 text-[11px] text-slate-500">
                                             <span>{d.specialty || d.speciality || 'General'}</span>
-                                            {d.phone && <span className="text-blue-700 font-bold">· 📞 {d.phone}</span>}
+                                            {(d.phone || d.contactNo) && (
+                                              <span className="font-semibold text-blue-700">{d.phone || d.contactNo}</span>
+                                            )}
                                           </div>
                                         </div>
                                       ))}
@@ -2119,8 +2389,8 @@ export default function Insurance() {
 
       {/* ── Rider Modal ─────────────────────────────────────────────────────── */}
       <Modal
-        open={riderModalOpen}
-        onClose={() => { setRiderModalOpen(false); setEditRider(null); }}
+        open={riderModalOpen && !companyModal && !editCompany}
+        onClose={() => { setRiderModalOpen(false); setEditRider(null); setOpenedFromRider(false); }}
         title={editRider ? 'Edit Rider / Add-on' : 'Add New Rider / Add-on'}
         size="md"
       >
@@ -2137,6 +2407,37 @@ export default function Insurance() {
               placeholder="e.g. Critical Illness Rider"
               className="input w-full"
             />
+          </div>
+
+          <div>
+            <label className="text-xs font-bold text-slate-700 uppercase tracking-wider block mb-1">
+              Insurance Company
+            </label>
+            <div className="flex items-center gap-2">
+              <select
+                value={riderForm.companyId}
+                onChange={e => setRiderForm(p => ({ ...p, companyId: e.target.value }))}
+                className="input w-full"
+              >
+                <option value="">All companies / not specified</option>
+                {rawCompanyList.map((company: any) => (
+                  <option key={company.id} value={company.id}>{company.name}</option>
+                ))}
+              </select>
+              <button
+                type="button"
+                onClick={() => {
+                  setOpenedFromRider(true);
+                  openAddCompany();
+                }}
+                className="btn-secondary text-xs py-2 px-3 whitespace-nowrap"
+              >
+                <Plus size={13} className="inline mr-1" /> Add Company
+              </button>
+            </div>
+            {rawCompanyList.length === 0 && (
+              <p className="mt-1 text-[11px] text-slate-500">Add an insurance company first, then select it here.</p>
+            )}
           </div>
 
           <div>
@@ -2213,6 +2514,7 @@ export default function Insurance() {
           </button>
         }
         size="2xl"
+        zIndexClass="z-[70]"
       >
         <form
           id="company-form"
@@ -3201,20 +3503,89 @@ export default function Insurance() {
                           </div>
 
                           <div className="flex flex-col gap-0.5">
-                            <label className="text-[10px] font-extrabold text-slate-900 uppercase tracking-wider flex items-center">
-                              Doctor Degree <span className="text-red-600 font-black text-xs ml-1" style={{ color: '#dc2626' }}>*</span>
-                            </label>
-                            <select
-                              required
-                              value={doc.degree}
-                              onChange={(e) => handleUpdateDoctor(doc.id, 'degree', e.target.value)}
-                              className="input text-xs py-1"
-                            >
-                              <option value="">Select Degree</option>
-                              {DOCTOR_DEGREES.map(d => (
-                                <option key={d} value={d}>{d}</option>
-                              ))}
-                            </select>
+                            <div className="flex items-center justify-between">
+                              <label className="text-[10px] font-extrabold text-slate-900 uppercase tracking-wider flex items-center">
+                                Doctor Degree <span className="text-red-600 font-black text-xs ml-1" style={{ color: '#dc2626' }}>*</span>
+                              </label>
+                              <span className="text-[9px] text-slate-400 font-medium">Write or select multiple</span>
+                            </div>
+                            <div className="relative flex items-center">
+                              <input
+                                type="text"
+                                required
+                                value={doc.degree}
+                                onChange={(e) => handleUpdateDoctor(doc.id, 'degree', e.target.value)}
+                                className="input text-xs py-1 pr-8 w-full bg-white font-medium text-slate-800"
+                                placeholder="e.g. MBBS, MD"
+                                list={`doctor-degrees-${doc.id}`}
+                              />
+                              <datalist id={`doctor-degrees-${doc.id}`}>
+                                {DOCTOR_DEGREES.map(d => (
+                                  <option key={d} value={d}>{d}</option>
+                                ))}
+                              </datalist>
+                              <select
+                                className="absolute right-0 top-0 bottom-0 opacity-0 w-8 cursor-pointer"
+                                value=""
+                                onChange={(e) => {
+                                  const selectedDeg = e.target.value;
+                                  if (!selectedDeg) return;
+                                  const current = doc.degree ? doc.degree.trim() : '';
+                                  if (!current) {
+                                    handleUpdateDoctor(doc.id, 'degree', selectedDeg);
+                                  } else {
+                                    const parts = current.split(',').map(s => s.trim().toLowerCase());
+                                    if (!parts.includes(selectedDeg.toLowerCase())) {
+                                      handleUpdateDoctor(doc.id, 'degree', `${current}, ${selectedDeg}`);
+                                    }
+                                  }
+                                }}
+                                title="Select degree from dropdown"
+                              >
+                                <option value="" disabled>Select Degree</option>
+                                {DOCTOR_DEGREES.map(d => (
+                                  <option key={d} value={d}>{d}</option>
+                                ))}
+                              </select>
+                              <div className="absolute right-2 pointer-events-none text-slate-400">
+                                <ChevronDown size={14} />
+                              </div>
+                            </div>
+                            {/* Quick select / toggle multiple degree chips */}
+                            <div className="flex flex-wrap gap-1 mt-1">
+                              {DOCTOR_DEGREES.map(d => {
+                                const currentParts = (doc.degree || '').split(',').map(s => s.trim().toLowerCase());
+                                const isSelected = currentParts.includes(d.toLowerCase());
+                                return (
+                                  <button
+                                    key={d}
+                                    type="button"
+                                    onClick={() => {
+                                      const current = doc.degree ? doc.degree.trim() : '';
+                                      if (isSelected) {
+                                        const newDegrees = (doc.degree || '')
+                                          .split(',')
+                                          .map(s => s.trim())
+                                          .filter(s => s.toLowerCase() !== d.toLowerCase())
+                                          .join(', ');
+                                        handleUpdateDoctor(doc.id, 'degree', newDegrees);
+                                      } else {
+                                        const newDegrees = current ? `${current}, ${d}` : d;
+                                        handleUpdateDoctor(doc.id, 'degree', newDegrees);
+                                      }
+                                    }}
+                                    className={`text-[9px] px-1.5 py-0.5 rounded font-semibold transition-all cursor-pointer border ${
+                                      isSelected
+                                        ? 'bg-blue-600 text-white border-blue-600 shadow-2xs'
+                                        : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border-slate-200'
+                                    }`}
+                                    title={isSelected ? `Click to remove ${d}` : `Click to add ${d}`}
+                                  >
+                                    {isSelected ? `✓ ${d}` : `+ ${d}`}
+                                  </button>
+                                );
+                              })}
+                            </div>
                           </div>
 
                           <div className="flex flex-col gap-0.5">
@@ -3266,15 +3637,27 @@ export default function Insurance() {
         })()}
       </Modal>
 
-      {/* ── Add Agent Modal ─────────────────────────────────────────────────── */}
+      {/* ── Add / Edit Agent Modal ─────────────────────────────────────────────────── */}
       <Modal
         open={agentModal}
-        onClose={() => { setAgentModal(false); setAgentModalTab('details'); }}
-        title="Add Agent"
+        onClose={() => { setAgentModal(false); setAgentModalTab('details'); setEditAgent(null); setIsAgentViewMode(false); }}
+        title={isAgentViewMode ? 'Agent Details' : (editAgent ? 'Edit Agent' : 'Add Agent')}
         actions={
-          <button type="submit" form="agent-form" className="btn-primary py-1 px-3 text-xs cursor-pointer shadow-md shadow-primary-500/20 rounded-xl">
-            Save Agent
-          </button>
+          isAgentViewMode ? (
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setIsAgentViewMode(false)}
+                className="btn-primary py-1 px-3 text-xs cursor-pointer shadow-md shadow-primary-500/20 rounded-xl flex items-center gap-1.5"
+              >
+                <Pencil size={13} /> Edit
+              </button>
+            </div>
+          ) : (
+            <button type="submit" form="agent-form" className="btn-primary py-1 px-3 text-xs cursor-pointer shadow-md shadow-primary-500/20 rounded-xl">
+              {editAgent ? 'Save Changes' : 'Save Agent'}
+            </button>
+          )
         }
         size="2xl"
       >
@@ -3320,11 +3703,12 @@ export default function Insurance() {
                   )}
                 </label>
                 <select
+                  disabled={isAgentViewMode}
                   value={agentForm.category}
                   onChange={e => {
                     setAgentForm(p => ({ ...p, category: e.target.value, companyId: '' }));
                   }}
-                  className="input"
+                  className="input disabled:bg-slate-50 disabled:text-slate-800 disabled:border-slate-200 disabled:cursor-default"
                 >
                   <option value="">Select Category...</option>
                   <option value="Health - SAHI">Health Insurance - SAHI</option>
@@ -3343,6 +3727,7 @@ export default function Insurance() {
                   )}
                 </label>
                 <select
+                  disabled={isAgentViewMode}
                   value={agentForm.companyId}
                   onChange={e => {
                     const coId = e.target.value;
@@ -3354,7 +3739,7 @@ export default function Insurance() {
                       category: coCat || p.category
                     }));
                   }}
-                  className="input"
+                  className="input disabled:bg-slate-50 disabled:text-slate-800 disabled:border-slate-200 disabled:cursor-default"
                 >
                   <option value="">Select Company...</option>
                   {rawCompanyList
@@ -3379,10 +3764,11 @@ export default function Insurance() {
                 </label>
                 <input
                   type="text"
+                  disabled={isAgentViewMode}
                   value={agentForm.agentName}
                   onChange={e => setAgentForm(p => ({ ...p, agentName: e.target.value }))}
                   placeholder="e.g. Pratibha Sharma"
-                  className="input"
+                  className="input disabled:bg-slate-50 disabled:text-slate-800 disabled:border-slate-200 disabled:cursor-default"
                 />
               </div>
 
@@ -3396,7 +3782,7 @@ export default function Insurance() {
                   value={agentForm.agencyNameDisplay}
                   readOnly
                   placeholder="e.g. Health - Star - Pratibha"
-                  className="input bg-slate-50 border-slate-200/60 text-slate-500 font-semibold cursor-not-allowed"
+                  className="input bg-slate-50 border-slate-200/60 text-slate-700 font-semibold cursor-not-allowed"
                 />
               </div>
 
@@ -3410,10 +3796,11 @@ export default function Insurance() {
                 </label>
                 <input
                   type="text"
+                  disabled={isAgentViewMode}
                   value={agentForm.agencyCode}
                   onChange={e => setAgentForm(p => ({ ...p, agencyCode: e.target.value }))}
                   placeholder="e.g. STAR0987"
-                  className="input"
+                  className="input disabled:bg-slate-50 disabled:text-slate-800 disabled:border-slate-200 disabled:cursor-default"
                 />
               </div>
 
@@ -3427,9 +3814,10 @@ export default function Insurance() {
                 </label>
                 <input
                   type="date"
+                  disabled={isAgentViewMode}
                   value={agentForm.startDate}
                   onChange={e => setAgentForm(p => ({ ...p, startDate: e.target.value }))}
-                  className="input"
+                  className="input disabled:bg-slate-50 disabled:text-slate-800 disabled:border-slate-200 disabled:cursor-default"
                 />
               </div>
 
@@ -3443,10 +3831,11 @@ export default function Insurance() {
                 </label>
                 <input
                   type="text"
+                  disabled={isAgentViewMode}
                   value={agentForm.homeBranch}
                   onChange={e => setAgentForm(p => ({ ...p, homeBranch: e.target.value }))}
                   placeholder="e.g. Mumbai Fort"
-                  className="input"
+                  className="input disabled:bg-slate-50 disabled:text-slate-800 disabled:border-slate-200 disabled:cursor-default"
                 />
               </div>
 
@@ -3457,10 +3846,11 @@ export default function Insurance() {
                 </label>
                 <input
                   type="text"
+                  disabled={isAgentViewMode}
                   value={agentForm.homeBranchCode}
                   onChange={e => setAgentForm(p => ({ ...p, homeBranchCode: e.target.value }))}
                   placeholder="e.g. BOM01"
-                  className="input"
+                  className="input disabled:bg-slate-50 disabled:text-slate-800 disabled:border-slate-200 disabled:cursor-default"
                 />
               </div>
 
@@ -3471,10 +3861,11 @@ export default function Insurance() {
                 </label>
                 <input
                   type="text"
+                  disabled={isAgentViewMode}
                   value={agentForm.rmName}
                   onChange={e => setAgentForm(p => ({ ...p, rmName: e.target.value }))}
                   placeholder="Relationship Manager Name"
-                  className="input"
+                  className="input disabled:bg-slate-50 disabled:text-slate-800 disabled:border-slate-200 disabled:cursor-default"
                 />
               </div>
 
@@ -3485,10 +3876,11 @@ export default function Insurance() {
                 </label>
                 <input
                   type="tel"
+                  disabled={isAgentViewMode}
                   value={agentForm.rmContact}
                   onChange={e => setAgentForm(p => ({ ...p, rmContact: e.target.value }))}
                   placeholder="e.g. +91 9876543210"
-                  className="input"
+                  className="input disabled:bg-slate-50 disabled:text-slate-800 disabled:border-slate-200 disabled:cursor-default"
                 />
               </div>
 
@@ -3499,10 +3891,11 @@ export default function Insurance() {
                 </label>
                 <input
                   type="text"
+                  disabled={isAgentViewMode}
                   value={agentForm.bmName}
                   onChange={e => setAgentForm(p => ({ ...p, bmName: e.target.value }))}
                   placeholder="Branch Manager Name"
-                  className="input"
+                  className="input disabled:bg-slate-50 disabled:text-slate-800 disabled:border-slate-200 disabled:cursor-default"
                 />
               </div>
 
@@ -3513,10 +3906,52 @@ export default function Insurance() {
                 </label>
                 <input
                   type="tel"
+                  disabled={isAgentViewMode}
                   value={agentForm.bmContact}
                   onChange={e => setAgentForm(p => ({ ...p, bmContact: e.target.value }))}
                   placeholder="e.g. +91 9876543211"
-                  className="input"
+                  className="input disabled:bg-slate-50 disabled:text-slate-800 disabled:border-slate-200 disabled:cursor-default"
+                />
+              </div>
+
+              {/* Agent Contact No */}
+              <div className="flex flex-col gap-1.5">
+                <label className="text-[11px] font-extrabold text-slate-900 uppercase tracking-wider flex items-center">
+                  Agent Contact No
+                  {isFieldRequired('Agent', 'phone', false) && (
+                    <span className="text-red-600 font-black text-sm ml-1">*</span>
+                  )}
+                </label>
+                <input
+                  type="tel"
+                  inputMode="numeric"
+                  maxLength={10}
+                  disabled={isAgentViewMode}
+                  value={agentForm.phone}
+                  onChange={e => {
+                    const digits = e.target.value.replace(/\D/g, '');
+                    setAgentForm(p => ({ ...p, phone: digits }));
+                  }}
+                  placeholder="e.g. 9876543210"
+                  className="input disabled:bg-slate-50 disabled:text-slate-800 disabled:border-slate-200 disabled:cursor-default"
+                />
+              </div>
+
+              {/* Agent Email ID */}
+              <div className="flex flex-col gap-1.5">
+                <label className="text-[11px] font-extrabold text-slate-900 uppercase tracking-wider flex items-center">
+                  Agent Email ID
+                  {isFieldRequired('Agent', 'email', false) && (
+                    <span className="text-red-600 font-black text-sm ml-1">*</span>
+                  )}
+                </label>
+                <input
+                  type="email"
+                  disabled={isAgentViewMode}
+                  value={agentForm.email}
+                  onChange={e => setAgentForm(p => ({ ...p, email: e.target.value }))}
+                  placeholder="e.g. agent@example.com"
+                  className="input disabled:bg-slate-50 disabled:text-slate-800 disabled:border-slate-200 disabled:cursor-default"
                 />
               </div>
             </div>
@@ -3532,40 +3967,44 @@ export default function Insurance() {
                     <label className="text-[11px] font-extrabold text-slate-900 uppercase tracking-wider">Bank Name</label>
                     <input
                       type="text"
+                      disabled={isAgentViewMode}
                       value={agentForm.bankName}
                       onChange={e => setAgentForm(p => ({ ...p, bankName: e.target.value }))}
                       placeholder="e.g. ICICI Bank"
-                      className="input"
+                      className="input disabled:bg-slate-50 disabled:text-slate-800 disabled:border-slate-200 disabled:cursor-default"
                     />
                   </div>
                   <div className="flex flex-col gap-1.5">
                     <label className="text-[11px] font-extrabold text-slate-900 uppercase tracking-wider">Bank Branch</label>
                     <input
                       type="text"
+                      disabled={isAgentViewMode}
                       value={agentForm.bankBranch}
                       onChange={e => setAgentForm(p => ({ ...p, bankBranch: e.target.value }))}
                       placeholder="e.g. Connaught Place"
-                      className="input"
+                      className="input disabled:bg-slate-50 disabled:text-slate-800 disabled:border-slate-200 disabled:cursor-default"
                     />
                   </div>
                   <div className="flex flex-col gap-1.5">
                     <label className="text-[11px] font-extrabold text-slate-900 uppercase tracking-wider">Bank IFSC</label>
                     <input
                       type="text"
+                      disabled={isAgentViewMode}
                       value={agentForm.bankIfsc}
                       onChange={e => setAgentForm(p => ({ ...p, bankIfsc: e.target.value }))}
                       placeholder="e.g. ICIC0000123"
-                      className="input"
+                      className="input disabled:bg-slate-50 disabled:text-slate-800 disabled:border-slate-200 disabled:cursor-default"
                     />
                   </div>
                   <div className="flex flex-col gap-1.5">
                     <label className="text-[11px] font-extrabold text-slate-900 uppercase tracking-wider">Bank Account No</label>
                     <input
                       type="text"
+                      disabled={isAgentViewMode}
                       value={agentForm.bankAccount}
                       onChange={e => setAgentForm(p => ({ ...p, bankAccount: e.target.value }))}
                       placeholder="e.g. 123456789012"
-                      className="input"
+                      className="input disabled:bg-slate-50 disabled:text-slate-800 disabled:border-slate-200 disabled:cursor-default"
                     />
                   </div>
                 </div>
@@ -3584,15 +4023,62 @@ export default function Insurance() {
               <div className="flex flex-col gap-1.5">
                 <label className="text-[11px] font-extrabold text-slate-900 uppercase tracking-wider">Comment</label>
                 <textarea
+                  disabled={isAgentViewMode}
                   value={agentForm.comment}
                   onChange={e => setAgentForm(p => ({ ...p, comment: e.target.value }))}
                   placeholder="Add any internal comments or notes regarding this agent..."
-                  className="input w-full"
+                  className="input w-full disabled:bg-slate-50 disabled:text-slate-800 disabled:border-slate-200 disabled:cursor-default"
                   rows={2}
                 />
               </div>
             </div>
           )}
+
+          {/* Modal Bottom Actions */}
+          <div className="flex items-center justify-end gap-2 pt-4 border-t border-slate-100">
+            {isAgentViewMode ? (
+              <>
+                <button
+                  type="button"
+                  onClick={() => setIsAgentViewMode(false)}
+                  className="btn-primary py-1.5 px-4 text-xs cursor-pointer shadow-md shadow-primary-500/20 rounded-xl flex items-center gap-1.5"
+                >
+                  <Pencil size={13} /> Edit Agent
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setAgentModal(false); setAgentModalTab('details'); setEditAgent(null); setIsAgentViewMode(false); }}
+                  className="btn-secondary py-1.5 px-4 text-xs cursor-pointer rounded-xl"
+                >
+                  Close
+                </button>
+              </>
+            ) : (
+              <>
+                <button
+                  type="submit"
+                  className="btn-primary py-1.5 px-4 text-xs cursor-pointer shadow-md shadow-primary-500/20 rounded-xl"
+                >
+                  {editAgent ? 'Save Changes' : 'Save Agent'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (editAgent) {
+                      setIsAgentViewMode(true);
+                    } else {
+                      setAgentModal(false);
+                      setAgentModalTab('details');
+                      setEditAgent(null);
+                    }
+                  }}
+                  className="btn-secondary py-1.5 px-4 text-xs cursor-pointer rounded-xl"
+                >
+                  Cancel
+                </button>
+              </>
+            )}
+          </div>
         </form>
       </Modal>
       {/* Floating Right Action Panel - showing Add Plan inside the Plans subpage */}
@@ -3617,7 +4103,13 @@ export default function Insurance() {
         <div className="fixed right-5 top-1/2 -translate-y-1/2 z-40 flex flex-col gap-3 bg-white/90 backdrop-blur-xl p-2 rounded-2xl shadow-2xl border border-slate-200/80 animate-fadeIn">
           <button
             type="button"
-            onClick={() => { setAgentModal(true); }}
+            onClick={() => {
+              setEditAgent(null);
+              setIsAgentViewMode(false);
+              setAgentForm({ category: '', companyId: '', agentName: '', agencyNameDisplay: '', agencyCode: '', startDate: '', homeBranch: '', homeBranchCode: '', rmName: '', rmContact: '', bmName: '', bmContact: '', phone: '', email: '', bankName: '', bankBranch: '', bankIfsc: '', bankAccount: '', comment: '' });
+              setAgentModalTab('details');
+              setAgentModal(true);
+            }}
             className="w-10 h-10 rounded-xl bg-gradient-to-tr from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white flex items-center justify-center transition-all hover:scale-105 shadow-lg shadow-blue-500/30 cursor-pointer group relative"
             title="Add Agent"
           >

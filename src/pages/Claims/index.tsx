@@ -737,7 +737,7 @@ export function extractConnectedPersonsAndNominees(policy?: any, contact?: any):
       } else {
         existing.relationship = normalizeNomineeRelationship(existing.relationship, existing.name);
       }
-      if (person.source === 'policy_nominee') {
+      if (person.source === 'policy_nominee' && existing.source !== 'contact_family') {
         existing.source = 'policy_nominee';
       }
       return;
@@ -1019,7 +1019,7 @@ export function ClaimEditForm({ initial, isPending, onSave, onCancel, employees,
     return [];
   });
 
-  // Auto-populate nominees if empty and connected persons become available
+  // Keep the edit-form nominees aligned with the available connected persons.
   useEffect(() => {
     if (availableConnectedPersons.length === 0) return;
     setNominees(prev => {
@@ -1035,13 +1035,24 @@ export function ClaimEditForm({ initial, isPending, onSave, onCancel, employees,
           comment: p.comment || '',
         }));
       }
-      return deduplicatedPrev.map(n => {
-        const match = availableConnectedPersons.find(p => isSamePerson(p, n));
+      return availableConnectedPersons.map(match => {
+        const n = deduplicatedPrev.find(nominee => isSamePerson(match, nominee));
+        if (!n) {
+          return {
+            name: match.name,
+            relationship: match.relationship,
+            phone: match.phone,
+            dob: match.dob,
+            percentage: match.percentage || (availableConnectedPersons.length === 1 ? '100' : ''),
+            comment: match.comment || '',
+          };
+        }
         const curRel = (n.relationship || '').trim();
         const normCurRel = normalizeNomineeRelationship(curRel, n.name);
         if (match && match.relationship) {
           const matchRel = match.relationship.trim();
-          if (!curRel || ['dependent', 'nominee', 'member', 'other', 'in_law'].includes(curRel.toLowerCase()) ||
+          if (match.source === 'contact_family' ||
+              !curRel || ['dependent', 'nominee', 'member', 'other', 'in_law'].includes(curRel.toLowerCase()) ||
               (curRel.toLowerCase() === 'mother' && matchRel.toLowerCase() === 'father') ||
               (curRel.toLowerCase() === 'father' && matchRel.toLowerCase() === 'mother') ||
               (curRel.toLowerCase() === 'sister' && matchRel.toLowerCase() === 'brother') ||
@@ -1051,7 +1062,9 @@ export function ClaimEditForm({ initial, isPending, onSave, onCancel, employees,
               name: (match.name && match.name.length > (n.name || '').length) ? match.name : n.name,
               relationship: matchRel,
               phone: n.phone || match.phone,
-              dob: n.dob || match.dob
+              dob: n.dob || match.dob,
+              percentage: n.percentage || match.percentage || '',
+              comment: n.comment || match.comment || '',
             };
           }
         }
@@ -2282,16 +2295,47 @@ export function ClaimEditForm({ initial, isPending, onSave, onCancel, employees,
                       </div>
                       <div>
                         <label className="label text-[10px]">Doctor Degree</label>
-                        <select
-                          value={doc.degree}
-                          onChange={e => handleDoctorChange(index, 'degree', e.target.value)}
-                          className="input mt-1 py-1 text-xs"
-                        >
-                          <option value="">Select Degree</option>
-                          {['MBBS', 'MD', 'MS', 'DM', 'MCh', 'DNB', 'BDS', 'MDS'].map(deg => (
-                            <option key={deg} value={deg}>{deg}</option>
-                          ))}
-                        </select>
+                        <div className="relative flex items-center">
+                          <input
+                            type="text"
+                            value={doc.degree}
+                            onChange={e => handleDoctorChange(index, 'degree', e.target.value)}
+                            className="input mt-1 py-1 text-xs pr-7 w-full bg-white"
+                            placeholder="e.g. MBBS, MD"
+                            list={`claim-doc-deg-edit-${index}`}
+                          />
+                          <datalist id={`claim-doc-deg-edit-${index}`}>
+                            {['MBBS', 'MD', 'MS', 'DM', 'MCh', 'DNB', 'BDS', 'MDS'].map(deg => (
+                              <option key={deg} value={deg}>{deg}</option>
+                            ))}
+                          </datalist>
+                          <select
+                            className="absolute right-0 top-1 bottom-0 opacity-0 w-7 cursor-pointer"
+                            value=""
+                            onChange={e => {
+                              const val = e.target.value;
+                              if (!val) return;
+                              const current = (doc.degree || '').trim();
+                              if (!current) {
+                                handleDoctorChange(index, 'degree', val);
+                              } else {
+                                const parts = current.split(',').map((s: string) => s.trim().toLowerCase());
+                                if (!parts.includes(val.toLowerCase())) {
+                                  handleDoctorChange(index, 'degree', `${current}, ${val}`);
+                                }
+                              }
+                            }}
+                            title="Select degree from dropdown"
+                          >
+                            <option value="" disabled>Select</option>
+                            {['MBBS', 'MD', 'MS', 'DM', 'MCh', 'DNB', 'BDS', 'MDS'].map(deg => (
+                              <option key={deg} value={deg}>{deg}</option>
+                            ))}
+                          </select>
+                          <div className="absolute right-1.5 top-2.5 pointer-events-none text-slate-400">
+                            <ChevronDown size={13} />
+                          </div>
+                        </div>
                       </div>
                       <div>
                         <label className="label text-[10px]">Doctor Contact No</label>
@@ -6696,16 +6740,47 @@ export default function Claims({ contactId, contact, embedded = false }: ClaimsP
                             </div>
                             <div>
                               <label className="label text-[10px]">Doctor Degree</label>
-                              <select
-                                value={doc.degree}
-                                onChange={e => handleNewDoctorChange(index, 'degree', e.target.value)}
-                                className="input mt-1 py-1 text-xs"
-                              >
-                                <option value="">Select Degree</option>
-                                {['MBBS', 'MD', 'MS', 'DM', 'MCh', 'DNB', 'BDS', 'MDS'].map(deg => (
-                                  <option key={deg} value={deg}>{deg}</option>
-                                ))}
-                              </select>
+                              <div className="relative flex items-center">
+                                <input
+                                  type="text"
+                                  value={doc.degree}
+                                  onChange={e => handleNewDoctorChange(index, 'degree', e.target.value)}
+                                  className="input mt-1 py-1 text-xs pr-7 w-full bg-white"
+                                  placeholder="e.g. MBBS, MD"
+                                  list={`claim-doc-deg-new-${index}`}
+                                />
+                                <datalist id={`claim-doc-deg-new-${index}`}>
+                                  {['MBBS', 'MD', 'MS', 'DM', 'MCh', 'DNB', 'BDS', 'MDS'].map(deg => (
+                                    <option key={deg} value={deg}>{deg}</option>
+                                  ))}
+                                </datalist>
+                                <select
+                                  className="absolute right-0 top-1 bottom-0 opacity-0 w-7 cursor-pointer"
+                                  value=""
+                                  onChange={e => {
+                                    const val = e.target.value;
+                                    if (!val) return;
+                                    const current = (doc.degree || '').trim();
+                                    if (!current) {
+                                      handleNewDoctorChange(index, 'degree', val);
+                                    } else {
+                                      const parts = current.split(',').map((s: string) => s.trim().toLowerCase());
+                                      if (!parts.includes(val.toLowerCase())) {
+                                        handleNewDoctorChange(index, 'degree', `${current}, ${val}`);
+                                      }
+                                    }
+                                  }}
+                                  title="Select degree from dropdown"
+                                >
+                                  <option value="" disabled>Select</option>
+                                  {['MBBS', 'MD', 'MS', 'DM', 'MCh', 'DNB', 'BDS', 'MDS'].map(deg => (
+                                    <option key={deg} value={deg}>{deg}</option>
+                                  ))}
+                                </select>
+                                <div className="absolute right-1.5 top-2.5 pointer-events-none text-slate-400">
+                                  <ChevronDown size={13} />
+                                </div>
+                              </div>
                             </div>
                             <div>
                               <label className="label text-[10px]">Doctor Contact No</label>

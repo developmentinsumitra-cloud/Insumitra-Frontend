@@ -232,6 +232,62 @@ export const DEFAULT_DROPDOWN_MENUS: DropdownMenu[] = [
     status: 'Active',
     options: ['Network', 'Non-Network', 'Blacklisted', 'Other'],
   },
+  {
+    id: 21,
+    name: 'Family Sizes',
+    module: 'Policy',
+    totalOptions: 7,
+    status: 'Active',
+    options: ['1', '2', '2_1', '2_2', '2_3', '1_1', '1_2'],
+  },
+  {
+    id: 22,
+    name: 'Lead Sources',
+    module: 'Lead',
+    totalOptions: 5,
+    status: 'Active',
+    options: ['Social Media', 'Our Customer Self', 'Refered by our customer', 'Walkin', 'BNI'],
+  },
+  {
+    id: 23,
+    name: 'Lead Statuses',
+    module: 'Lead',
+    totalOptions: 5,
+    status: 'Active',
+    options: ['NOT_INTERESTED', 'LEAD_LOST', 'INTERESTED', 'HOT', 'VERY_HOT'],
+  },
+  {
+    id: 24,
+    name: 'Lead Types',
+    module: 'Lead',
+    totalOptions: 4,
+    status: 'Active',
+    options: ['Fresh', 'Renewal', 'Porting', 'Renewal/Porting'],
+  },
+  {
+    id: 25,
+    name: 'Address Types',
+    module: 'Contact',
+    totalOptions: 5,
+    status: 'Active',
+    options: ['Home', 'Office', 'Business', 'Permanent', 'Other'],
+  },
+  {
+    id: 26,
+    name: 'Residency Types',
+    module: 'Contact',
+    totalOptions: 3,
+    status: 'Active',
+    options: ['Resident', 'NRI', 'PIO'],
+  },
+  {
+    id: 27,
+    name: 'Expense Categories',
+    module: 'Claim',
+    totalOptions: 8,
+    status: 'Active',
+    options: ['Room Rent', 'Medicine', 'Investigation', 'Doctor Consultation', 'Surgery', 'Ambulance', 'Consumables', 'Other'],
+  },
 ];
 
 export const DEFAULT_USAGE_MAPPINGS: UsageMapping[] = [
@@ -252,6 +308,13 @@ export const DEFAULT_USAGE_MAPPINGS: UsageMapping[] = [
   { id: 15, module: 'Contact', fieldName: 'Occupation', dropdownId: 16, isRequired: false, status: 'Active' },
   { id: 16, module: 'Claim', fieldName: 'Claim Type', dropdownId: 18, isRequired: true, status: 'Active' },
   { id: 17, module: 'Claim', fieldName: 'Claim Status', dropdownId: 19, isRequired: true, status: 'Active' },
+  { id: 18, module: 'Policy', fieldName: 'Family Size', dropdownId: 21, isRequired: false, status: 'Active' },
+  { id: 19, module: 'Lead', fieldName: 'Lead Source', dropdownId: 22, isRequired: false, status: 'Active' },
+  { id: 20, module: 'Lead', fieldName: 'Lead Status', dropdownId: 23, isRequired: false, status: 'Active' },
+  { id: 21, module: 'Lead', fieldName: 'Lead Type', dropdownId: 24, isRequired: false, status: 'Active' },
+  { id: 22, module: 'Contact', fieldName: 'Address Type', dropdownId: 25, isRequired: false, status: 'Active' },
+  { id: 23, module: 'Contact', fieldName: 'Residency Type', dropdownId: 26, isRequired: false, status: 'Active' },
+  { id: 24, module: 'Claim', fieldName: 'Expense Category', dropdownId: 27, isRequired: false, status: 'Active' },
 ];
 
 export function getStoredDropdownMenus(): DropdownMenu[] {
@@ -292,7 +355,14 @@ export function getStoredUsageMappings(): UsageMapping[] {
     const raw = localStorage.getItem(MAPPINGS_STORAGE_KEY);
     if (raw) {
       const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        const result: UsageMapping[] = [...parsed];
+        const existingIds = new Set(parsed.map(p => String(p.id)));
+        for (const def of DEFAULT_USAGE_MAPPINGS) {
+          if (!existingIds.has(String(def.id))) result.push(def);
+        }
+        return result;
+      }
     }
   } catch {}
   return DEFAULT_USAGE_MAPPINGS;

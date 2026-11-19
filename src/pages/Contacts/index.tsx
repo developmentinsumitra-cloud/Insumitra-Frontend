@@ -5802,6 +5802,7 @@ export default function Contacts() {
                 <option value="ALL">All Roles</option>
                 <option value="Contact">Contact</option>
                 <option value="Employee">Employee</option>
+                <option value="Doctor">Doctor</option>
                 <option value="ADMIN/OWNER">ADMIN/OWNER</option>
                 <option value="Business Associate">Business Associate</option>
                 <option value="SUPERADMIN">Super Admin</option>
@@ -6839,6 +6840,7 @@ export default function Contacts() {
                       >
                         <option value="Contact">Contact</option>
                         <option value="Employee">Employee</option>
+                        <option value="Doctor">Doctor</option>
                         <option value="ADMIN/OWNER">ADMIN/OWNER</option>
                         <option value="Business Associate">Business Associate</option>
                       </select>

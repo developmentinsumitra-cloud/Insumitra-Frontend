@@ -81,6 +81,7 @@ export const POLICY_RELATIONSHIP_MAP: Record<string, string> = {
   MOTHER: 'Mother',
   BROTHER: 'Brother',
   SISTER: 'Sister',
+  SIBLING: 'Brother',
   GRANDFATHER: 'Grandfather',
   GRANDMOTHER: 'Grandmother',
   GRANDSON: 'Grandson',
@@ -89,12 +90,16 @@ export const POLICY_RELATIONSHIP_MAP: Record<string, string> = {
   GRANDCHILD: 'Grandchild',
   UNCLE: 'Uncle',
   AUNT: 'Aunt / Unty',
+  AUNTIE: 'Aunt / Unty',
+  UNTY: 'Aunt / Unty',
+  AUNT___UNTY: 'Aunt / Unty',
   NEPHEW: 'Nephew',
   NIECE: 'Niece',
   CHILD: 'Child',
   PARENT: 'Parent',
   IN_LAW: 'In-Law',
   OTHER: 'Other',
+  DEPENDENT: 'Other',
 };
 
 export function formatPolicyRelationship(
@@ -104,7 +109,7 @@ export function formatPolicyRelationship(
 ): string {
   if (!rawRel) return 'Spouse';
   const clean = String(rawRel).trim();
-  const upper = clean.toUpperCase().replace(/\s+/g, '_');
+  const upper = clean.toUpperCase().replace(/[\s-]+/g, '_');
 
   let label = POLICY_RELATIONSHIP_MAP[upper];
   const isFemale = String(gender).toUpperCase() === 'FEMALE';
@@ -114,6 +119,12 @@ export function formatPolicyRelationship(
     if (isFemale) label = 'Wife';
     else if (isMale) label = 'Husband';
     else label = 'Spouse';
+  } else if (upper === 'SIBLING') {
+    label = isFemale ? 'Sister' : 'Brother';
+  } else if (upper === 'CHILD') {
+    label = isFemale ? 'Daughter' : 'Son';
+  } else if (upper === 'PARENT') {
+    label = isFemale ? 'Mother' : 'Father';
   }
 
   if (!isDirect && upper) {
@@ -123,12 +134,18 @@ export function formatPolicyRelationship(
       label = isFemale ? 'Daughter' : 'Son';
     } else if (['NEPHEW', 'NIECE'].includes(upper)) {
       label = isFemale ? 'Aunt / Unty' : 'Uncle';
-    } else if (['UNCLE', 'AUNT'].includes(upper)) {
+    } else if (['UNCLE', 'AUNT', 'AUNTIE', 'UNTY'].includes(upper)) {
       label = isFemale ? 'Niece' : 'Nephew';
     } else if (['GRANDCHILD', 'GRANDSON', 'GRANDDAUGHTER'].includes(upper)) {
       label = isFemale ? 'Grandmother' : 'Grandfather';
     } else if (['GRANDPARENT', 'GRANDFATHER', 'GRANDMOTHER'].includes(upper)) {
       label = isFemale ? 'Granddaughter' : 'Grandson';
+    } else if (upper === 'IN_LAW') {
+      label = 'In-Law';
+    } else if (['SPOUSE', 'HUSBAND', 'WIFE'].includes(upper)) {
+      label = isFemale ? 'Wife' : isMale ? 'Husband' : 'Spouse';
+    } else if (['SIBLING', 'BROTHER', 'SISTER'].includes(upper)) {
+      label = isFemale ? 'Sister' : 'Brother';
     }
   }
 
@@ -235,6 +252,18 @@ export default function CreatePolicyModal({
       { value: 'QUARTERLY', label: 'Quarterly' },
       { value: 'MONTHLY', label: 'Monthly' },
       { value: 'SINGLE', label: 'One Time' },
+    ]);
+  }, [getOptions, dropdownMenus]);
+
+  const familySizeOptions = useMemo(() => {
+    return getOptions('Policy', 'Family Size', [
+      { value: '1', label: '1 Adult (Individual)' },
+      { value: '2', label: '2 Adults (1A + 1A)' },
+      { value: '2_1', label: '2 Adults + 1 Child' },
+      { value: '2_2', label: '2 Adults + 2 Children' },
+      { value: '2_3', label: '2 Adults + 3 Children' },
+      { value: '1_1', label: '1 Adult + 1 Child' },
+      { value: '1_2', label: '1 Adult + 2 Children' },
     ]);
   }, [getOptions, dropdownMenus]);
 
@@ -407,18 +436,32 @@ export default function CreatePolicyModal({
               return !isSelf && (!proposerNameLower || mName !== proposerNameLower);
             })
             .map((m: any, idx: number) => {
-              const formattedRel = formatPolicyRelationship(m.relationship, m.gender, true);
+              let relToUse = m.relationship;
+              let genToUse = m.gender;
+              const mNameLower = (m.name || `${m.firstName || ''} ${m.lastName || ''}`).trim().toLowerCase();
+              if (policyToEdit.contact?.relationships) {
+                const matchedRel = policyToEdit.contact.relationships.find((r: any) => {
+                  const rc = r.relatedContact || r.contact;
+                  const rNameLower = `${rc?.firstName || ''} ${rc?.lastName || ''}`.trim().toLowerCase();
+                  return rNameLower && (rNameLower === mNameLower || mNameLower.includes(rNameLower) || rNameLower.includes(mNameLower));
+                });
+                if (matchedRel?.relationshipType) {
+                  relToUse = matchedRel.relationshipType;
+                  if (matchedRel.relatedContact?.gender) genToUse = matchedRel.relatedContact.gender;
+                }
+              }
+              const formattedRel = formatPolicyRelationship(relToUse, genToUse, true);
               return {
                 id: m.id || `member-${idx}`,
                 name: m.name || `${m.firstName || ''} ${m.lastName || ''}`.trim(),
                 relationship: formattedRel,
                 contactNo: cleanConnectedPhone(m.phone || m.contactNo),
                 dob: m.dateOfBirth ? m.dateOfBirth.slice(0, 10) : (m.dob || ''),
-                gender: m.gender || 'MALE',
+                gender: genToUse || m.gender || 'MALE',
                 isCovered: m.isCovered !== false,
                 isNominee: !!m.isNominee,
                 nomineeName: m.nomineeName || '',
-                nomineeRelation: formatPolicyRelationship(m.nomineeRelation || m.relationship, m.gender, true),
+                nomineeRelation: formatPolicyRelationship(m.nomineeRelation || relToUse, genToUse, true),
                 nomineeContact: m.nomineeContact || '',
                 nomineeDob: m.nomineeDob || '',
                 nomineePercentage: m.nomineePercentage && Number(m.nomineePercentage) > 0 ? m.nomineePercentage : '',
@@ -484,10 +527,12 @@ export default function CreatePolicyModal({
           });
         }
 
-        // Check initialData familyMembers or relationships and merge any that aren't already included
-        const famList = Array.isArray(initialData?.familyMembers) && initialData.familyMembers.length > 0
-          ? initialData.familyMembers
-          : (Array.isArray(initialData?.contact?.relationships) ? initialData.contact.relationships : (Array.isArray(selectedContact?.relationships) ? selectedContact.relationships : []));
+        // Check contact relationships or familyMembers and merge / update any
+        const famList = Array.isArray(policyToEdit?.contact?.relationships) && policyToEdit.contact.relationships.length > 0
+          ? policyToEdit.contact.relationships
+          : (Array.isArray(initialData?.familyMembers) && initialData.familyMembers.length > 0
+            ? initialData.familyMembers
+            : (Array.isArray(initialData?.contact?.relationships) ? initialData.contact.relationships : (Array.isArray(selectedContact?.relationships) ? selectedContact.relationships : [])));
 
         if (famList.length > 0) {
           const existingNames = new Set(initialMembers.map(m => m.name.trim().toLowerCase()));
@@ -496,19 +541,31 @@ export default function CreatePolicyModal({
             const fmName = (target.name || `${target.firstName || ''} ${target.lastName || ''}`).trim();
             const rawRel = fm.relation || fm.relationship || fm.relationshipType || '';
             const isSelf = String(rawRel).toLowerCase() === 'self';
-            if (fmName && !isSelf && (!proposerNameLower || fmName.toLowerCase() !== proposerNameLower) && !existingNames.has(fmName.toLowerCase())) {
+            if (!fmName || isSelf || (proposerNameLower && fmName.toLowerCase() === proposerNameLower)) return;
+
+            const existingIdx = initialMembers.findIndex(m => m.name.toLowerCase() === fmName.toLowerCase());
+            const formattedRel = formatPolicyRelationship(rawRel, target.gender, true);
+            if (existingIdx >= 0) {
+              if (formattedRel && formattedRel.toLowerCase() !== 'other') {
+                initialMembers[existingIdx].relationship = formattedRel;
+                if (target.gender) initialMembers[existingIdx].gender = target.gender;
+                if (!initialMembers[existingIdx].contactNo && target.phone) {
+                  initialMembers[existingIdx].contactNo = cleanConnectedPhone(target.phone);
+                }
+              }
+            } else if (!existingNames.has(fmName.toLowerCase())) {
               existingNames.add(fmName.toLowerCase());
               initialMembers.push({
                 id: target.id || target.contactId ? `contact-${target.id || target.contactId}` : `member-${idx}`,
                 name: fmName,
-                relationship: formatPolicyRelationship(rawRel, target.gender, true),
+                relationship: formattedRel,
                 contactNo: cleanConnectedPhone(target.phone || target.contactNo || target.whatsapp),
                 dob: target.dateOfBirth ? String(target.dateOfBirth).slice(0, 10) : (target.dob ? String(target.dob).slice(0, 10) : ''),
                 gender: ['MALE', 'FEMALE', 'OTHER'].includes(String(target.gender).toUpperCase()) ? String(target.gender).toUpperCase() : 'MALE',
                 isCovered: true,
                 isNominee: false,
                 nomineeName: '',
-                nomineeRelation: formatPolicyRelationship(rawRel, target.gender, true) || 'Spouse',
+                nomineeRelation: formattedRel || 'Spouse',
                 nomineeContact: '',
                 nomineeDob: '',
                 nomineePercentage: '',
@@ -1325,12 +1382,23 @@ export default function CreatePolicyModal({
       const seen = new Set<string>();
       const result: ConnectedPersonItem[] = [];
 
-      // 1. Preserve existing members in the policy
+      // 1. Preserve existing members in the policy, but update relationship if matched in familyMembers
       previous.forEach(p => {
         const k = p.name.trim().toLowerCase();
         if (k && !seen.has(k) && k !== contactFullName && p.relationship?.toLowerCase() !== 'self') {
           seen.add(k);
-          result.push(p);
+          const fresh = familyMembers.find(f => f.name.trim().toLowerCase() === k);
+          if (fresh && fresh.relationship && fresh.relationship.toLowerCase() !== 'other') {
+            result.push({
+              ...p,
+              relationship: fresh.relationship,
+              gender: fresh.gender || p.gender,
+              contactNo: p.contactNo || fresh.contactNo,
+              dob: p.dob || fresh.dob,
+            });
+          } else {
+            result.push(p);
+          }
         }
       });
 
@@ -2679,15 +2747,15 @@ export default function CreatePolicyModal({
                         <CustomSelect
                           value={selectedFamilySize}
                           onChange={val => setSelectedFamilySize(val)}
-                          options={[
-                            { value: '1', label: '1 Adult (Individual)' },
-                            { value: '2', label: '2 Adults (1A + 1A)' },
-                            { value: '2_1', label: '2 Adults + 1 Child' },
-                            { value: '2_2', label: '2 Adults + 2 Children' },
-                            { value: '2_3', label: '2 Adults + 3 Children' },
-                            { value: '1_1', label: '1 Adult + 1 Child' },
-                            { value: '1_2', label: '1 Adult + 2 Children' },
-                          ]}
+                          options={familySizeOptions.map(opt =>
+                            opt.value === '1' ? { value: '1', label: '1 Adult (Individual)' } :
+                            opt.value === '2' ? { value: '2', label: '2 Adults (1A + 1A)' } :
+                            opt.value === '2_1' ? { value: '2_1', label: '2 Adults + 1 Child' } :
+                            opt.value === '2_2' ? { value: '2_2', label: '2 Adults + 2 Children' } :
+                            opt.value === '2_3' ? { value: '2_3', label: '2 Adults + 3 Children' } :
+                            opt.value === '1_1' ? { value: '1_1', label: '1 Adult + 1 Child' } :
+                            opt.value === '1_2' ? { value: '1_2', label: '1 Adult + 2 Children' } : opt
+                          )}
                         />
                       </div>
 

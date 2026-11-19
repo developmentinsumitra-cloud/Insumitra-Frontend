@@ -147,7 +147,7 @@ export default function Login() {
   };
 
   return (
-    <div className="min-h-screen w-full bg-slate-50 relative overflow-y-auto flex flex-col items-center justify-center p-3 md:p-6 select-none">
+    <div className="min-h-screen w-full bg-slate-50 relative overflow-y-auto no-scrollbar flex flex-col items-center justify-center p-3 md:p-6 select-none">
       
       {/* Soft Pastel Floating Ambient Blobs */}
       <div className="absolute -top-32 -left-32 w-96 h-96 bg-teal-200/50 rounded-full blur-3xl pointer-events-none animate-pulse" />
