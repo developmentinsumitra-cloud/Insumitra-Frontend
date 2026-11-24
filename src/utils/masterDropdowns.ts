@@ -288,6 +288,14 @@ export const DEFAULT_DROPDOWN_MENUS: DropdownMenu[] = [
     status: 'Active',
     options: ['Room Rent', 'Medicine', 'Investigation', 'Doctor Consultation', 'Surgery', 'Ambulance', 'Consumables', 'Other'],
   },
+  {
+    id: 28,
+    name: 'District',
+    module: 'Contact',
+    totalOptions: 0,
+    status: 'Active',
+    options: [],
+  },
 ];
 
 export const DEFAULT_USAGE_MAPPINGS: UsageMapping[] = [
@@ -324,9 +332,10 @@ export function getStoredDropdownMenus(): DropdownMenu[] {
       const parsed = JSON.parse(raw);
       if (Array.isArray(parsed) && parsed.length > 0) {
         // User configured menus are the source of truth
-        const result: DropdownMenu[] = [...parsed];
-        const existingIds = new Set(parsed.map(p => String(p.id)));
-        const existingNames = new Set(parsed.map(p => cleanKey(p.name)));
+        const normalizedMenus = normalizeDropdownMenus(parsed);
+        const result: DropdownMenu[] = [...normalizedMenus];
+        const existingIds = new Set(normalizedMenus.map(p => String(p.id)));
+        const existingNames = new Set(normalizedMenus.map(p => cleanKey(p.name)));
 
         for (const def of DEFAULT_DROPDOWN_MENUS) {
           if (!existingIds.has(String(def.id)) && !existingNames.has(cleanKey(def.name))) {
@@ -337,15 +346,16 @@ export function getStoredDropdownMenus(): DropdownMenu[] {
       }
     }
   } catch {}
-  return DEFAULT_DROPDOWN_MENUS;
+  return normalizeDropdownMenus(DEFAULT_DROPDOWN_MENUS);
 }
 
 export function saveStoredDropdownMenus(menus: DropdownMenu[], syncToBackend = true): void {
   try {
-    localStorage.setItem(DROPDOWNS_STORAGE_KEY, JSON.stringify(menus));
-    window.dispatchEvent(new CustomEvent(DROPDOWNS_UPDATED_EVENT, { detail: menus }));
+    const normalizedMenus = normalizeDropdownMenus(menus);
+    localStorage.setItem(DROPDOWNS_STORAGE_KEY, JSON.stringify(normalizedMenus));
+    window.dispatchEvent(new CustomEvent(DROPDOWNS_UPDATED_EVENT, { detail: normalizedMenus }));
     if (syncToBackend) {
-      insuranceService.updateDropdownMenus(menus).catch(() => {});
+      insuranceService.updateDropdownMenus(normalizedMenus).catch(() => {});
     }
   } catch {}
 }
@@ -377,6 +387,14 @@ export function saveStoredUsageMappings(mappings: UsageMapping[]): void {
 
 function cleanKey(str: string): string {
   return str.toLowerCase().replace(/[^a-z0-9]/g, '').replace(/ies$/, 'y').replace(/s$/, '');
+}
+
+function normalizeDropdownMenus(menus: DropdownMenu[]): DropdownMenu[] {
+  return menus.map(menu =>
+    cleanKey(menu.module) === 'contact' && cleanKey(menu.name) === 'city'
+      ? { ...menu, name: 'District' }
+      : menu
+  );
 }
 
 export function getHospitalTypeOptions(providedMenus?: DropdownMenu[]): Array<{ value: string; label: string }> {

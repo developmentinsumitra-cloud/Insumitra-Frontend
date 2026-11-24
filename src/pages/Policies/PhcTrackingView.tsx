@@ -92,7 +92,22 @@ interface PhcPolicyRecord {
 const fmtCurr = (n: number) => `₹${Number(n).toLocaleString('en-IN')}`;
 const isFamilyPhcInProgress = (entry: any) =>
   String(entry?.id || '').startsWith('family-phc-') &&
-  !/completed/i.test(String(entry?.status || ''));
+  !/completed|settled/i.test(String(entry?.status || '')) &&
+  !Boolean(entry?.claimSettled);
+
+const isFamilyPhcCompleted = (entry: any) =>
+  String(entry?.id || '').startsWith('family-phc-') &&
+  (/completed|settled/i.test(String(entry?.status || '')) || Boolean(entry?.claimSettled));
+
+const isPrimaryPhcCompleted = (record: PhcPolicyRecord) => {
+  const baseCheckups = (record.allCheckups || []).filter(
+    (e: any) => !String(e.id || '').startsWith('family-phc-')
+  );
+  if (baseCheckups.length > 0) {
+    return baseCheckups.some((e: any) => /completed|settled/i.test(String(e.status || '')));
+  }
+  return record.phcStatus === 'Completed' || record.phcStatus === 'Fully Utilized';
+};
 
 const STATUS_CFG: Record<PhcStatus, { bg: string; text: string; border: string; dot: string }> = {
   'Interested':       { bg: 'bg-amber-50',   text: 'text-amber-700',   border: 'border-amber-200',   dot: 'bg-amber-500' },
@@ -572,7 +587,8 @@ function enrichPhcRecord(r: PhcPolicyRecord, polNotes?: string): PhcPolicyRecord
       utilizedAmount: allocationUtilized,
       allocatedAmount: Math.max(0, Number(allocation.amount) || 0),
       reimbursementType: allocation.reimbursementCashless || 'N/A',
-      member: { name, relationship },
+      member: { name, relationship, phone: connectedPerson?.contact || null },
+      phone: connectedPerson?.contact || null,
       countsAsPhc: hasActivity,
     };
   });
@@ -781,11 +797,20 @@ function enrichPhcRecord(r: PhcPolicyRecord, polNotes?: string): PhcPolicyRecord
     };
   });
 
+  const finalUtilizedAmount = Math.max(
+    utilizedAmount,
+    years[0]?.utilizedAmount || 0,
+    years.reduce((s, y) => s + (y.utilizedAmount || 0), 0)
+  );
+  const finalBalanceAmount = (extra?.phcBalanceAmount !== undefined && extra.phcBalanceAmount !== null && extra.phcBalanceAmount >= 0)
+    ? extra.phcBalanceAmount
+    : Math.max(0, eligibleAmount - finalUtilizedAmount);
+
   return {
     ...r,
     eligibleAmount,
-    utilizedAmount,
-    balanceAmount,
+    utilizedAmount: finalUtilizedAmount,
+    balanceAmount: finalBalanceAmount,
     totalYears,
     phcStatus,
     phcFrequency,
@@ -1089,7 +1114,10 @@ export default function PhcTrackingView() {
       return hasFamilyPhcEntry ||
         (p.phcStatus !== 'Completed' && p.phcStatus !== 'Fully Utilized' && (p.phcStatus === 'Upcoming' || p.daysRemaining > 30));
     });
-    else if (activeTab === 'completed') list = list.filter(p => p.phcStatus === 'Completed' || p.phcStatus === 'Fully Utilized');
+    else if (activeTab === 'completed') list = list.filter(p => {
+      const hasCompletedFamily = (p.allCheckups || []).some(isFamilyPhcCompleted);
+      return hasCompletedFamily || p.phcStatus === 'Completed' || p.phcStatus === 'Fully Utilized';
+    });
     
     if (policyTypeFilter !== 'All') {
       list = list.filter(p => p.companyType.toUpperCase() === policyTypeFilter.toUpperCase());
@@ -1103,8 +1131,9 @@ export default function PhcTrackingView() {
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase();
       list = list.filter(p => p.policyNo.toLowerCase().includes(q) || p.customerName.toLowerCase().includes(q) || p.planName.toLowerCase().includes(q) || p.customerPhone.includes(q) ||
-        (activeTab === 'upcoming' && (p.allCheckups || []).some((entry: any) =>
-          isFamilyPhcInProgress(entry) && String(entry.member?.name || '').toLowerCase().includes(q),
+        ((activeTab === 'upcoming' || activeTab === 'completed') && (p.allCheckups || []).some((entry: any) =>
+          (activeTab === 'completed' ? isFamilyPhcCompleted(entry) : isFamilyPhcInProgress(entry)) &&
+          String(entry.member?.name || '').toLowerCase().includes(q),
         )));
     }
     return list;
@@ -1288,16 +1317,39 @@ export default function PhcTrackingView() {
   };
 
   const tableRows = useMemo(() => sortedFilteredData.flatMap(record => {
-    if (activeTab !== 'upcoming') return [{ record, id: record.id, familyEntry: null as any }];
-    const familyEntries = (record.allCheckups || []).filter(isFamilyPhcInProgress);
-    return [
-      { record, id: record.id, familyEntry: null as any },
-      ...familyEntries.map((familyEntry: any) => ({
-        record,
-        id: `${record.id}-${familyEntry.id}`,
-        familyEntry,
-      })),
-    ];
+    if (activeTab === 'completed') {
+      const completedFamilyEntries = (record.allCheckups || []).filter(isFamilyPhcCompleted);
+      const rows: { record: PhcPolicyRecord; id: string; familyEntry: any }[] = [];
+      if (isPrimaryPhcCompleted(record) || completedFamilyEntries.length === 0) {
+        rows.push({ record, id: record.id, familyEntry: null as any });
+      }
+      completedFamilyEntries.forEach((familyEntry: any) => {
+        rows.push({
+          record,
+          id: `${record.id}-${familyEntry.id}`,
+          familyEntry,
+        });
+      });
+      return rows;
+    }
+
+    if (activeTab === 'upcoming') {
+      const inProgressFamilyEntries = (record.allCheckups || []).filter(isFamilyPhcInProgress);
+      const rows: { record: PhcPolicyRecord; id: string; familyEntry: any }[] = [];
+      if (!isPrimaryPhcCompleted(record) || inProgressFamilyEntries.length === 0) {
+        rows.push({ record, id: record.id, familyEntry: null as any });
+      }
+      inProgressFamilyEntries.forEach((familyEntry: any) => {
+        rows.push({
+          record,
+          id: `${record.id}-${familyEntry.id}`,
+          familyEntry,
+        });
+      });
+      return rows;
+    }
+
+    return [{ record, id: record.id, familyEntry: null as any }];
   }), [activeTab, sortedFilteredData]);
 
   const paginatedData = useMemo(() => {
@@ -1765,20 +1817,49 @@ export default function PhcTrackingView() {
                   r.companyType ||
                   (r.planName?.toLowerCase().includes('life') || r.planName?.toLowerCase().includes('jeevan') ? 'LIFE' : 'HEALTH')
                 ).toUpperCase();
-                const familyEligible = Number(familyEntry?.allocatedAmount) || 0;
-                const effEligible = familyEntry && familyEligible > 0
-                  ? familyEligible
-                  : r.eligibleAmount > 0 ? r.eligibleAmount : (r.years?.[0]?.eligibleAmount || 5000);
-                const effUtilized = familyEntry
-                  ? Number(familyEntry.utilizedAmount) || 0
-                  : (r.utilizedAmount !== undefined && r.utilizedAmount !== null && r.utilizedAmount > 0)
-                  ? r.utilizedAmount
-                  : (r.years?.reduce((s: number, y: any) => s + (y.utilizedAmount || 0), 0) || r.utilizedAmount || 0);
-                const effBalance = familyEntry
-                  ? Math.max(0, effEligible - effUtilized)
-                  : (r.balanceAmount !== undefined && r.balanceAmount !== null && r.balanceAmount >= 0)
-                  ? r.balanceAmount
-                  : Math.max(0, effEligible - effUtilized);
+                const allFamilyCheckups = (r.allCheckups || []).filter(
+                  (entry: any) => String(entry.id || '').startsWith('family-phc-')
+                );
+                const hasFamilyCheckups = allFamilyCheckups.length > 0;
+                const totalFamilyAllocated = allFamilyCheckups.reduce(
+                  (sum: number, entry: any) => sum + (Number(entry.allocatedAmount) || 0),
+                  0
+                );
+
+                let effEligible: number;
+                let effUtilized: number;
+                let effBalance: number;
+
+                if (familyEntry) {
+                  effEligible = Number(familyEntry.allocatedAmount) || 0;
+                  effUtilized = Number(familyEntry.utilizedAmount) || 0;
+                  effBalance = Math.max(0, effEligible - effUtilized);
+                } else if (hasFamilyCheckups && totalFamilyAllocated > 0) {
+                  const totalEligible = r.eligibleAmount > 0 ? r.eligibleAmount : (r.years?.[0]?.eligibleAmount || 5000);
+                  effEligible = Math.max(0, totalEligible - totalFamilyAllocated);
+                  const primaryCheckup = (r.allCheckups || []).find(
+                    (entry: any) => !String(entry.id || '').startsWith('family-phc-')
+                  );
+                  if (primaryCheckup && primaryCheckup.utilizedAmount !== undefined && Number(primaryCheckup.utilizedAmount) > 0) {
+                    effUtilized = Number(primaryCheckup.utilizedAmount) || 0;
+                  } else {
+                    const totalFamilyUtilized = allFamilyCheckups.reduce(
+                      (sum: number, entry: any) => sum + (Number(entry.utilizedAmount) || 0),
+                      0
+                    );
+                    const totalPolUtilized = r.years?.[0]?.utilizedAmount || r.utilizedAmount || 0;
+                    effUtilized = Math.max(0, totalPolUtilized - totalFamilyUtilized);
+                  }
+                  effBalance = Math.max(0, effEligible - effUtilized);
+                } else {
+                  effEligible = r.eligibleAmount > 0 ? r.eligibleAmount : (r.years?.[0]?.eligibleAmount || 5000);
+                  effUtilized = (r.utilizedAmount !== undefined && r.utilizedAmount !== null && r.utilizedAmount > 0)
+                    ? r.utilizedAmount
+                    : (r.years?.reduce((s: number, y: any) => s + (y.utilizedAmount || 0), 0) || r.utilizedAmount || 0);
+                  effBalance = (r.balanceAmount !== undefined && r.balanceAmount !== null && r.balanceAmount >= 0)
+                    ? r.balanceAmount
+                    : Math.max(0, effEligible - effUtilized);
+                }
 
                 return (
                 <tr key={rowId} onClick={() => setActiveModal({ type: 'phc', record: r })} className={clsx(idx % 2 === 1 ? 'bg-slate-50/80' : 'bg-white')}>
@@ -1786,9 +1867,14 @@ export default function PhcTrackingView() {
                   <td className="px-3 py-3 border border-slate-200">
                     <span className="font-extrabold text-slate-900 text-xs transition-colors whitespace-nowrap">
                       {familyEntry?.member?.name || r.customerName}
+                      {familyEntry?.member?.relationship && familyEntry.member.relationship !== 'Self' && (
+                        <span className="ml-1.5 text-[10px] font-semibold text-slate-400">({familyEntry.member.relationship})</span>
+                      )}
                     </span>
                   </td>
-                  <td className="px-3 py-3 border border-slate-200 whitespace-nowrap font-bold text-slate-800 text-xs">{r.customerPhone || 'N/A'}</td>
+                  <td className="px-3 py-3 border border-slate-200 whitespace-nowrap font-bold text-slate-800 text-xs">
+                    {familyEntry?.phone || familyEntry?.member?.phone || r.customerPhone || 'N/A'}
+                  </td>
                   <td className="px-3 py-3 border border-slate-200 whitespace-nowrap">
                     <span className={clsx(
                       "inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-extrabold uppercase border",
@@ -1824,13 +1910,21 @@ export default function PhcTrackingView() {
                   </td>
                   <td className="px-3 py-3 border border-slate-200 whitespace-nowrap">
                     {familyEntry
-                      ? <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-black border bg-amber-50 text-amber-700 border-amber-200">{familyEntry.status || 'Under Process'}</span>
+                      ? (isFamilyPhcCompleted(familyEntry)
+                          ? <StatusBadge status="Completed" />
+                          : <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-black border bg-amber-50 text-amber-700 border-amber-200">{familyEntry.status || 'Under Process'}</span>
+                        )
                       : <StatusBadge status={r.phcStatus} />}
                   </td>
                   <td className="px-3 py-3 border border-slate-200 whitespace-nowrap font-black text-slate-900 text-xs">{fmtCurr(effEligible)}</td>
                   <td className="px-3 py-3 border border-slate-200 whitespace-nowrap font-extrabold text-xs">
                     {effUtilized > 0 ? (
-                      <span className="inline-flex items-center px-1.5 py-0.5 rounded font-black bg-amber-50 text-amber-700 border border-amber-200">
+                      <span className={clsx(
+                        "inline-flex items-center px-1.5 py-0.5 rounded font-black border",
+                        (familyEntry ? isFamilyPhcCompleted(familyEntry) : (r.phcStatus === 'Completed' || r.phcStatus === 'Fully Utilized'))
+                          ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+                          : "bg-amber-50 text-amber-700 border-amber-200"
+                      )}>
                         {fmtCurr(effUtilized)}
                       </span>
                     ) : (

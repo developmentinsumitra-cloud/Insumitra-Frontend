@@ -38,6 +38,7 @@ import { CountryPhoneInput } from '@comps/common/CountryPhoneInput';
 import { DatalistInput } from '@comps/common/DatalistInput';
 import INDIA_STATE_DISTRICTS from '@/constants/india-state-districts.json';
 import { getActiveDropdownOptions, getModuleCustomDropdowns } from '@/utils/masterDropdowns';
+import { useMasterDropdowns } from '@/hooks/useMasterDropdowns';
 import { isFieldRequired as isFieldRequiredHelper, COMPULSORY_RULES_UPDATED_EVENT } from '@/utils/compulsoryFieldRules';
 
 const DEFAULT_EDUCATION_OPTIONS = [
@@ -574,6 +575,7 @@ function MultiSelectBox({
 import { canEditModule, canManageModule } from '../../utils/permissions';
 
 export default function Contacts() {
+  const { getOptions: getDropdownOptions } = useMasterDropdowns();
   const user = useAuthStore(s => s.user);
   const canEditContacts = canEditModule(user, 'contacts');
   const canManageContacts = canManageModule(user, 'contacts');
@@ -946,6 +948,14 @@ export default function Contacts() {
     assignedEmployeeId: '',
     assignedEmployeeIds: [] as string[],
   });
+  const districtOptions = useMemo(() => {
+    const stateDistricts = personalFields.state
+      ? (INDIAN_DISTRICTS_BY_STATE[personalFields.state] || [])
+      : ALL_INDIAN_DISTRICTS;
+    const configuredDistricts = getDropdownOptions('Contact', 'District').map(option => option.value);
+    return [...new Set([...stateDistricts, ...configuredDistricts])]
+      .sort((a, b) => a.localeCompare(b));
+  }, [getDropdownOptions, personalFields.state]);
 
   const [leadInfoFields, setLeadInfoFields] = useState({
     profileType: 'Lead Profile', // 'Lead Profile' | 'Client Profile'
@@ -7420,9 +7430,7 @@ export default function Contacts() {
                         className="input w-full focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 rounded-xl transition-all"
                         placeholder="Select or search District"
                         value={personalFields.district || ''}
-                        options={personalFields.state
-                          ? (INDIAN_DISTRICTS_BY_STATE[personalFields.state] || [])
-                          : ALL_INDIAN_DISTRICTS}
+                        options={districtOptions}
                         onChange={val => setPersonalFields(p => ({ ...p, district: val }))}
                       />
                     </div>

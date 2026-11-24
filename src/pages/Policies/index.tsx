@@ -2566,7 +2566,7 @@ export default function Policies() {
       const actualEnd = yearNo === totalYears ? policyEnd : yearEnd;
       const eligibleStartForYear = effectiveEligibilityStart > yearStart ? effectiveEligibilityStart : yearStart;
       const isEligible = eligibleStartForYear <= actualEnd;
-      const familyMembers = allocations.filter(allocation => {
+      const familyAllocationsForYear = allocations.filter(allocation => {
         if (!allocation.personName?.trim() || !isEligible) return false;
         const eventDate = parseDate(
           allocation.appointmentDate ||
@@ -2577,7 +2577,7 @@ export default function Policies() {
         if (eventDate) return eventDate >= eligibleStartForYear && eventDate <= actualEnd;
         return effectiveEligibilityStart >= yearStart && effectiveEligibilityStart <= actualEnd;
       });
-      const familyUtilizedAmount = familyMembers.reduce(
+      const familyUtilizedAmount = familyAllocationsForYear.reduce(
         (sum, allocation) => sum + Math.max(0, Number(allocation.utilizedAmount) || 0),
         0,
       );
@@ -2587,8 +2587,59 @@ export default function Policies() {
           ? phcActivityDate >= eligibleStartForYear && phcActivityDate <= actualEnd
           : isCurrentYear || (!hasCurrentPolicyYear && yearNo === 1)
       );
+      const primaryPersonName = (
+        phcExtraDetails.insuredPersonName ||
+        insuredPerson ||
+        (selectedContact ? `${selectedContact.firstName || ''} ${selectedContact.lastName || ''}`.trim() : '')
+      ).trim();
+      const primaryUtilizedAmount = Math.max(0, Number(phcExtraDetails.utilizedAmount) || 0);
+      const hasPrimaryPhcActivity = Boolean(
+        primaryUtilizedAmount > 0 ||
+        phcExtraDetails.bookingDate ||
+        phcExtraDetails.appointmentDate ||
+        phcExtraDetails.reportReceivedDate ||
+        phcExtraDetails.settlementDate ||
+        (phcExtraDetails.phcStage && phcExtraDetails.phcStage !== 'TO_CONTACT'),
+      );
+      const familyMembers = [...familyAllocationsForYear];
+      if (primaryPersonName && hasPrimaryPhcActivity && includePrimaryUtilized) {
+        const primaryEntry: PhcFamilyAllocation = {
+          id: `primary-phc-${yearNo}`,
+          personName: primaryPersonName,
+          amount: primaryUtilizedAmount,
+          utilizedAmount: primaryUtilizedAmount,
+          bookingDate: phcExtraDetails.bookingDate,
+          appointmentDate: phcExtraDetails.appointmentDate,
+          centreName: phcExtraDetails.centreName,
+          centreCity: phcExtraDetails.centreCity,
+          reimbursementCashless: phcExtraDetails.reimbursementCashless,
+          reportReceivedDate: phcExtraDetails.reportReceivedDate,
+          reportBillReceivedDate: phcExtraDetails.reportBillReceivedDate,
+          reportBillSubmittedDate: phcExtraDetails.reportBillSubmittedDate,
+          settlementDate: phcExtraDetails.settlementDate,
+          phcStage: phcExtraDetails.phcStage,
+          claimSettled: false,
+          children: [],
+        };
+        const normalizedPrimaryName = primaryPersonName.trim().replace(/\s+/g, ' ').toLowerCase();
+        const existingIndex = familyMembers.findIndex(
+          member => member.personName.trim().replace(/\s+/g, ' ').toLowerCase() === normalizedPrimaryName,
+        );
+        if (existingIndex >= 0) {
+          const existing = familyMembers[existingIndex];
+          familyMembers[existingIndex] = {
+            ...existing,
+            utilizedAmount: (Number(existing.utilizedAmount) || 0) + primaryUtilizedAmount,
+            bookingDate: existing.bookingDate || primaryEntry.bookingDate,
+            appointmentDate: existing.appointmentDate || primaryEntry.appointmentDate,
+            phcStage: existing.phcStage === 'TO_CONTACT' ? primaryEntry.phcStage : existing.phcStage,
+          };
+        } else {
+          familyMembers.unshift(primaryEntry);
+        }
+      }
       const utilizedAmount = familyUtilizedAmount + (
-        includePrimaryUtilized ? Math.max(0, Number(phcExtraDetails.utilizedAmount) || 0) : 0
+        includePrimaryUtilized ? primaryUtilizedAmount : 0
       );
       years.push({ yearNo, startDate: yearStart, endDate: actualEnd, isEligible, familyMembers, utilizedAmount });
     }
