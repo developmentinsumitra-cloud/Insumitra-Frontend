@@ -6,7 +6,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { employeesService } from '@api/index';
 import DataTable, { Column } from '@comps/common/DataTable';
 import Modal from '@comps/common/Modal';
-import { useForm } from 'react-hook-form';
+import { Controller, useForm } from 'react-hook-form';
 import { z } from 'zod';
 import { zodResolver } from '@hookform/resolvers/zod';
 import toast from 'react-hot-toast';
@@ -166,7 +166,7 @@ export default function Employees() {
   }, [sortedEmployees, page]);
 
   const { register: regEdit, handleSubmit: handleEditSubmit, reset: resetEdit,
-          setValue: setEditVal, formState: { errors: editErrors } } = useForm<EditForm>({
+          setValue: setEditVal, control: editControl, formState: { errors: editErrors } } = useForm<EditForm>({
     resolver: zodResolver(editSchema),
   });
 
@@ -576,7 +576,11 @@ export default function Employees() {
 
                     <div>
                       <label className="label">Date of Joining</label>
-                      <DatePicker {...regEdit('dateOfJoining')} className="input" />
+                      <Controller
+                        control={editControl}
+                        name="dateOfJoining"
+                        render={({ field }) => <DatePicker {...field} className="input" />}
+                      />
                     </div>
 
                     <div>

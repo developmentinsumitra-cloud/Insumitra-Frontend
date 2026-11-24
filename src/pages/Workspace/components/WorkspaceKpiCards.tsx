@@ -5,11 +5,13 @@ import { TrendingUp, ListTodo, Shield, FileText, Users, ArrowRight, DollarSign }
 interface WorkspaceKpiCardsProps {
   activeCounts: any;
   taskListFromApi: any[];
+  contactsCountError?: boolean;
 }
 
 export default function WorkspaceKpiCards({
   activeCounts,
-  taskListFromApi
+  taskListFromApi,
+  contactsCountError = false,
 }: WorkspaceKpiCardsProps) {
   // Using mock data for missing endpoints as per user request
   const leadsAssigned = activeCounts?.leads || 0;
@@ -49,7 +51,12 @@ export default function WorkspaceKpiCards({
           <ArrowRight className="w-4 h-4 text-gray-300 group-hover:text-purple-600 group-hover:translate-x-0.5 transition-all" />
         </div>
         <div>
-          <p className="text-2xl font-bold text-gray-800">{contacts}</p>
+          <p
+            className="text-2xl font-bold text-gray-800"
+            title={contactsCountError ? 'Unable to load Contacts list count' : undefined}
+          >
+            {contactsCountError ? 'Unavailable' : contacts}
+          </p>
           <p className="text-[11px] text-gray-500 font-medium mt-0.5">My Contacts</p>
         </div>
       </Link>

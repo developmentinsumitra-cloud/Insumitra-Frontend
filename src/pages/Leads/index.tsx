@@ -2138,42 +2138,7 @@ export default function Leads() {
       return timeB - timeA;
     });
 
-    const groupedLeads = new Map<string, any>();
-    matchingLeads.forEach((lead: any) => {
-      const phone = String(lead.contact?.phone || '').replace(/\D/g, '');
-      const contactKey = lead.contactId || lead.contact?.id || (phone ? `phone:${phone}` : `lead:${lead.id}`);
-      const existing = groupedLeads.get(contactKey);
-      const products = lead.plan?.name
-        ? [lead.plan.name]
-        : (lead.interests || []).filter((interest: string) => Boolean(interest?.trim()));
-
-      if (!existing) {
-        groupedLeads.set(contactKey, {
-          ...lead,
-          relatedLeads: [lead],
-          relatedLeadCount: 1,
-          displayProducts: [...new Set(products)],
-          relatedStages: lead.uiStage ? [lead.uiStage] : [],
-        });
-        return;
-      }
-
-      existing.relatedLeads.push(lead);
-      existing.relatedLeadCount += 1;
-      existing.displayProducts = [...new Set([...existing.displayProducts, ...products])];
-      if (lead.uiStage && !existing.relatedStages.includes(lead.uiStage)) {
-        existing.relatedStages.push(lead.uiStage);
-      }
-
-      const currentUpdatedAt = existing.updatedAt ? new Date(existing.updatedAt).getTime() : 0;
-      const leadUpdatedAt = lead.updatedAt ? new Date(lead.updatedAt).getTime() : 0;
-      if (leadUpdatedAt > currentUpdatedAt) {
-        const { relatedLeads, relatedLeadCount, displayProducts, relatedStages } = existing;
-        Object.assign(existing, lead, { relatedLeads, relatedLeadCount, displayProducts, relatedStages });
-      }
-    });
-
-    return Array.from(groupedLeads.values());
+    return matchingLeads;
   }, [leadsFlat, search, filterPlans, filterEmployee, filterStatuses, filterStages, filterTypes, filterDateFrom, filterDateTo, filterEnquiryDateFrom, filterEnquiryDateTo, filterFinalSellsFrom, filterFinalSellsTo, filterExpectedPremiumMin, filterExpectedPremiumMax, filterLeadSource, selectedQuickFilters]);
 
   // Sorted leads for table

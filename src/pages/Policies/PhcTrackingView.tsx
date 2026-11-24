@@ -26,6 +26,17 @@ interface InsuredPerson {
   phcCount: number;
 }
 
+interface PhcBenefitPeriod {
+  periodNo: number;
+  label: string;
+  startDate: string;
+  endDate: string;
+  eligibleAmount: number;
+  utilizedAmount: number;
+  balanceAmount: number;
+  phcCount: number;
+}
+
 interface PhcYearRecord {
   yearNo: number;
   label: string;
@@ -40,6 +51,7 @@ interface PhcYearRecord {
   daysRemaining?: number;
   insuredPersons: InsuredPerson[];
   allCheckups?: any[];
+  benefitPeriods?: PhcBenefitPeriod[];
 }
 
 interface PhcPolicyRecord {
@@ -78,6 +90,9 @@ interface PhcPolicyRecord {
 
 // ── Helpers ──────────────────────────────────────────────────────────────────────
 const fmtCurr = (n: number) => `₹${Number(n).toLocaleString('en-IN')}`;
+const isFamilyPhcInProgress = (entry: any) =>
+  String(entry?.id || '').startsWith('family-phc-') &&
+  !/completed/i.test(String(entry?.status || ''));
 
 const STATUS_CFG: Record<PhcStatus, { bg: string; text: string; border: string; dot: string }> = {
   'Interested':       { bg: 'bg-amber-50',   text: 'text-amber-700',   border: 'border-amber-200',   dot: 'bg-amber-500' },
@@ -119,6 +134,7 @@ function PhcYearCard({
 }) {
   const [selPerson, setSelPerson] = useState('All Family Members');
   const [entries, setEntries] = useState<PhcEntryState[]>([{ id: Date.now(), status: 'Unutilised' }]);
+  const [expandedTransactionEntries, setExpandedTransactionEntries] = useState<Set<string>>(() => new Set());
   const pct = yr.eligibleAmount > 0 ? Math.round((yr.utilizedAmount / yr.eligibleAmount) * 100) : 0;
   const persons = selPerson === 'All Family Members' ? yr.insuredPersons : yr.insuredPersons.filter(p => p.name === selPerson);
 
@@ -174,6 +190,39 @@ function PhcYearCard({
             <p className="text-[9px] font-bold text-violet-500 uppercase tracking-wide">Count</p>
             <p className="text-[11px] font-extrabold text-violet-800 mt-0.5">{yr.phcCount}</p>
           </div>
+        </div>
+
+        <div className="space-y-2">
+          <h4 className="text-[10px] font-black text-slate-600 uppercase tracking-wide">PHC Benefit Periods</h4>
+          {yr.benefitPeriods?.length ? (
+            <div className="space-y-2">
+              {yr.benefitPeriods.map(period => (
+                <div key={period.periodNo} className="grid grid-cols-1 sm:grid-cols-5 gap-2 items-center rounded-lg border border-slate-200 bg-slate-50/70 p-2.5 text-center">
+                  <div className="sm:col-span-2 text-left">
+                    <p className="text-[10px] font-extrabold text-slate-700">{period.label}</p>
+                    <p className="text-[10px] font-semibold text-slate-500">{period.startDate} – {period.endDate}</p>
+                    <p className="text-[9px] font-semibold text-slate-400">{period.phcCount} PHC {period.phcCount === 1 ? 'visit' : 'visits'}</p>
+                  </div>
+                  <div>
+                    <p className="text-[9px] font-bold text-slate-400 uppercase">Eligible</p>
+                    <p className="text-[10px] font-extrabold text-slate-800">{fmtCurr(period.eligibleAmount)}</p>
+                  </div>
+                  <div>
+                    <p className="text-[9px] font-bold text-blue-500 uppercase">Utilized</p>
+                    <p className="text-[10px] font-extrabold text-blue-800">{fmtCurr(period.utilizedAmount)}</p>
+                  </div>
+                  <div>
+                    <p className="text-[9px] font-bold text-emerald-500 uppercase">Balance</p>
+                    <p className="text-[10px] font-extrabold text-emerald-800">{fmtCurr(period.balanceAmount)}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="rounded-lg border border-slate-100 bg-slate-50 px-3 py-2 text-[10px] font-semibold text-slate-500">
+              No PHC benefit period is available during this policy year.
+            </p>
+          )}
         </div>
 
         {/* Insured Person Dropdown */}
@@ -239,16 +288,32 @@ function PhcYearCard({
                 <div className="space-y-3">
                   {groupEntries.map((entry: any, index: number) => {
                     const globalIdx = index + 1;
+                    const entryKey = String(entry.id || `${groupStatus}-${globalIdx}`);
+                    const isEntryExpanded = expandedTransactionEntries.has(entryKey);
                     return (
-                      <div key={entry.id} className="bg-slate-50 p-3 rounded-xl border border-slate-200/80 space-y-3 relative group shadow-sm">
-                        <div className="flex items-center justify-between mb-1 pr-6">
-                          <div className="flex flex-wrap items-center gap-2">
+                      <div key={entryKey} className="bg-slate-50 rounded-xl border border-slate-200/80 relative group shadow-sm">
+                        <button
+                          type="button"
+                          aria-expanded={isEntryExpanded}
+                          onClick={() => setExpandedTransactionEntries(current => {
+                            const next = new Set(current);
+                            if (next.has(entryKey)) next.delete(entryKey);
+                            else next.add(entryKey);
+                            return next;
+                          })}
+                          className="w-full flex items-center justify-between gap-3 p-3 text-left cursor-pointer"
+                        >
+                          <span className="flex flex-wrap items-center gap-2">
                             <span className="bg-blue-600 text-white text-[9px] font-black px-1.5 py-0.5 rounded uppercase tracking-wider">
                               Entry #{globalIdx}
                             </span>
-                          </div>
-                        </div>
+                            <span className="text-xs font-bold text-slate-700">{entry.member?.name || 'Self'}</span>
+                            <span className="text-[10px] font-semibold text-slate-500">{entry.status || groupStatus}</span>
+                          </span>
+                          {isEntryExpanded ? <ChevronUp size={14} className="shrink-0 text-slate-500" /> : <ChevronDown size={14} className="shrink-0 text-slate-500" />}
+                        </button>
 
+                        {isEntryExpanded && <div className="px-3 pb-3 space-y-3">
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                           <div>
                             <label className="block text-[9px] font-bold text-slate-400 uppercase tracking-wide mb-0.5">Insured Person</label>
@@ -317,6 +382,7 @@ function PhcYearCard({
                             </p>
                           </div>
                         </div>
+                        </div>}
                       </div>
                     );
                   })}
@@ -440,6 +506,77 @@ function enrichPhcRecord(r: PhcPolicyRecord, polNotes?: string): PhcPolicyRecord
         ? r.balanceAmount
         : Math.max(0, eligibleAmount - utilizedAmount));
 
+  const normalizePersonName = (name: string) =>
+    name.replace(/\s*\([^)]*\)\s*$/, '').trim().toLowerCase();
+  const normalizePhcDate = (value: unknown) => {
+    if (!value) return '';
+    const text = String(value).trim();
+    const localDate = text.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+    if (localDate) {
+      return `${localDate[3]}-${localDate[2].padStart(2, '0')}-${localDate[1].padStart(2, '0')}`;
+    }
+    const isoDate = text.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (isoDate) return `${isoDate[1]}-${isoDate[2]}-${isoDate[3]}`;
+    const parsedDate = new Date(text);
+    return Number.isNaN(parsedDate.getTime()) ? text : parsedDate.toISOString().slice(0, 10);
+  };
+  const flattenFamilyAllocations = (allocations: any[], result: any[] = []): any[] => {
+    allocations.forEach(allocation => {
+      if (!allocation || typeof allocation !== 'object') return;
+      result.push(allocation);
+      if (Array.isArray(allocation.children)) flattenFamilyAllocations(allocation.children, result);
+    });
+    return result;
+  };
+  const familyAllocations = flattenFamilyAllocations(
+    Array.isArray(extra?.phcFamilyAllocations) ? extra.phcFamilyAllocations : [],
+  ).filter(allocation => String(allocation.personName || '').trim());
+  const familyCheckups = familyAllocations.map((allocation, index) => {
+    const name = String(allocation.personName).trim();
+    const nameKey = normalizePersonName(name);
+    const connectedPerson = (extra?.connectedPersons || []).find(
+      (person: any) => normalizePersonName(String(person.name || '')) === nameKey,
+    );
+    const relationship = connectedPerson?.relationship || 'Family Member';
+    const allocationUtilized = Math.max(0, Number(allocation.utilizedAmount) || 0);
+    const hasActivity = Boolean(
+      allocation.bookingDate ||
+      allocation.appointmentDate ||
+      allocationUtilized > 0 ||
+      allocation.reportReceivedDate ||
+      allocation.settlementDate ||
+      allocation.claimSettled ||
+      (allocation.phcStage && allocation.phcStage !== 'TO_CONTACT'),
+    );
+
+    const stage = String(allocation.phcStage || '').trim();
+    const isCompleted = Boolean(
+      allocation.claimSettled ||
+      stage.toUpperCase().includes('COMPLET'),
+    );
+    const displayStage = stage === 'TO_CONTACT'
+      ? 'To Contact'
+      : stage === 'PROCESS_COMPLETED'
+        ? 'Process Completed'
+        : stage;
+    return {
+      id: `family-phc-${r.id}-${allocation.id || index}`,
+      status: isCompleted
+        ? 'Test Completed'
+        : (displayStage || (allocation.appointmentDate ? 'Appointment Scheduled' : (allocation.bookingDate ? 'Test Booked' : 'Allocated'))),
+      bookingDate: allocation.bookingDate || null,
+      scheduledAt: allocation.appointmentDate || null,
+      completedAt: allocation.reportReceivedDate || allocation.settlementDate || null,
+      centreName: allocation.centreName || 'N/A',
+      centreCity: allocation.centreCity || 'N/A',
+      utilizedAmount: allocationUtilized,
+      allocatedAmount: Math.max(0, Number(allocation.amount) || 0),
+      reimbursementType: allocation.reimbursementCashless || 'N/A',
+      member: { name, relationship },
+      countsAsPhc: hasActivity,
+    };
+  });
+
   // Parse explicit PHC status from extra notes or policy notes
   const resolveStatusFromStr = (statusStr?: string | null): PhcStatus | null => {
     if (!statusStr) return null;
@@ -503,17 +640,28 @@ function enrichPhcRecord(r: PhcPolicyRecord, polNotes?: string): PhcPolicyRecord
     } as PhcYearRecord
   ];
 
+  const currentYearIndex = rawYears.findIndex(yr => yr.isCurrent);
+  const familyYearIndex = currentYearIndex >= 0 ? currentYearIndex : 0;
+  const rawPhcFrequency = String(extra?.phcFrequency || r.phcFrequency || 'Annual')
+    .toUpperCase()
+    .replace(/[^A-Z]/g, '');
+  const phcFrequency = rawPhcFrequency.includes('ONCETENURE')
+    ? 'Once Per Tenure'
+    : rawPhcFrequency.includes('BIANNUAL')
+      ? 'Bi-Annual'
+      : 'Annual';
   const years: PhcYearRecord[] = rawYears.map((yr, idx) => {
-    const yrEligible = yr.eligibleAmount > 0 ? yr.eligibleAmount : eligibleAmount;
-    const yrUtilized = yr.utilizedAmount !== undefined && yr.utilizedAmount !== null
-      ? (yr.utilizedAmount === 0 && (idx === 0 || yr.isCurrent) && utilizedAmount > 0 ? utilizedAmount : yr.utilizedAmount)
+    const isCurrentYear = idx === (currentYearIndex >= 0 ? currentYearIndex : 0);
+    const yrEligible = Number.isFinite(yr.eligibleAmount) ? yr.eligibleAmount : eligibleAmount;
+    const yrUtilized = Number.isFinite(yr.utilizedAmount)
+      ? yr.utilizedAmount
       : (idx === 0 || yr.isCurrent ? utilizedAmount : 0);
-    const yrBalance = (idx === 0 && balanceAmount !== undefined && balanceAmount >= 0) ? balanceAmount : Math.max(0, yrEligible - yrUtilized);
+    const yrBalance = Number.isFinite(yr.balanceAmount)
+      ? yr.balanceAmount
+      : Math.max(0, yrEligible - yrUtilized);
 
     let yrStatus = yr.status;
-    if (explicitStatus && (idx === 0 || yr.isCurrent)) {
-      yrStatus = explicitStatus;
-    } else if (!yrStatus || yrStatus === 'Not Applicable Yet' || (yrStatus as any) === 'Not Applicable') {
+    if (!yrStatus || yrStatus === 'Not Applicable Yet' || (yrStatus as any) === 'Not Applicable') {
       if (yrUtilized >= yrEligible && yrEligible > 0) {
         yrStatus = 'Fully Utilized';
       } else if (yrUtilized > 0) {
@@ -526,8 +674,47 @@ function enrichPhcRecord(r: PhcPolicyRecord, polNotes?: string): PhcPolicyRecord
     const yrPersons = yr.insuredPersons && yr.insuredPersons.length > 0
       ? yr.insuredPersons
       : (idx === 0 || yr.isCurrent ? defaultInsuredPersons : []);
+    const currentYearPersons = [...yrPersons];
+    const yearStartKey = normalizePhcDate(yr.startDate);
+    const yearEndKey = normalizePhcDate(yr.endDate);
+    const yearFamilyCheckups = familyCheckups.filter((entry: any) => {
+      const eventDateKey = normalizePhcDate(entry.completedAt || entry.scheduledAt || entry.bookingDate);
+      if (!eventDateKey) return idx === familyYearIndex;
+      return eventDateKey >= yearStartKey && eventDateKey <= yearEndKey;
+    });
+    const familyPersonsByName = new Map<string, InsuredPerson>();
+    yearFamilyCheckups.forEach((entry: any) => {
+      const nameKey = normalizePersonName(String(entry.member?.name || ''));
+      const existingPerson = familyPersonsByName.get(nameKey);
+      const utilized = Number(entry.utilizedAmount) || 0;
+      if (existingPerson) {
+        existingPerson.utilizedAmount += utilized;
+        existingPerson.phcCount += entry.countsAsPhc ? 1 : 0;
+      } else {
+        familyPersonsByName.set(nameKey, {
+          name: entry.member?.name || 'Family Member',
+          relationship: entry.member?.relationship || 'Family Member',
+          utilizedAmount: utilized,
+          phcCount: entry.countsAsPhc ? 1 : 0,
+        });
+      }
+    });
+    familyPersonsByName.forEach(familyPerson => {
+      const existingIndex = currentYearPersons.findIndex(
+        person => normalizePersonName(person.name) === normalizePersonName(familyPerson.name),
+      );
+      if (existingIndex >= 0) {
+        currentYearPersons[existingIndex] = {
+          ...currentYearPersons[existingIndex],
+          utilizedAmount: Math.max(currentYearPersons[existingIndex].utilizedAmount, familyPerson.utilizedAmount),
+          phcCount: Math.max(currentYearPersons[existingIndex].phcCount, familyPerson.phcCount),
+        };
+      } else {
+        currentYearPersons.push(familyPerson);
+      }
+    });
 
-    const yrCheckups = (yr.allCheckups && yr.allCheckups.length > 0)
+    const baseCheckups = (yr.allCheckups && yr.allCheckups.length > 0)
       ? yr.allCheckups
       : ((idx === 0 || yr.isCurrent) && (yrUtilized > 0 || extra?.phcBookingDate || extra?.phcAppointmentDate || extra?.phcCentreName)
         ? [{
@@ -546,16 +733,51 @@ function enrichPhcRecord(r: PhcPolicyRecord, polNotes?: string): PhcPolicyRecord
             }
           }]
         : []);
+    const checkupsWithoutFamilyDuplicates = baseCheckups.filter((entry: any) => !yearFamilyCheckups.some((allocation: any) => {
+      const sameMember = normalizePersonName(String(entry.member?.name || '')) ===
+        normalizePersonName(String(allocation.member?.name || ''));
+      if (!sameMember) return false;
+      const entryBookingDate = normalizePhcDate(entry.bookingDate);
+      const entryAppointmentDate = normalizePhcDate(entry.scheduledAt);
+      const allocationBookingDate = normalizePhcDate(allocation.bookingDate);
+      const allocationAppointmentDate = normalizePhcDate(allocation.scheduledAt);
+      return Boolean(
+        (entryBookingDate && allocationBookingDate && entryBookingDate === allocationBookingDate) ||
+        (entryAppointmentDate && allocationAppointmentDate && entryAppointmentDate === allocationAppointmentDate),
+      );
+    }));
+    const yrCheckups = [
+      ...checkupsWithoutFamilyDuplicates,
+      ...yearFamilyCheckups.filter((entry: any) => !checkupsWithoutFamilyDuplicates.some((existing: any) => existing.id === entry.id)),
+    ];
+    const countedCheckups = yrCheckups.filter((entry: any) =>
+      !String(entry.id || '').startsWith('family-phc-') || entry.countsAsPhc,
+    );
+    const checkupsUtilizedAmount = countedCheckups.reduce(
+      (sum: number, entry: any) => sum + Math.max(0, Number(entry.utilizedAmount) || 0),
+      0,
+    );
+    const yearUtilizedAmount = Math.max(yrUtilized, checkupsUtilizedAmount);
+    const updatedBenefitPeriods = yr.benefitPeriods?.map(period => {
+      const periodStartKey = normalizePhcDate(period.startDate);
+      const periodEndKey = normalizePhcDate(period.endDate);
+      const periodCheckups = countedCheckups.filter((entry: any) => {
+        const eventDateKey = normalizePhcDate(entry.completedAt || entry.scheduledAt || entry.bookingDate || entry.createdAt);
+        return eventDateKey && eventDateKey >= periodStartKey && eventDateKey <= periodEndKey;
+      });
+      return { ...period, phcCount: periodCheckups.length };
+    });
 
     return {
       ...yr,
       status: yrStatus,
       eligibleAmount: yrEligible,
-      utilizedAmount: yrUtilized,
+      utilizedAmount: yearUtilizedAmount,
       balanceAmount: yrBalance,
-      phcCount: yr.phcCount || (yrUtilized > 0 ? 1 : 0),
-      insuredPersons: yrPersons,
+      phcCount: countedCheckups.length || (yrUtilized > 0 ? 1 : 0),
+      insuredPersons: currentYearPersons,
       allCheckups: yrCheckups,
+      benefitPeriods: updatedBenefitPeriods,
     };
   });
 
@@ -566,7 +788,7 @@ function enrichPhcRecord(r: PhcPolicyRecord, polNotes?: string): PhcPolicyRecord
     balanceAmount,
     totalYears,
     phcStatus,
-    phcFrequency: extra?.phcFrequency || r.phcFrequency || 'Annual',
+    phcFrequency,
     years,
     insuredPersons: years.find(y => y.isCurrent)?.insuredPersons || years[0]?.insuredPersons || defaultInsuredPersons,
     allCheckups: years.flatMap(y => y.allCheckups || []),
@@ -599,7 +821,7 @@ function PhcDrawer({ record: rawRecord, onClose, onViewDetails, onViewHistory, p
 
   const totalPhcAmount = useMemo(() => {
     const sumYears = record.years.reduce((s, yr) => s + (yr.eligibleAmount || 0), 0);
-    return sumYears > 0 ? sumYears : (record.eligibleAmount * (record.totalYears || 1));
+    return record.years.length > 0 ? sumYears : (record.eligibleAmount * (record.totalYears || 1));
   }, [record]);
 
   return (
@@ -862,7 +1084,11 @@ export default function PhcTrackingView() {
     }
 
     if (activeTab === 'due-this-month') list = list.filter(p => p.phcStatus !== 'Completed' && p.phcStatus !== 'Fully Utilized' && (p.phcStatus === 'Due This Month' || (p.daysRemaining <= 30 && p.daysRemaining > 0)));
-    else if (activeTab === 'upcoming') list = list.filter(p => p.phcStatus !== 'Completed' && p.phcStatus !== 'Fully Utilized' && (p.phcStatus === 'Upcoming' || p.daysRemaining > 30));
+    else if (activeTab === 'upcoming') list = list.filter(p => {
+      const hasFamilyPhcEntry = (p.allCheckups || []).some(isFamilyPhcInProgress);
+      return hasFamilyPhcEntry ||
+        (p.phcStatus !== 'Completed' && p.phcStatus !== 'Fully Utilized' && (p.phcStatus === 'Upcoming' || p.daysRemaining > 30));
+    });
     else if (activeTab === 'completed') list = list.filter(p => p.phcStatus === 'Completed' || p.phcStatus === 'Fully Utilized');
     
     if (policyTypeFilter !== 'All') {
@@ -876,7 +1102,10 @@ export default function PhcTrackingView() {
     
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase();
-      list = list.filter(p => p.policyNo.toLowerCase().includes(q) || p.customerName.toLowerCase().includes(q) || p.planName.toLowerCase().includes(q) || p.customerPhone.includes(q));
+      list = list.filter(p => p.policyNo.toLowerCase().includes(q) || p.customerName.toLowerCase().includes(q) || p.planName.toLowerCase().includes(q) || p.customerPhone.includes(q) ||
+        (activeTab === 'upcoming' && (p.allCheckups || []).some((entry: any) =>
+          isFamilyPhcInProgress(entry) && String(entry.member?.name || '').toLowerCase().includes(q),
+        )));
     }
     return list;
   }, [
@@ -1058,10 +1287,23 @@ export default function PhcTrackingView() {
     printWindow.document.close();
   };
 
+  const tableRows = useMemo(() => sortedFilteredData.flatMap(record => {
+    if (activeTab !== 'upcoming') return [{ record, id: record.id, familyEntry: null as any }];
+    const familyEntries = (record.allCheckups || []).filter(isFamilyPhcInProgress);
+    return [
+      { record, id: record.id, familyEntry: null as any },
+      ...familyEntries.map((familyEntry: any) => ({
+        record,
+        id: `${record.id}-${familyEntry.id}`,
+        familyEntry,
+      })),
+    ];
+  }), [activeTab, sortedFilteredData]);
+
   const paginatedData = useMemo(() => {
     const start = (currentPage - 1) * rowsPerPage;
-    return sortedFilteredData.slice(start, start + rowsPerPage);
-  }, [sortedFilteredData, currentPage, rowsPerPage]);
+    return tableRows.slice(start, start + rowsPerPage);
+  }, [tableRows, currentPage, rowsPerPage]);
 
   const dependenciesData = useMemo(() => {
     const depsMap = new Map<string, any>();
@@ -1101,7 +1343,7 @@ export default function PhcTrackingView() {
     return dependenciesData.slice(start, start + rowsPerPage);
   }, [dependenciesData, currentPage, rowsPerPage]);
 
-  const totalRows = (activeTab as string) === 'dependencies' ? dependenciesData.length : sortedFilteredData.length;
+  const totalRows = (activeTab as string) === 'dependencies' ? dependenciesData.length : tableRows.length;
   const totalPages = Math.max(1, Math.ceil(totalRows / rowsPerPage));
 
   useEffect(() => {
@@ -1518,25 +1760,32 @@ export default function PhcTrackingView() {
                 </tr>
               ) : paginatedData.length === 0 ? (
                 <tr><td colSpan={17} className="px-5 py-12 text-center text-slate-400 font-semibold">No PHC policies match the selected filters.</td></tr>
-              ) : paginatedData.map((r, idx) => {
+              ) : paginatedData.map(({ record: r, id: rowId, familyEntry }, idx) => {
                 const resolvedCompanyType = (
                   r.companyType ||
                   (r.planName?.toLowerCase().includes('life') || r.planName?.toLowerCase().includes('jeevan') ? 'LIFE' : 'HEALTH')
                 ).toUpperCase();
-                const effEligible = r.eligibleAmount > 0 ? r.eligibleAmount : (r.years?.[0]?.eligibleAmount || 5000);
-                const effUtilized = (r.utilizedAmount !== undefined && r.utilizedAmount !== null && r.utilizedAmount > 0)
+                const familyEligible = Number(familyEntry?.allocatedAmount) || 0;
+                const effEligible = familyEntry && familyEligible > 0
+                  ? familyEligible
+                  : r.eligibleAmount > 0 ? r.eligibleAmount : (r.years?.[0]?.eligibleAmount || 5000);
+                const effUtilized = familyEntry
+                  ? Number(familyEntry.utilizedAmount) || 0
+                  : (r.utilizedAmount !== undefined && r.utilizedAmount !== null && r.utilizedAmount > 0)
                   ? r.utilizedAmount
                   : (r.years?.reduce((s: number, y: any) => s + (y.utilizedAmount || 0), 0) || r.utilizedAmount || 0);
-                const effBalance = (r.balanceAmount !== undefined && r.balanceAmount !== null && r.balanceAmount >= 0)
+                const effBalance = familyEntry
+                  ? Math.max(0, effEligible - effUtilized)
+                  : (r.balanceAmount !== undefined && r.balanceAmount !== null && r.balanceAmount >= 0)
                   ? r.balanceAmount
                   : Math.max(0, effEligible - effUtilized);
 
                 return (
-                <tr key={r.id} onClick={() => setActiveModal({ type: 'phc', record: r })} className={clsx(idx % 2 === 1 ? 'bg-slate-50/80' : 'bg-white')}>
+                <tr key={rowId} onClick={() => setActiveModal({ type: 'phc', record: r })} className={clsx(idx % 2 === 1 ? 'bg-slate-50/80' : 'bg-white')}>
                   <td className="px-3 py-3 border border-slate-200 text-center font-bold text-slate-500">{(currentPage - 1) * rowsPerPage + idx + 1}</td>
                   <td className="px-3 py-3 border border-slate-200">
                     <span className="font-extrabold text-slate-900 text-xs transition-colors whitespace-nowrap">
-                      {r.customerName}
+                      {familyEntry?.member?.name || r.customerName}
                     </span>
                   </td>
                   <td className="px-3 py-3 border border-slate-200 whitespace-nowrap font-bold text-slate-800 text-xs">{r.customerPhone || 'N/A'}</td>
@@ -1573,7 +1822,11 @@ export default function PhcTrackingView() {
                     <p className="text-slate-800 font-bold text-xs">{r.phcYearEndDate || 'N/A'}</p>
                     {r.daysRemaining > 0 && <p className={clsx('text-[10px] font-bold', r.daysRemaining <= 30 ? 'text-rose-500' : 'text-slate-400')}>{r.daysRemaining} Days Remaining</p>}
                   </td>
-                  <td className="px-3 py-3 border border-slate-200 whitespace-nowrap"><StatusBadge status={r.phcStatus} /></td>
+                  <td className="px-3 py-3 border border-slate-200 whitespace-nowrap">
+                    {familyEntry
+                      ? <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-black border bg-amber-50 text-amber-700 border-amber-200">{familyEntry.status || 'Under Process'}</span>
+                      : <StatusBadge status={r.phcStatus} />}
+                  </td>
                   <td className="px-3 py-3 border border-slate-200 whitespace-nowrap font-black text-slate-900 text-xs">{fmtCurr(effEligible)}</td>
                   <td className="px-3 py-3 border border-slate-200 whitespace-nowrap font-extrabold text-xs">
                     {effUtilized > 0 ? (

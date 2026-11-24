@@ -10,7 +10,7 @@ import {
   User, ShieldCheck
 } from 'lucide-react';
 import Modal from '@comps/common/Modal';
-import { useForm } from 'react-hook-form';
+import { Controller, useForm } from 'react-hook-form';
 import { z } from 'zod';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { format } from 'date-fns';
@@ -605,7 +605,11 @@ export default function EmployeeDetail() {
 
                   <div>
                     <label className="label">Date of Joining</label>
-                    <DatePicker {...editForm.register('dateOfJoining')} className="input font-semibold" />
+                    <Controller
+                      control={editForm.control}
+                      name="dateOfJoining"
+                      render={({ field }) => <DatePicker {...field} className="input font-semibold" />}
+                    />
                   </div>
 
                   <div>

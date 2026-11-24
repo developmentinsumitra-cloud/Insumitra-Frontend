@@ -83,6 +83,9 @@ const INDIAN_DISTRICTS_BY_STATE = Object.fromEntries(
     [...districts].sort((a, b) => a.localeCompare(b)),
   ]),
 );
+const ALL_INDIAN_DISTRICTS = Array.from(
+  new Set(INDIA_STATE_DISTRICTS.flatMap(({ districts }) => districts)),
+).sort((a, b) => a.localeCompare(b));
 
 const CONTACT_IMPORT_COLUMNS: ImportFormatColumn[] = [
   { name: 'Sr. No.', requirement: 'Optional; row serial number.' },
@@ -583,6 +586,8 @@ export default function Contacts() {
   const openedFamilyRef = useRef<string | null>(null);
   const openedDirectContactRef = useRef<string | null>(null);
   const isDirectPolicyModalRef = useRef(false);
+  const isLeadSubmitInProgressRef = useRef(false);
+  const [isLeadSubmitSaving, setIsLeadSubmitSaving] = useState(false);
   const [activeTab, setActiveTab] = useState<'contacts' | 'customers' | 'birthdays'>('contacts');
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState(() => searchParams.get('search') || searchParams.get('q') || '');
@@ -1648,11 +1653,76 @@ export default function Contacts() {
 
   const contactsListArray = useMemo(() => {
     if (!contactsRes) return [];
-    if (Array.isArray(contactsRes.data)) return contactsRes.data;
-    if (Array.isArray(contactsRes.data?.data)) return contactsRes.data.data;
-    if (Array.isArray(contactsRes)) return contactsRes;
-    return [];
-  }, [contactsRes]);
+    const contacts = Array.isArray(contactsRes.data)
+      ? contactsRes.data
+      : Array.isArray(contactsRes.data?.data)
+        ? contactsRes.data.data
+        : Array.isArray(contactsRes)
+          ? contactsRes
+          : [];
+    const contactsById = new Map<string, any>();
+    contacts.forEach((contact: any) => {
+      if (contact.id) contactsById.set(contact.id, contact);
+    });
+
+    if (user?.role === 'EMPLOYEE') {
+      contacts.forEach((primaryContact: any) => {
+        const parentEmployeeIds = [
+          ...(Array.isArray(primaryContact.assignedEmployeeIds) ? primaryContact.assignedEmployeeIds : []),
+          primaryContact.assignedEmployeeId,
+        ].filter(Boolean);
+        if (parentEmployeeIds.length === 0 || !Array.isArray(primaryContact.relationships)) return;
+
+        primaryContact.relationships.forEach((relationship: any) => {
+          const familyContact = relationship.relatedContact;
+          if (!familyContact?.id || familyContact.id === primaryContact.id) return;
+
+          const existing = contactsById.get(familyContact.id) || familyContact;
+          const relatedTo = Array.isArray(existing.relatedTo) ? existing.relatedTo : [];
+          contactsById.set(familyContact.id, {
+            ...familyContact,
+            ...existing,
+            assignedEmployeeId: existing.assignedEmployeeId || primaryContact.assignedEmployeeId || parentEmployeeIds[0],
+            assignedEmployeeIds: Array.from(new Set([
+              ...(Array.isArray(existing.assignedEmployeeIds) ? existing.assignedEmployeeIds : []),
+              ...parentEmployeeIds,
+            ])),
+            relatedTo: [
+              ...relatedTo,
+              {
+                primaryContact: {
+                  id: primaryContact.id,
+                  assignedEmployeeId: primaryContact.assignedEmployeeId,
+                  assignedEmployeeIds: primaryContact.assignedEmployeeIds || [],
+                },
+              },
+            ],
+          });
+        });
+      });
+    }
+
+    contactsById.forEach((contact, id) => {
+      const relatedEmployeeIds = Array.isArray(contact.relatedTo)
+        ? contact.relatedTo.flatMap((relation: any) => [
+            ...(Array.isArray(relation.primaryContact?.assignedEmployeeIds) ? relation.primaryContact.assignedEmployeeIds : []),
+            relation.primaryContact?.assignedEmployeeId,
+          ]).filter(Boolean)
+        : [];
+      if (relatedEmployeeIds.length === 0) return;
+
+      contactsById.set(id, {
+        ...contact,
+        assignedEmployeeId: contact.assignedEmployeeId || relatedEmployeeIds[0],
+        assignedEmployeeIds: Array.from(new Set([
+          ...(Array.isArray(contact.assignedEmployeeIds) ? contact.assignedEmployeeIds : []),
+          ...relatedEmployeeIds,
+        ])),
+      });
+    });
+
+    return Array.from(contactsById.values());
+  }, [contactsRes, user?.role]);
 
   const { data: birthdayRes, isLoading: birthdayLoading } = useUpcomingBirthdays(30, activeTab === 'birthdays');
   const birthdayList = birthdayRes?.data ?? [];
@@ -2021,6 +2091,96 @@ export default function Contacts() {
     if (options?.isView !== undefined) {
       setIsViewMode(options.isView);
     }
+
+    // Immediately initialize family members from table row data for instant rendering
+    const initialRels = Array.isArray(fallbackContact.relationships) && fallbackContact.relationships.length > 0
+      ? fallbackContact.relationships
+      : (Array.isArray(fallbackContact.familyMembers) && fallbackContact.familyMembers.length > 0
+          ? fallbackContact.familyMembers
+          : []);
+
+    if (initialRels.length > 0) {
+      const rels0 = initialRels.map((r: any) => {
+        const c = r.relatedContact || r.contact || (r.firstName ? r : {});
+        const parsedNames = extractNameFields(c);
+        const firstAddr = c.addresses?.[0] || {};
+        const firstOcc = c.occupations?.find((o: any) => o.isPrimary) || c.occupations?.[0] || {};
+        const rawDob = c?.dateOfBirth ? c.dateOfBirth.split('T')[0] : (r.dob || '');
+        const computedAge = rawDob ? String(calculateAge(rawDob)) : '';
+        const mainContactPhone = (fallbackContact?.phone && !fallbackContact.phone.startsWith('00') && fallbackContact.phone !== '0000000000') ? (fallbackContact.phone.replace(/\D/g, '').length > 10 ? fallbackContact.phone.replace(/\D/g, '').slice(-10) : fallbackContact.phone) : '';
+        const isDep = !!(c?.isDependent || r?.isDependent);
+        const rawDepPhone = isDep ? (c?.dependentNo || r?.dependentNo || mainContactPhone) : '';
+        const depPhone = (rawDepPhone.replace(/\D/g, '').length > 10 && !rawDepPhone.startsWith('00')) ? rawDepPhone.replace(/\D/g, '').slice(-10) : rawDepPhone;
+        const rawFamPhone = (c?.phone && !c.phone.startsWith('00') && c.phone !== '0000000000') ? c.phone : (r?.phone && !r.phone.startsWith('00') && r.phone !== '0000000000' ? r.phone : depPhone);
+        const famPhone = (rawFamPhone.replace(/\D/g, '').length > 10 && !rawFamPhone.startsWith('00')) ? rawFamPhone.replace(/\D/g, '').slice(-10) : rawFamPhone;
+        const rawFamAlt = (c?.alternatePhone && !c.alternatePhone.startsWith('00') && c.alternatePhone !== '0000000000') ? c.alternatePhone : (r?.alternatePhone && !r.alternatePhone.startsWith('00') && r.alternatePhone !== '0000000000' ? r.alternatePhone : (isDep ? famPhone : ''));
+        const famAltPhone = (rawFamAlt.replace(/\D/g, '').length > 10 && !rawFamAlt.startsWith('00')) ? rawFamAlt.replace(/\D/g, '').slice(-10) : rawFamAlt;
+        return {
+          id: r.id || `rel-${Math.random()}`,
+          contactId: c.id,
+          addedAt: r.createdAt || c.createdAt || new Date().toISOString(),
+          name: `${parsedNames.firstName} ${parsedNames.middleName} ${parsedNames.lastName}`.replace(/\s+/g, ' ').trim() || r.name || '',
+          firstName: parsedNames.firstName,
+          middleName: parsedNames.middleName,
+          lastName: parsedNames.lastName,
+          dob: rawDob,
+          dateOfBirth: rawDob,
+          relation: r.relationshipType || r.relation || 'OTHER',
+          gender: c?.gender || r.gender || '',
+          birthPlace: c?.birthPlace || r.birthPlace || '',
+          isDependent: isDep,
+          guardianWhatsapp: c?.dependentNo || (isDep ? depPhone : ''),
+          dependentNo: c?.dependentNo || (isDep ? depPhone : ''),
+          motherName: c?.motherName || r.motherName || '',
+          email: c?.email || r.email || '',
+          aadhaarNumber: c?.aadhaarNumber || r.aadhaarNumber || '',
+          pan: c?.panNumber || c?.pan || r.panNumber || r.pan || '',
+          panNumber: c?.panNumber || c?.pan || r.panNumber || r.pan || '',
+          phone: famPhone,
+          contactNo: famPhone,
+          whatsapp: famPhone,
+          whatsappNumber: famPhone,
+          callingNumber: famAltPhone,
+          alternatePhone: famAltPhone,
+          sameAsWhatsapp: !!(famPhone && famAltPhone && famPhone === famAltPhone),
+          role: c?.role || r.role || 'Contact',
+          contactStatus: c?.isActive !== false ? 'Active' : 'Inactive',
+          occupation: firstOcc.type || c?.occupation || r.occupation || '',
+          occupationType: firstOcc.type || c?.occupation || r.occupationType || '',
+          companyName: firstOcc.companyName || r.companyName || '',
+          annualIncome: c?.annualIncome != null ? String(c.annualIncome) : (firstOcc.annualIncome != null ? String(firstOcc.annualIncome) : (r.annualIncome || '')),
+          education: c.education || r.education || '',
+          maritalStatus: c.maritalStatus || r.maritalStatus || '',
+          weddingAnniversary: c.weddingAnniversaryDate || r.weddingAnniversaryDate || '',
+          weddingAnniversaryDate: c.weddingAnniversaryDate || r.weddingAnniversaryDate || '',
+          state: firstAddr.state || r.state || '',
+          district: firstAddr.district || r.district || '',
+          city: firstAddr.city || r.city || '',
+          pincode: firstAddr.pincode || r.pincode || '',
+          streetAddress: firstAddr.line1 ? `${firstAddr.line1}${firstAddr.line2 ? ', ' + firstAddr.line2 : ''}` : (r.streetAddress || ''),
+          bankName: c?.bankName || r.bankName || '',
+          bankAccountNumber: c?.bankAccountNumber || r.bankAccountNumber || '',
+          bankIfsc: c?.bankIfsc || r.bankIfsc || '',
+          bankBranch: c?.bankBranch || r.bankBranch || '',
+          chewTobacco: !!(c?.chewTobacco ?? r.chewTobacco),
+          smoke: !!(c?.smoke ?? r.smoke),
+          consumeAlcohol: !!(c?.consumeAlcohol ?? r.consumeAlcohol),
+          height: c.height == null ? (r.height || '') : String(c.height),
+          weight: c.weight == null ? (r.weight || '') : String(c.weight),
+          age: computedAge,
+          medicalHistory: c.medicalHistory || r.medicalHistory || [],
+          declaredMedicalHistory: c.declaredMedicalHistory || r.declaredMedicalHistory || [],
+          notDeclaredMedicalHistory: c.notDeclaredMedicalHistory || r.notDeclaredMedicalHistory || [],
+          medicalHistoryDetails: c.medicalHistoryDetails || r.medicalHistoryDetails || '',
+          surgeryDetails: c.surgeryDetails || r.surgeryDetails || '',
+          prescriptionDetails: c.prescriptionDetails || r.prescriptionDetails || ''
+        };
+      });
+      setFamilyMembers(rels0);
+    } else {
+      setFamilyMembers([]);
+    }
+
     setLeadModalOpen(true);
 
     const toastId = toast.loading('Loading contact details...');
@@ -3016,6 +3176,9 @@ export default function Contacts() {
       }
     }
 
+    if (isLeadSubmitInProgressRef.current) return;
+    isLeadSubmitInProgressRef.current = true;
+    setIsLeadSubmitSaving(true);
     const toastId = toast.loading(editContactId ? 'Updating contact...' : 'Creating contact...');
     try {
       const mergedTags = [...selectedCampaigns];
@@ -3504,9 +3667,7 @@ export default function Contacts() {
         });
       }
       qc.invalidateQueries({ queryKey: ['contacts'] });
-      qc.refetchQueries({ queryKey: ['contacts'] });
       setPage(1);
-      refetchContacts();
       qc.invalidateQueries({ queryKey: ['leads'] });
       qc.invalidateQueries({ queryKey: ['policies'] });
       qc.invalidateQueries({ queryKey: ['contacts-policies-list'] });
@@ -3536,6 +3697,9 @@ export default function Contacts() {
         ? err.response.data.errors.join(' | ')
         : (err.response?.data?.message || err.message || 'Failed to save customer');
       toast.error(errMsg, { id: toastId });
+    } finally {
+      isLeadSubmitInProgressRef.current = false;
+      setIsLeadSubmitSaving(false);
     }
   };
 
@@ -3762,6 +3926,11 @@ export default function Contacts() {
       : contactsListArray;
 
     return list.filter((item: any) => {
+      if (activeTab !== 'birthdays' && String(item.role || '').trim().toLowerCase() === 'doctor') {
+        const doctorPhone = String(item.phone || '').replace(/\D/g, '');
+        if (doctorPhone.length !== 10) return false;
+      }
+
       // Employee role data isolation safeguard: only show contacts assigned to this employee.
       if (user?.role === 'EMPLOYEE') {
         const currentUserId = user.id;
@@ -3777,6 +3946,10 @@ export default function Contacts() {
           item.assignedEmployeeId,
           item.assignedEmployee?.id,
           item.assignedEmployee?.userId,
+          ...(Array.isArray(item.relatedTo) ? item.relatedTo.flatMap((relation: any) => [
+            ...(Array.isArray(relation.primaryContact?.assignedEmployeeIds) ? relation.primaryContact.assignedEmployeeIds : []),
+            relation.primaryContact?.assignedEmployeeId,
+          ]) : []),
         ].filter(Boolean);
 
         const isAssignedToMe = directEmpIds.some((empId: string) => {
@@ -6209,10 +6382,13 @@ export default function Contacts() {
             ) : (
               <button
                 type="button"
-                className="px-3 sm:px-5 py-1.5 sm:py-2 text-[10px] sm:text-xs font-extrabold bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white rounded-xl cursor-pointer shadow-md shadow-blue-500/20 transition-all hover:scale-105"
+                disabled={isLeadSubmitSaving}
+                className="px-3 sm:px-5 py-1.5 sm:py-2 text-[10px] sm:text-xs font-extrabold bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white rounded-xl cursor-pointer shadow-md shadow-blue-500/20 transition-all hover:scale-105 disabled:cursor-not-allowed disabled:opacity-60"
                 onClick={(e) => handleLeadSubmit(e, false)}
               >
-                {activeLeadTab === 'Policy'
+                {isLeadSubmitSaving
+                  ? 'Saving...'
+                  : activeLeadTab === 'Policy'
                   ? (editContactId ? 'Update Policy' : 'Add Policy')
                   : (editContactId ? 'Update Profile' : 'Save')}
               </button>
@@ -7242,9 +7418,11 @@ export default function Contacts() {
                       <label className="label text-[10px] font-extrabold text-slate-500 uppercase tracking-wider block mb-1">District {isFieldRequired('district', false) && <span className="text-red-500">*</span>}</label>
                       <DatalistInput
                         className="input w-full focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 rounded-xl transition-all"
-                        placeholder={personalFields.state ? "Select or search District" : "Select State first"}
+                        placeholder="Select or search District"
                         value={personalFields.district || ''}
-                        options={personalFields.state ? (INDIAN_DISTRICTS_BY_STATE[personalFields.state] || []) : []}
+                        options={personalFields.state
+                          ? (INDIAN_DISTRICTS_BY_STATE[personalFields.state] || [])
+                          : ALL_INDIAN_DISTRICTS}
                         onChange={val => setPersonalFields(p => ({ ...p, district: val }))}
                       />
                     </div>
@@ -7603,16 +7781,32 @@ export default function Contacts() {
                     <div className="grid gap-3">
                       {familyMembers.map((member, idx) => {
                         const fullName = [member.firstName, member.middleName, member.lastName].filter(Boolean).join(' ').trim() || member.name || 'Family Member';
-                        const rel = (member.relation || 'OTHER').toUpperCase();
+                        const rel = (member.relation || 'OTHER').toUpperCase().replace(/[\s-]+/g, '_');
+                        const g = (member.gender || '').toUpperCase();
+                        const isFemale = g === 'FEMALE';
+                        const isMale = g === 'MALE';
+                        const fn = (member.firstName || member.name || '').trim().split(' ')[0].toLowerCase();
+                        const likelyFemale = isFemale || (!isMale && /(a|i|ee|ita|ika|shree|priya|devi|bai|ben)$/i.test(fn));
+
                         let relLabel = rel.replace(/_/g, ' ');
-                        if (rel === 'SPOUSE') {
-                          const g = (member.gender || '').toUpperCase();
-                          if (g === 'FEMALE') relLabel = 'WIFE';
-                          else if (g === 'MALE') relLabel = 'HUSBAND';
-                          else {
-                            const fn = (member.firstName || member.name || '').trim().split(' ')[0].toLowerCase();
-                            if (/(a|i|ee|ita|ika|shree|priya|devi|bai|ben)$/i.test(fn)) relLabel = 'WIFE';
-                          }
+                        if (rel === 'SPOUSE' || rel === 'HUSBAND' || rel === 'WIFE') {
+                          relLabel = likelyFemale ? 'WIFE' : 'HUSBAND';
+                        } else if (rel === 'CHILD') {
+                          relLabel = likelyFemale ? 'DAUGHTER' : 'SON';
+                        } else if (rel === 'PARENT') {
+                          relLabel = likelyFemale ? 'MOTHER' : 'FATHER';
+                        } else if (rel === 'SIBLING') {
+                          relLabel = likelyFemale ? 'SISTER' : 'BROTHER';
+                        } else if (rel === 'GRANDPARENT') {
+                          relLabel = likelyFemale ? 'GRANDMOTHER' : 'GRANDFATHER';
+                        } else if (rel === 'GRANDCHILD') {
+                          relLabel = likelyFemale ? 'GRANDDAUGHTER' : 'GRANDSON';
+                        } else if (rel === 'UNCLE' || rel === 'AUNT' || rel === 'AUNTIE' || rel === 'UNTY') {
+                          relLabel = likelyFemale ? 'AUNT / UNTY' : 'UNCLE';
+                        } else if (rel === 'NEPHEW' || rel === 'NIECE') {
+                          relLabel = likelyFemale ? 'NIECE' : 'NEPHEW';
+                        } else if (rel === 'IN_LAW') {
+                          relLabel = 'IN LAW';
                         }
                         const dobVal = member.dob || member.dateOfBirth || '';
                         const ageVal = member.age || (dobVal ? calculateAge(dobVal) : '');
@@ -7637,7 +7831,7 @@ export default function Contacts() {
 
                         const isSpouse = ['SPOUSE', 'HUSBAND', 'WIFE'].includes(rel);
                         const isChild = ['SON', 'DAUGHTER', 'CHILD', 'GRANDSON', 'GRANDDAUGHTER', 'GRANDCHILD', 'NEPHEW', 'NIECE'].includes(rel);
-                        const isParent = ['FATHER', 'MOTHER', 'PARENT', 'GRANDFATHER', 'GRANDMOTHER', 'GRANDPARENT', 'UNCLE', 'AUNT'].includes(rel);
+                        const isParent = ['FATHER', 'MOTHER', 'PARENT', 'GRANDFATHER', 'GRANDMOTHER', 'GRANDPARENT', 'UNCLE', 'AUNT', 'AUNTIE', 'UNTY'].includes(rel);
 
                         const cardBorder = isSpouse
                           ? 'border-purple-200 hover:border-purple-300'

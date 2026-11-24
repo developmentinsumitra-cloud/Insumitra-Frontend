@@ -18,6 +18,8 @@ import { useAuthStore } from '@store/auth.store';
 import { getPolicyStatusDisplay, calculateLastInstallmentDate } from '../../utils/policyStatusUtils';
 import { formatIndianNumber } from '../../utils/numberUtils';
 import ActivityTimeline from '@comps/common/ActivityTimeline';
+import { PolicyRidersSelector } from './PolicyRidersSelector';
+import PhcFamilyAllocations, { PhcFamilyAllocationButton, sumPhcFamilyAllocations, type PhcFamilyAllocation } from './PhcFamilyAllocations';
 import {
   INSTALLMENT_DATE_OPTIONS,
   PHC_STAGE_OPTIONS,
@@ -268,7 +270,10 @@ export default function CreatePolicyModal({
   }, [getOptions, dropdownMenus]);
 
   const customPolicyDropdowns = useMemo(() => {
-    return getCustomDropdowns('Policy');
+    return getCustomDropdowns('Policy').filter(cd => {
+      const k = cd.name.toLowerCase().replace(/[^a-z0-9]/g, '');
+      return k !== 'familysize' && k !== 'familysizes';
+    });
   }, [getCustomDropdowns, dropdownMenus]);
 
   // Fetch contacts list for Target Contact / Client Name selector
@@ -742,6 +747,7 @@ export default function CreatePolicyModal({
           phcStage: resolvedPhcStage,
           comment: extra.phcComment || '',
         });
+        setPhcFamilyAllocations(Array.isArray(extra.phcFamilyAllocations) ? extra.phcFamilyAllocations : []);
       } else {
         setIsViewOnly(false);
         const targetCId = contactId || initialData?.contactId || initialData?.contact?.id || '';
@@ -867,6 +873,7 @@ export default function CreatePolicyModal({
         const clientFullName = (contactName || (initialData?.contact ? [initialData.contact.firstName, initialData.contact.middleName, initialData.contact.lastName].filter(Boolean).join(' ') : '')).trim();
         setInsuredPerson(clientFullName);
         setPhcRequired(false);
+        setPhcFamilyAllocations([]);
         setPhcAmount('');
         setPhcAmountError('');
         setPhcStatus('');
@@ -1074,17 +1081,18 @@ export default function CreatePolicyModal({
   const [noOfInstallments, setNoOfInstallments] = useState('');
   const [lastInstallmentDate, setLastInstallmentDate] = useState('');
 
-  const isLifeCategory = Boolean(
-    [
-      selectedCategory,
-      selectedCompanyCategory,
-      selectedPlanCategory,
-    ].some(cat => {
-      if (!cat) return false;
-      const upper = String(cat).toUpperCase();
-      return upper.includes('LIFE') || upper.includes('TERM');
-    })
-  );
+  const normalizedPlanCategory = String(selectedPlanCategory || '').trim().toUpperCase().replace(/[\s_-]+/g, ' ');
+  const isLifeTermPlanCategory =
+    normalizedPlanCategory === 'LIFE TERM' ||
+    normalizedPlanCategory === 'TERM LIFE' ||
+    normalizedPlanCategory.includes('TERM') ||
+    normalizedPlanCategory.includes('LIFE');
+  const selectedPolicyCategory = String(
+    `${selectedCategory || ''} ${selectedCompanyCategory || ''} ${selectedPlanCategory || ''}`,
+  ).toUpperCase();
+  const isLifeOrTerm = isLifeTermPlanCategory || selectedPolicyCategory.includes('LIFE') || selectedPolicyCategory.includes('TERM');
+  const isLifeCategory = isLifeOrTerm;
+  const isHealthCategory = selectedPolicyCategory.includes('HEALTH');
 
   // Auto-update policy term when duration years change
   useEffect(() => {
@@ -1173,8 +1181,15 @@ export default function CreatePolicyModal({
   const [installmentAmount, setInstallmentAmount] = useState('');
   const [firstInstallmentDate, setFirstInstallmentDate] = useState('');
   const [emiComment, setEmiComment] = useState('');
-  const showLifeTermInstallmentFields = isLifeCategory && Boolean(emiCase);
-  const showInstallmentAndYearlyFields = isLifeCategory && Boolean(emiCase);
+  const showLifeTermInstallmentFields = isLifeOrTerm && Boolean(emiCase);
+  const showLifeTermPolicyFields = showLifeTermInstallmentFields || isLifeTermPlanCategory;
+  const showInstallmentAndYearlyFields = showLifeTermInstallmentFields || isLifeTermPlanCategory;
+
+  useEffect(() => {
+    if (!isHealthCategory && activeTab === 'phcDetails') {
+      setActiveTab('policyPlan');
+    }
+  }, [activeTab, isHealthCategory]);
 
   const recalculateLastInstallment = useCallback((overrides?: {
     baseDate?: string;
@@ -1494,6 +1509,7 @@ export default function CreatePolicyModal({
     phcStage: 'TO_CONTACT',
     comment: '',
   });
+  const [phcFamilyAllocations, setPhcFamilyAllocations] = useState<PhcFamilyAllocation[]>([]);
   const [isPhcBookingCollapsed, setIsPhcBookingCollapsed] = useState(false);
   const [isPhcSettlementCollapsed, setIsPhcSettlementCollapsed] = useState(false);
   const [notes, setNotes] = useState('');
@@ -1546,6 +1562,22 @@ export default function CreatePolicyModal({
     return list;
   }, [insuredPerson, contactName, members, phcInsuredPerson]);
 
+  const phcFamilyMemberOptions = useMemo(() => {
+    const seen = new Set<string>();
+    return members.reduce<{ value: string; label: string; sublabel?: string }[]>((options, member) => {
+      const name = (member.name || '').trim();
+      const key = name.toLowerCase();
+      if (!name || seen.has(key)) return options;
+      seen.add(key);
+      options.push({
+        value: name,
+        label: `${name} (${member.relationship || 'Member'})`,
+        sublabel: member.relationship ? `Relationship: ${member.relationship}` : 'Family Member',
+      });
+      return options;
+    }, []);
+  }, [members]);
+
   // Fetch All Plans via policiesService.plans()
   const { data: allPlansRes } = useQuery({
     queryKey: ['all-plans-list-picker'],
@@ -1579,6 +1611,9 @@ export default function CreatePolicyModal({
   const handleCompanyCategoryChange = (newCat: string) => {
     setSelectedCompanyCategory(newCat);
     setSelectedCategory(newCat);
+    if (!newCat.toUpperCase().includes('HEALTH')) {
+      setPhcRequired(false);
+    }
 
     if (selectedCompany && newCat) {
       const catKey = newCat.toUpperCase();
@@ -1739,7 +1774,7 @@ export default function CreatePolicyModal({
 
   const handleFormSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (phcRequired && !phcAmount.trim()) {
+    if (isHealthCategory && phcRequired && !phcAmount.trim()) {
       setPhcAmountError('PHC Amount is required');
       setActiveTab('phcDetails');
       toast.error('PHC Amount is required');
@@ -1943,19 +1978,21 @@ export default function CreatePolicyModal({
       if (durationYears) {
         cleanNotes += `\nPolicy Tenure: ${durationYears} ${Number(durationYears) === 1 ? 'Year' : 'Years'}`;
       }
-      if (policyTerm) {
+      if ((showLifeTermPolicyFields || showLifeTermInstallmentFields) && policyTerm) {
         cleanNotes += `\nPolicy Term: ${policyTerm}`;
       }
-      if (isLifeCategory) {
+      if (showInstallmentAndYearlyFields || showLifeTermInstallmentFields) {
         if (firstYearPremium) cleanNotes += `\n1st Year Premium Amount: ₹${firstYearPremium}`;
         if (secondYearPremium) cleanNotes += `\n2nd Year Onwards Premium Amount: ₹${secondYearPremium}`;
+      }
+      if (showLifeTermPolicyFields || showLifeTermInstallmentFields) {
         if (ageAtEntry) cleanNotes += `\nAge at Entry: ${ageAtEntry}`;
         if (ageAtLastPremium) cleanNotes += `\nAge at Last Premium: ${ageAtLastPremium}`;
         if (ageAtMaturity) cleanNotes += `\nAge at Maturity: ${ageAtMaturity}`;
       }
       if (policyPeriod) cleanNotes += `\nPolicy Period: ${policyPeriod}`;
       if (firstPremiumDate) cleanNotes += `\nFirst Premium Date: ${firstPremiumDate}`;
-      if (premiumPaymentPeriod) cleanNotes += `\nPremium Payment Period: ${premiumPaymentPeriod} Years`;
+      if ((showLifeTermPolicyFields || showLifeTermInstallmentFields) && premiumPaymentPeriod) cleanNotes += `\nPremium Payment Period: ${premiumPaymentPeriod} Years`;
       if (lastPremiumDate) cleanNotes += `\nLast Premium Date: ${lastPremiumDate}`;
       if (emiCase) {
         if (downpaymentAmount) cleanNotes += `\nDownpayment Amount: ₹${downpaymentAmount}`;
@@ -2028,7 +2065,7 @@ export default function CreatePolicyModal({
       } else if (gstApplicable) {
         cleanNotes += `\nGST Details: Applicable: Yes (${gstPercentage}%), GST Amount: ₹${gstAmount || '0'}`;
       }
-      if (phcRequired) {
+      if (isHealthCategory && phcRequired) {
         const isCompleted = phcExtraDetails.phcStage === 'PROCESS_COMPLETED' ||
           phcExtraDetails.phcStage === 'Process Completed' ||
           phcExtraDetails.phcStage?.toUpperCase().includes('COMPLET') ||
@@ -2040,7 +2077,7 @@ export default function CreatePolicyModal({
         const effectivePhcStatus = isCompleted ? 'Completed' : (phcStatus || 'N/A');
         const phcAmountNum = Number(phcAmount || 0);
         const utilizedNum = Number(phcExtraDetails.utilizedAmount || 0);
-        const balanceNum = Math.max(0, phcAmountNum - utilizedNum);
+        const balanceNum = Math.max(0, phcAmountNum - utilizedNum - sumPhcFamilyAllocations(phcFamilyAllocations));
         const activePhcPerson = phcExtraDetails.insuredPersonName || phcInsuredPerson;
 
         cleanNotes += `\nPreventive Health Checkup: Yes (Amount: ₹${phcAmountNum}, Status: ${effectivePhcStatus}, Claim Settled: ${phcClaimSettled ? 'Yes' : 'No'}${activePhcPerson ? `, Insured Person: ${activePhcPerson}` : ''})`;
@@ -2058,6 +2095,7 @@ export default function CreatePolicyModal({
           cleanNotes += `\nPHC Utilized Amount: ₹${utilizedNum}`;
         }
         cleanNotes += `\nPHC Balance Amount: ₹${balanceNum}`;
+        if (phcFamilyAllocations.length > 0) cleanNotes += `\nPHC Family Allocations: ${JSON.stringify(phcFamilyAllocations)}`;
         if (phcExtraDetails.bookingDate) cleanNotes += `\nPHC Booking Date: ${phcExtraDetails.bookingDate}`;
         if (phcExtraDetails.appointmentDate) cleanNotes += `\nPHC Appointment Date: ${phcExtraDetails.appointmentDate}`;
         if (phcExtraDetails.centreName) cleanNotes += `\nPHC Centre / Lab Name: ${phcExtraDetails.centreName}`;
@@ -2071,7 +2109,7 @@ export default function CreatePolicyModal({
         if (phcExtraDetails.frequency) cleanNotes += `\nPHC Frequency: ${phcExtraDetails.frequency}`;
         if (phcExtraDetails.followUpDate) cleanNotes += `\nPHC Follow-up Date: ${phcExtraDetails.followUpDate}`;
         if (phcExtraDetails.comment) cleanNotes += `\nPHC Comment: ${phcExtraDetails.comment}`;
-      } else {
+      } else if (isHealthCategory) {
         cleanNotes += `\nPreventive Health Checkup: No\nPHC Required: No`;
       }
       const proposerClean = (insuredPerson || contactName || '').trim().toLowerCase();
@@ -2098,7 +2136,7 @@ export default function CreatePolicyModal({
         });
       }
 
-      const rawPrem = isLifeCategory ? (firstYearPremium || premiumAmount || 0) : (premiumAmount || 0);
+      const rawPrem = showInstallmentAndYearlyFields ? (firstYearPremium || premiumAmount || 0) : (premiumAmount || 0);
       const cleanPremium = Number(String(rawPrem).replace(/,/g, '')) || 0;
       const cleanSum = Number(String(sumAssured || 0).replace(/,/g, '')) || 0;
 
@@ -2121,7 +2159,7 @@ export default function CreatePolicyModal({
         startDate: isoStart,
         endDate: isoEnd,
         nextDueDate: safeIsoDate(nextDueDate),
-        maturityDate: safeIsoDate(maturityDate),
+        maturityDate: (showLifeTermPolicyFields || showLifeTermInstallmentFields) ? safeIsoDate(maturityDate) : undefined,
         businessType: resolvedBusinessType,
         renewedFromPolicyId: (resolvedBusinessType === 'RENEWAL' && previousPolicyId) ? previousPolicyId : undefined,
         assignedEmployeeId: finalAssignedEmployeeId,
@@ -2321,19 +2359,21 @@ export default function CreatePolicyModal({
             Connected Persons ({displayedMembers.length})
           </button>
 
-          <button
-            type="button"
-            onClick={() => setActiveTab('phcDetails')}
-            className={clsx(
-              'px-2.5 sm:px-3.5 py-1.5 sm:py-2 rounded-xl text-xs font-extrabold tracking-wide transition-all cursor-pointer whitespace-nowrap flex items-center gap-1.5 shrink-0',
-              activeTab === 'phcDetails'
-                ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-md shadow-blue-500/25 scale-[1.02]'
-                : 'text-slate-600 hover:text-slate-900 hover:bg-white/80'
-            )}
-          >
-            <Activity size={14} />
-            Preventive Health Checkup
-          </button>
+          {isHealthCategory && (
+            <button
+              type="button"
+              onClick={() => setActiveTab('phcDetails')}
+              className={clsx(
+                'px-2.5 sm:px-3.5 py-1.5 sm:py-2 rounded-xl text-xs font-extrabold tracking-wide transition-all cursor-pointer whitespace-nowrap flex items-center gap-1.5 shrink-0',
+                activeTab === 'phcDetails'
+                  ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-md shadow-blue-500/25 scale-[1.02]'
+                  : 'text-slate-600 hover:text-slate-900 hover:bg-white/80'
+              )}
+            >
+              <Activity size={14} />
+              Preventive Health Checkup
+            </button>
+          )}
 
           <button
             type="button"
@@ -3059,40 +3099,13 @@ export default function CreatePolicyModal({
                     </div>
 
                     {/* Riders / Addons */}
-                    <div className="flex flex-col gap-1 pt-2">
-                      <label className="label text-[10px] font-extrabold text-slate-900 uppercase tracking-wider block mb-1">
-                        Riders / Addons
-                      </label>
-                      <div className="grid grid-cols-1 sm:grid-cols-2 sm:grid-cols-3 gap-2 p-3 bg-slate-50 rounded-xl border border-slate-200 text-xs">
-                        {[
-                          { id: 'CRITICAL_ILLNESS', label: 'Critical Illness' },
-                          { id: 'ACCIDENTAL_DEATH', label: 'Accidental Death Rider' },
-                          { id: 'ROOM_RENT_WAIVER', label: 'Room Rent Limit Waiver' },
-                          { id: 'MATERNITY_COVER', label: 'Maternity Cover Option' },
-                          { id: 'OPD_BENEFIT', label: 'OPD Benefit Rider' },
-                          { id: 'WAIVER_OF_PREMIUM', label: 'Waiver of Premium' },
-                        ].map(rider => {
-                          const isChecked = riders.includes(rider.id);
-                          return (
-                            <label key={rider.id} className="flex flex-wrap items-center gap-2 cursor-pointer text-gray-700 hover:text-blue-600 transition-colors">
-                              <input
-                                type="checkbox"
-                                checked={isChecked}
-                                onChange={e => {
-                                  setRiders(prev =>
-                                    e.target.checked
-                                      ? [...prev.filter(id => id !== rider.id), rider.id]
-                                      : prev.filter(id => id !== rider.id)
-                                  );
-                                }}
-                                className="rounded border-gray-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
-                              />
-                              <span className="text-[11px] font-medium">{rider.label}</span>
-                            </label>
-                          );
-                        })}
-                      </div>
-                    </div>
+                    <PolicyRidersSelector
+                      selectedRiders={riders}
+                      onChange={setRiders}
+                      planId={selectedPlanId}
+                      plansList={plansList}
+                      disabled={isViewOnly}
+                    />
                   </div>
                 )}
               </div>
@@ -3123,32 +3136,30 @@ export default function CreatePolicyModal({
 
                 {!isPremiumBreakdownCollapsed && (
                   <div className="p-4 grid grid-cols-1 md:grid-cols-3 gap-3.5 animate-fadeIn">
-                    {(!isLifeCategory || !showInstallmentAndYearlyFields) && (
-                      <div>
-                        <label className="label text-[10px] font-extrabold text-slate-900 uppercase tracking-wider block mb-1">
-                          Premium Amount (₹) <span className="text-red-600 font-black text-sm ml-0.5" style={{ color: '#dc2626' }}>*</span>
-                        </label>
-                        <div className="relative">
-                          <Shield size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-blue-500/80" />
-                          <input
-                            type="text"
-                            value={formatIndianNumber(premiumAmount)}
-                            onChange={(e) => {
-                              const raw = e.target.value.replace(/,/g, '');
-                              setPremiumAmount(raw);
-                              setFirstYearPremium(raw);
-                            }}
-                            className="input pl-9 w-full h-10 text-xs rounded-xl bg-white border border-slate-200 focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
-                            placeholder="Enter premium amount"
-                          />
-                        </div>
+                    <div>
+                      <label className="label text-[10px] font-extrabold text-slate-900 uppercase tracking-wider block mb-1">
+                        Premium Amount (₹) <span className="text-red-600 font-black text-sm ml-0.5" style={{ color: '#dc2626' }}>*</span>
+                      </label>
+                      <div className="relative">
+                        <Shield size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-blue-500/80" />
+                        <input
+                          type="text"
+                          value={formatIndianNumber(premiumAmount)}
+                          onChange={(e) => {
+                            const raw = e.target.value.replace(/,/g, '');
+                            setPremiumAmount(raw);
+                            setFirstYearPremium(raw);
+                          }}
+                          className="input pl-9 w-full h-10 text-xs rounded-xl bg-white border border-slate-200 focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
+                          placeholder="Enter premium amount"
+                        />
                       </div>
-                    )}
+                    </div>
 
                     {showInstallmentAndYearlyFields && (
                       <div>
                         <label className="label text-[10px] font-extrabold text-slate-900 uppercase tracking-wider block mb-1">
-                          1st Year Premium Amount (₹) <span className="text-red-600 font-black text-sm ml-0.5" style={{ color: '#dc2626' }}>*</span>
+                          1st Year Premium Amount (₹)
                         </label>
                         <input
                           type="text"
@@ -3182,7 +3193,7 @@ export default function CreatePolicyModal({
                       </div>
                     )}
 
-                    {isLifeCategory && (
+                    {showLifeTermInstallmentFields && (
                       <div>
                         <label className="label text-[10px] font-extrabold text-slate-900 uppercase tracking-wider block mb-1">
                           Premium Payment Period (Years)
@@ -3223,7 +3234,7 @@ export default function CreatePolicyModal({
                   <div className="p-4 grid grid-cols-1 md:grid-cols-3 gap-3.5 animate-fadeIn">
                     <div>
                       <label className="label text-[10px] font-extrabold text-slate-900 uppercase tracking-wider block mb-1">
-                        Policy Tenure (Years)
+                        {isLifeTermPlanCategory ? 'Policy Term (Period of Coverage in Years)' : 'Policy Tenure (Years)'}
                       </label>
                       <div className="relative">
                         <input
@@ -3251,20 +3262,6 @@ export default function CreatePolicyModal({
                       </div>
                     </div>
 
-                    {showLifeTermInstallmentFields && (
-                      <div>
-                        <label className="label text-[10px] font-extrabold text-slate-900 uppercase tracking-wider block mb-1">
-                          Policy Term
-                        </label>
-                        <input
-                          type="text"
-                          className="input w-full h-10 text-xs rounded-xl bg-white border border-slate-200 focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 text-slate-800 font-bold"
-                          value={policyTerm}
-                          onChange={e => setPolicyTerm(e.target.value)}
-                          placeholder="e.g. 1 Year"
-                        />
-                      </div>
-                    )}
 
                     <div>
                       <label className="label text-[10px] font-extrabold text-slate-900 uppercase tracking-wider block mb-1">
@@ -3294,20 +3291,8 @@ export default function CreatePolicyModal({
                       />
                     </div>
 
-                    <div>
-                      <label className="label text-[10px] font-extrabold text-slate-900 uppercase tracking-wider block mb-1">
-                        Next Due Date
-                      </label>
-                      <DatePicker
-                        value={nextDueDate}
-                        onChange={(val: any) => setNextDueDate(typeof val === 'string' ? val : (val?.target?.value || ''))}
-                        className="input w-full h-10 text-xs rounded-xl bg-white border border-slate-200"
-                        placeholder="DD/MM/YYYY"
-                      />
-                    </div>
-
-                    {/* Date of Maturity - Life/Term with Installment Case */}
-                    {showLifeTermInstallmentFields && (
+                    {/* Date of Maturity - Life/Term */}
+                    {showLifeTermPolicyFields && (
                       <div>
                         <label className="label text-[10px] font-extrabold text-slate-900 uppercase tracking-wider block mb-1">
                           Date of Maturity
@@ -3321,8 +3306,8 @@ export default function CreatePolicyModal({
                       </div>
                     )}
 
-                    {/* Age at Entry - Life/Term with Installment Case */}
-                    {showLifeTermInstallmentFields && (
+                    {/* Age at Entry - Life/Term */}
+                    {showLifeTermPolicyFields && (
                       <div>
                         <label className="label text-[10px] font-extrabold text-slate-900 uppercase tracking-wider block mb-1">
                           Age at Entry
@@ -3337,8 +3322,8 @@ export default function CreatePolicyModal({
                       </div>
                     )}
 
-                    {/* Age at Last Premium - Life/Term with Installment Case */}
-                    {showLifeTermInstallmentFields && (
+                    {/* Age at Last Premium - Life/Term */}
+                    {showLifeTermPolicyFields && (
                       <div>
                         <label className="label text-[10px] font-extrabold text-slate-900 uppercase tracking-wider block mb-1">
                           Age at Last Premium
@@ -3353,8 +3338,8 @@ export default function CreatePolicyModal({
                       </div>
                     )}
 
-                    {/* Age at Maturity - Life/Term with Installment Case */}
-                    {showLifeTermInstallmentFields && (
+                    {/* Age at Maturity - Life/Term */}
+                    {showLifeTermPolicyFields && (
                       <div>
                         <label className="label text-[10px] font-extrabold text-slate-900 uppercase tracking-wider block mb-1">
                           Age at Maturity
@@ -3365,6 +3350,20 @@ export default function CreatePolicyModal({
                           onChange={e => setAgeAtMaturity(e.target.value)}
                           className="input w-full h-10 text-xs rounded-xl bg-white border border-slate-200 focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
                           placeholder="e.g. 50"
+                        />
+                      </div>
+                    )}
+
+                    {(!showLifeTermPolicyFields || nextDueDate) && (
+                      <div>
+                        <label className="label text-[10px] font-extrabold text-slate-900 uppercase tracking-wider block mb-1">
+                          Next Due Date
+                        </label>
+                        <DatePicker
+                          value={nextDueDate}
+                          onChange={(val: any) => setNextDueDate(typeof val === 'string' ? val : (val?.target?.value || ''))}
+                          className="input w-full h-10 text-xs rounded-xl bg-white border border-slate-200"
+                          placeholder="DD/MM/YYYY"
                         />
                       </div>
                     )}
@@ -3999,6 +3998,7 @@ export default function CreatePolicyModal({
               </div>
 
               {/* Section 7: Preventive Health Checkup Option */}
+              {isHealthCategory && (
               <div className="border border-slate-200/90 rounded-2xl bg-white shadow-2xs hover:shadow-xs transition-all overflow-visible">
                 <div
                   className="bg-gradient-to-r from-teal-50/80 via-slate-50 to-emerald-50/30 px-4 py-2.5 border-b border-slate-100 flex items-center justify-between cursor-pointer select-none rounded-t-2xl"
@@ -4042,6 +4042,7 @@ export default function CreatePolicyModal({
                   </div>
                 )}
               </div>
+              )}
             </div>
           )}
 
@@ -4367,7 +4368,7 @@ export default function CreatePolicyModal({
           )}
 
           {/* ════════ TAB 4: Preventive Health Checkup ════════ */}
-          {activeTab === 'phcDetails' && (
+          {activeTab === 'phcDetails' && isHealthCategory && (
             <div className="space-y-4 animate-fadeIn">
               {/* PHC Info Header Banner */}
               <div className="bg-gradient-to-r from-teal-50 via-slate-50 to-blue-50 border border-teal-200/80 rounded-2xl p-3 sm:p-4 flex flex-wrap items-center justify-between gap-3 shadow-2xs">
@@ -4383,21 +4384,6 @@ export default function CreatePolicyModal({
                     <p className="text-[11px] text-slate-500">Configure health checkup allowance, lab booking, appointments and claim settlements.</p>
                   </div>
                 </div>
-                {selectedCategory?.toUpperCase() !== 'HEALTH' && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setSelectedCategory('Health');
-                      setSelectedCompanyCategory('Health');
-                      setPhcRequired(true);
-                      toast.success('Insurance Company Category set to Health');
-                    }}
-                    className="text-[11px] font-bold px-3 py-1.5 rounded-xl bg-teal-600 hover:bg-teal-700 text-white transition-all shadow-2xs cursor-pointer flex items-center gap-1.5"
-                  >
-                    <CheckCircle2 size={13} />
-                    <span>Set Policy as Health</span>
-                  </button>
-                )}
               </div>
 
               <div className="space-y-4">
@@ -4453,6 +4439,9 @@ export default function CreatePolicyModal({
                               <input
                                 type="number"
                                 value={phcAmount}
+                                min={phcFamilyAllocations.length > 0
+                                  ? (Number(phcExtraDetails.utilizedAmount) || 0) + sumPhcFamilyAllocations(phcFamilyAllocations)
+                                  : undefined}
                                 onChange={e => {
                                   setPhcAmount(e.target.value);
                                   if (e.target.value.trim()) setPhcAmountError('');
@@ -4466,7 +4455,7 @@ export default function CreatePolicyModal({
                               <label className="label text-[10px] font-extrabold text-slate-900 uppercase tracking-wider block mb-1">PHC Balance Amount (₹)</label>
                               <input
                                 type="text"
-                                value={`₹${Math.max(0, (Number(phcAmount) || 0) - (Number(phcExtraDetails.utilizedAmount) || 0))}`}
+                                value={`₹${Math.max(0, (Number(phcAmount) || 0) - (Number(phcExtraDetails.utilizedAmount) || 0) - sumPhcFamilyAllocations(phcFamilyAllocations))}`}
                                 readOnly
                                 className="input w-full h-10 text-xs rounded-xl bg-white border border-slate-200 focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 font-bold text-slate-800"
                               />
@@ -4537,6 +4526,14 @@ export default function CreatePolicyModal({
                     </div>
                   )}
                 </div>
+
+                {phcRequired && (
+                  <PhcFamilyAllocationButton
+                    allocations={phcFamilyAllocations}
+                    onChange={setPhcFamilyAllocations}
+                    availableAmount={Math.max(0, (Number(phcAmount) || 0) - (Number(phcExtraDetails.utilizedAmount) || 0))}
+                  />
+                )}
 
                 {/* Card 1B: PHC Booking & Centre Details */}
                 {phcRequired && (
@@ -4669,7 +4666,15 @@ export default function CreatePolicyModal({
                           <input
                             type="number"
                             value={phcExtraDetails.utilizedAmount}
-                            onChange={e => setPhcExtraDetails(p => ({ ...p, utilizedAmount: e.target.value }))}
+                            onChange={e => {
+                              const entered = Number(e.target.value) || 0;
+                              const hasAllocations = phcFamilyAllocations.length > 0;
+                              const maxUtilized = Math.max(0, (Number(phcAmount) || 0) - sumPhcFamilyAllocations(phcFamilyAllocations));
+                              setPhcExtraDetails(p => ({
+                                ...p,
+                                utilizedAmount: String(hasAllocations ? Math.min(entered, maxUtilized) : entered),
+                              }));
+                            }}
                             className="input w-full h-10 text-xs rounded-xl bg-white border border-slate-200"
                             placeholder="Utilized Amount"
                           />
@@ -4752,6 +4757,15 @@ export default function CreatePolicyModal({
                       </div>
                     )}
                   </div>
+                )}
+                {phcRequired && (
+                  <PhcFamilyAllocations
+                    allocations={phcFamilyAllocations}
+                    onChange={setPhcFamilyAllocations}
+                    availableAmount={Math.max(0, (Number(phcAmount) || 0) - (Number(phcExtraDetails.utilizedAmount) || 0))}
+                    stageOptions={PHC_STAGE_OPTIONS}
+                    familyMemberOptions={phcFamilyMemberOptions}
+                  />
                 )}
               </div>
             </div>

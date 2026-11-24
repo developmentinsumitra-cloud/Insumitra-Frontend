@@ -412,6 +412,15 @@
   /* ──────────────────────────── Stat highlight ────────────────────────────── */
 
   .stat-ring { @apply rounded-xl p-4 border; }
+
+  .modal-scroll-body .overflow-y-auto:not(.absolute):not(.fixed),
+  .modal-scroll-body .overflow-auto:not(.absolute):not(.fixed),
+  .modal-scroll-body .overflow-y-scroll:not(.absolute):not(.fixed),
+  .modal-scroll-body .overflow-scroll:not(.absolute):not(.fixed) {
+    height: auto !important;
+    max-height: none !important;
+    overflow-y: hidden !important;
+  }
 }
 
 /* ── Animations ────────────────────────────────────────────────────────────── */

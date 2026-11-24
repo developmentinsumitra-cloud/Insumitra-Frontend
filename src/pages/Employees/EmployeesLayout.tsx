@@ -2,14 +2,14 @@ import { useState, useMemo } from 'react';
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { 
   Plus, AlertTriangle, AlertCircle, Users, Target, 
-  FileText, ShieldCheck, Search, ChevronDown, X, Upload, 
+  FileText, ShieldCheck, Search, ChevronDown, X, 
   User, Briefcase, Landmark, Sparkles, Eye, EyeOff, 
   CheckCircle2, Link2, Unlink, ArrowRight, ArrowLeft
 } from 'lucide-react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { employeesService, contactsService } from '@api/index';
 import Modal from '@comps/common/Modal';
-import { useForm } from 'react-hook-form';
+import { Controller, useForm } from 'react-hook-form';
 import { z } from 'zod';
 import { zodResolver } from '@hookform/resolvers/zod';
 import toast from 'react-hot-toast';
@@ -111,7 +111,7 @@ export default function EmployeesLayout() {
   const isLimitReached   = false;
   const isNearLimit      = false;
 
-  const { register, handleSubmit, reset, setValue, trigger, formState: { errors } } = useForm<CreateForm>({
+  const { register, handleSubmit, reset, setValue, trigger, control, formState: { errors } } = useForm<CreateForm>({
     resolver: zodResolver(createSchema),
     mode: 'onTouched',
   });
@@ -284,22 +284,9 @@ export default function EmployeesLayout() {
         })}
       </div>
 
-      {/* Floating Right Action Panel (Upload & Add Employee) */}
+      {/* Floating Right Action Panel (Add Employee) */}
       {isOverview && canEditEmployees && (
         <div className="fixed right-5 top-1/2 -translate-y-1/2 z-40 flex flex-col gap-3 bg-white/90 backdrop-blur-xl p-2 rounded-2xl shadow-2xl border border-slate-200/80 animate-fadeIn">
-          {/* Upload */}
-          <button
-            type="button"
-            onClick={() => toast('Bulk Employee Import feature available', { icon: '📥' })}
-            className="w-10 h-10 rounded-xl bg-gradient-to-tr from-emerald-600 to-teal-500 hover:from-emerald-700 hover:to-teal-600 text-white flex items-center justify-center transition-all hover:scale-105 shadow-md shadow-emerald-500/25 cursor-pointer group relative"
-            title="Import Employees CSV"
-          >
-            <Upload size={18} strokeWidth={2.2} />
-            <span className="absolute right-full mr-3 px-3 py-1.5 rounded-xl bg-slate-900/90 backdrop-blur-md text-white text-[11px] font-bold whitespace-nowrap opacity-0 group-hover:opacity-100 transition-all pointer-events-none shadow-xl border border-slate-800">
-              Import Employees CSV
-            </span>
-          </button>
-
           {/* Add Employee Button */}
           <button
             type="button"
@@ -596,7 +583,11 @@ export default function EmployeesLayout() {
                   </div>
                   <div className="sm:col-span-2">
                     <label className="label font-bold text-slate-700">Date of Joining</label>
-                    <DatePicker {...register('dateOfJoining')} className="input" />
+                    <Controller
+                      control={control}
+                      name="dateOfJoining"
+                      render={({ field }) => <DatePicker {...field} className="input" />}
+                    />
                   </div>
                 </div>
               </div>

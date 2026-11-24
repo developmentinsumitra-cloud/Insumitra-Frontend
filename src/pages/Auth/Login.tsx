@@ -1,8 +1,8 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { authService } from '@api/auth.service';
 import toast from 'react-hot-toast';
 import { 
@@ -31,7 +31,8 @@ type RegisterForm = z.infer<typeof registerSchema>;
 
 const resetSchema = z.object({
   email: z.string().email('Please enter a valid email address'),
-  phone: z.string().optional(),
+  phone: z.string().min(10, 'Valid 10-digit registered mobile phone is required'),
+  code: z.string().min(1, 'Email verification code is required'),
   newPassword: z.string().min(6, 'Password must be at least 6 characters'),
   confirmPassword: z.string().min(1, 'Please confirm your new password'),
 }).refine((data) => data.newPassword === data.confirmPassword, {
@@ -42,6 +43,7 @@ type ResetForm = z.infer<typeof resetSchema>;
 
 export default function Login() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const [loading, setLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
@@ -50,6 +52,10 @@ export default function Login() {
   const [isRegistering, setIsRegistering] = useState(false);
   const [isResetting, setIsResetting] = useState(false);
   const [pendingApprovalMsg, setPendingApprovalMsg] = useState<string | null>(null);
+
+  const [sendingCode, setSendingCode] = useState(false);
+  const [codeSent, setCodeSent] = useState(false);
+  const [countdown, setCountdown] = useState(0);
 
   const { 
     register: registerLogin, 
@@ -77,10 +83,47 @@ export default function Login() {
     register: registerReset,
     handleSubmit: handleResetSubmit,
     reset: resetResetForm,
+    getValues: getResetValues,
+    setValue: setResetValue,
+    trigger: triggerReset,
     formState: { errors: resetErrors }
   } = useForm<ResetForm>({
-    resolver: zodResolver(resetSchema)
+    resolver: zodResolver(resetSchema),
+    defaultValues: {
+      email: '',
+      phone: '',
+      code: '',
+      newPassword: '',
+      confirmPassword: '',
+    }
   });
+
+  // Countdown timer for resend code
+  useEffect(() => {
+    if (countdown <= 0) return;
+    const timer = setInterval(() => {
+      setCountdown((prev) => (prev > 0 ? prev - 1 : 0));
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [countdown]);
+
+  // Check URL params if arrived via email link
+  useEffect(() => {
+    const resetParam = searchParams.get('reset');
+    const tokenParam = searchParams.get('token');
+    const emailParam = searchParams.get('email');
+    if (resetParam === 'true' || tokenParam) {
+      setIsResetting(true);
+      setIsRegistering(false);
+      if (emailParam) {
+        setResetValue('email', emailParam);
+      }
+      if (tokenParam) {
+        setResetValue('code', tokenParam);
+        setCodeSent(true);
+      }
+    }
+  }, [searchParams, setResetValue]);
 
   const onLoginSubmit = async (data: LoginForm) => {
     setLoading(true);
@@ -126,21 +169,65 @@ export default function Login() {
     }
   };
 
+  const handleSendResetCode = async () => {
+    const email = getResetValues('email')?.trim();
+    const phone = getResetValues('phone')?.trim();
+
+    if (!email) {
+      toast.error('Please enter your registered email address first.');
+      triggerReset('email');
+      return;
+    }
+    const emailValid = await triggerReset('email');
+    if (!emailValid) return;
+
+    if (!phone) {
+      toast.error('Please enter your registered mobile phone number.');
+      triggerReset('phone');
+      return;
+    }
+    const phoneValid = await triggerReset('phone');
+    if (!phoneValid) return;
+
+    setSendingCode(true);
+    try {
+      const res = await authService.sendResetCode({ email, phone });
+      setCodeSent(true);
+      setCountdown(60);
+      if (res?.code) {
+        setResetValue('code', res.code, { shouldValidate: true });
+        toast.success(res.message || `OTP Code: ${res.code}`, { duration: 8000 });
+      } else {
+        toast.success(res?.message || 'Verification code sent to your registered email!');
+      }
+    } catch (e: any) {
+      toast.error(e.response?.data?.message || 'Authentication failed. Please verify your email and phone number.');
+    } finally {
+      setSendingCode(false);
+    }
+  };
+
   const onResetSubmit = async (data: ResetForm) => {
+    if (!data.code || !data.code.trim()) {
+      toast.error('Please enter the verification code sent to your email.');
+      return;
+    }
     setLoading(true);
     try {
       const res = await authService.resetPasswordDirect({
         email: data.email.trim().toLowerCase(),
         phone: data.phone?.trim() || undefined,
+        code: data.code.trim(),
         newPassword: data.newPassword,
       });
       toast.success(res?.message ?? 'Password reset successfully!');
       setIsResetting(false);
       resetResetForm();
+      setCodeSent(false);
       setLoginValue('email', data.email.trim().toLowerCase(), { shouldValidate: true });
       setLoginValue('password', '');
     } catch (e: any) {
-      toast.error(e.response?.data?.message ?? 'Failed to reset password. Please check your details.');
+      toast.error(e.response?.data?.message ?? 'Failed to reset password. Please check your verification code.');
     } finally {
       setLoading(false);
     }
@@ -207,7 +294,7 @@ export default function Login() {
             <form onSubmit={handleResetSubmit(onResetSubmit)} className="space-y-3">
               <div className="p-2.5 bg-teal-50/80 border border-teal-200/70 rounded-xl text-[11px] text-teal-900 flex items-center gap-2">
                 <KeyRound className="w-4 h-4 text-teal-600 shrink-0" />
-                <span>Reset password by verifying your email and mobile number.</span>
+                <span>Enter your registered email and mobile number to authenticate and receive your OTP code.</span>
               </div>
 
               {/* Email Address */}
@@ -233,11 +320,21 @@ export default function Login() {
                 )}
               </div>
 
-              {/* Phone Number */}
+              {/* Mobile Phone */}
               <div>
-                <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-600 mb-1">
-                  Registered Mobile Phone (Optional)
-                </label>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-600">
+                    Registered Mobile Phone *
+                  </label>
+                  <button
+                    type="button"
+                    onClick={handleSendResetCode}
+                    disabled={sendingCode || countdown > 0}
+                    className="text-[10px] font-bold text-teal-600 hover:text-teal-700 disabled:text-slate-400 disabled:cursor-not-allowed cursor-pointer transition-colors"
+                  >
+                    {sendingCode ? 'Sending...' : countdown > 0 ? `Resend (${countdown}s)` : codeSent ? 'Resend Code' : 'Send Code'}
+                  </button>
+                </div>
                 <div className="relative">
                   <div className="absolute inset-y-0 left-0 pl-2.5 flex items-center pointer-events-none text-slate-400">
                     <Phone className="w-3.5 h-3.5" />
@@ -245,13 +342,55 @@ export default function Login() {
                   <input
                     {...registerReset('phone')}
                     type="tel"
-                    placeholder="10-digit mobile number"
-                    className="w-full pl-8 pr-2.5 py-2 bg-slate-50/80 border border-slate-200 rounded-xl text-xs font-medium text-slate-800 placeholder-slate-400 focus:outline-none focus:bg-white focus:border-teal-500 focus:ring-2 focus:ring-teal-500/10 transition-all"
+                    placeholder="10-digit registered mobile number"
+                    className="w-full pl-8 pr-24 py-2 bg-slate-50/80 border border-slate-200 rounded-xl text-xs font-medium text-slate-800 placeholder-slate-400 focus:outline-none focus:bg-white focus:border-teal-500 focus:ring-2 focus:ring-teal-500/10 transition-all"
                   />
+                  <button
+                    type="button"
+                    onClick={handleSendResetCode}
+                    disabled={sendingCode || countdown > 0}
+                    className="absolute inset-y-1 right-1 px-2.5 bg-teal-600/10 hover:bg-teal-600/20 text-teal-700 text-[10px] font-bold rounded-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1 cursor-pointer"
+                  >
+                    {sendingCode ? (
+                      <div className="w-2.5 h-2.5 border-2 border-teal-600 border-t-transparent rounded-full animate-spin" />
+                    ) : (
+                      <span>{countdown > 0 ? `${countdown}s` : codeSent ? 'Resend' : 'Send Code'}</span>
+                    )}
+                  </button>
                 </div>
                 {resetErrors.phone && (
                   <p className="text-[10px] text-rose-500 font-semibold mt-1">
                     {resetErrors.phone.message}
+                  </p>
+                )}
+              </div>
+
+              {/* Verification Code */}
+              <div>
+                <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-600 mb-1">
+                  Email Verification Code (OTP) *
+                </label>
+                <div className="relative">
+                  <div className="absolute inset-y-0 left-0 pl-2.5 flex items-center pointer-events-none text-slate-400">
+                    <ShieldCheck className="w-3.5 h-3.5" />
+                  </div>
+                  <input
+                    {...registerReset('code')}
+                    type="text"
+                    maxLength={32}
+                    placeholder="Enter 6-digit code or paste token"
+                    className="w-full pl-8 pr-2.5 py-2 bg-slate-50/80 border border-slate-200 rounded-xl text-xs font-semibold tracking-wider text-slate-800 placeholder-slate-400 placeholder:tracking-normal focus:outline-none focus:bg-white focus:border-teal-500 focus:ring-2 focus:ring-teal-500/10 transition-all"
+                  />
+                </div>
+                {resetErrors.code && (
+                  <p className="text-[10px] text-rose-500 font-semibold mt-1">
+                    {resetErrors.code.message}
+                  </p>
+                )}
+                {codeSent && !resetErrors.code && (
+                  <p className="text-[10px] text-emerald-600 font-medium mt-1 flex items-center gap-1">
+                    <CheckCircle2 className="w-3 h-3 text-emerald-500 shrink-0" />
+                    <span>OTP code generated & sent! Please check your email or use the code above.</span>
                   </p>
                 )}
               </div>
@@ -326,11 +465,11 @@ export default function Login() {
                 {loading ? (
                   <>
                     <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                    <span>Resetting Password...</span>
+                    <span>Verifying & Setting Password...</span>
                   </>
                 ) : (
                   <>
-                    <span>Reset Password</span>
+                    <span>Verify Code & Reset Password</span>
                     <ArrowRight className="w-3.5 h-3.5" />
                   </>
                 )}

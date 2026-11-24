@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Users, Shield, FileText, TrendingUp, DollarSign, AlertCircle,
@@ -9,7 +9,8 @@ import {
 import { format, isToday, isTomorrow, differenceInDays } from 'date-fns';
 import {
   useDashboardKpis, useDashboardRevenue, useDashboardPortfolio,
-  useDashboardPipeline, useDashboardDbSummary, useDashboardAnalytics
+  useDashboardPipeline, useDashboardDbSummary, useDashboardAnalytics,
+  useDashboardClaims
 } from '@hooks/useDashboard';
 import { useClaims } from '@hooks/useClaims';
 import { LineChartWidget, PieChartWidget, BarChartWidget, CoverageBarChartWidget } from '@comps/common/Charts';
@@ -150,11 +151,7 @@ const MOCK_LEADS_STATUS_WISE = [
 ];
 
 const LEAD_STATUS_BARS = [
-  { key: 'hot', label: 'Hot', color: '#ef4444' }, // red
-  { key: 'warm', label: 'Warm', color: '#f59e0b' }, // amber
-  { key: 'cold', label: 'Cold', color: '#3b82f6' }, // blue
-  { key: 'converted', label: 'Converted', color: '#10b981' }, // emerald
-  { key: 'dropped', label: 'Dropped', color: '#64748b' }, // slate
+  { key: 'count', label: 'Leads', color: '#3b82f6' },
 ];
 
 // ── Comprehensive Dummy Fallback Data ─────────────────────────────────────────
@@ -306,15 +303,17 @@ function PremiumKpiCard({ label, value, trend, trendUp = true, icon, color, onCl
 }
 
 // ── Contacts Breakdown Indicator Card ─────────────────────────────────────────
-function ContactsBreakdownCard({ data }: { data: { total: number; male: number; female: number; under18: number; above60: number } }) {
+function ContactsBreakdownCard({ data }: { data: { total: number; male: number; female: number; otherGender?: number; unspecifiedGender?: number; under18: number; above60: number } }) {
   const total = data?.total > 0 ? data.total : 1;
   const maleCount = data?.male || 0;
   const femaleCount = data?.female || 0;
+  const otherCount = (data?.otherGender || 0) + (data?.unspecifiedGender || 0);
   const under18Count = data?.under18 || 0;
   const above60Count = data?.above60 || 0;
 
   const malePct = ((maleCount / total) * 100).toFixed(0);
   const femalePct = ((femaleCount / total) * 100).toFixed(0);
+  const otherPct = ((otherCount / total) * 100).toFixed(0);
   const under18Pct = ((under18Count / total) * 100).toFixed(0);
   const above60Pct = ((above60Count / total) * 100).toFixed(0);
 
@@ -359,6 +358,20 @@ function ContactsBreakdownCard({ data }: { data: { total: number; male: number; 
             </div>
             <div className="w-full bg-gray-100 rounded-full h-1.5 overflow-hidden">
               <div className="h-full bg-pink-500 rounded-full transition-all duration-500" style={{ width: `${femalePct}%` }} />
+            </div>
+          </div>
+
+          {/* Other or unspecified gender */}
+          <div>
+            <div className="flex justify-between text-[11px] font-bold text-gray-700 mb-1.5">
+              <span className="flex items-center gap-1.5">
+                <span className="w-2.5 h-2.5 rounded-full bg-violet-500 inline-block shadow-xs" />
+                Other / Not specified
+              </span>
+              <span>{fmt(otherCount)} ({otherPct}%)</span>
+            </div>
+            <div className="w-full bg-gray-100 rounded-full h-1.5 overflow-hidden">
+              <div className="h-full bg-violet-500 rounded-full transition-all duration-500" style={{ width: `${otherPct}%` }} />
             </div>
           </div>
 
@@ -655,7 +668,10 @@ function AvgSumInsuredTermCard({ data }: { data?: any }) {
               <p className="text-[10px] font-semibold text-rose-600 mt-0.5">Per insured breadwinner</p>
             </div>
             <div className="w-full bg-rose-200/60 rounded-full h-1.5 mt-1 overflow-hidden">
-              <div className="bg-rose-600 h-full rounded-full" style={{ width: avgLifeCover !== '₹0' ? '85%' : '0%' }} />
+              <div
+                className="bg-rose-600 h-full rounded-full"
+                style={{ width: `${Math.min(100, Math.max(0, data?.over1CrPct || 0))}%` }}
+              />
             </div>
           </div>
 
@@ -702,47 +718,38 @@ function DatabaseSummary({ summaryData }: { summaryData: any }) {
     leadsGrouped = []
   } = summaryData || {};
 
-  // Policies: Active and Expired
+  // Policies: Active and other statuses
   const rawPolicyActive = policies
     .filter((p: any) => ['ACTIVE', 'INFORCE'].includes(p.status))
-    .reduce((acc: number, curr: any) => acc + (curr.count || 0), 0);
-  const rawPolicyExpired = policies
-    .filter((p: any) => ['EXPIRED', 'LAPSED', 'CANCELLED', 'SURRENDERED', 'INACTIVE_OLD'].includes(p.status))
     .reduce((acc: number, curr: any) => acc + (curr.count || 0), 0);
   const rawPolicyTotal = policies.reduce((acc: number, curr: any) => acc + (curr.count || 0), 0);
 
   const policyTotal = rawPolicyTotal;
   const policyActive = rawPolicyActive;
-  const policyExpired = rawPolicyExpired;
+  const policyOther = Math.max(0, policyTotal - policyActive);
 
   // Contacts: Active and Inactive
   const totalContacts = contacts;
-  const contactsActive = rawContactsActive !== undefined ? rawContactsActive : Math.round(totalContacts * 0.9);
-  const contactsInactive = rawContactsInactive !== undefined ? rawContactsInactive : (totalContacts - contactsActive);
+  const contactsActive = rawContactsActive ?? 0;
+  const contactsInactive = rawContactsInactive ?? 0;
 
-  // Leads: Hopeful (Interested, Hot, Very Hot, Contacted, Proposal, Login, Payment) and Hopeless (Lost, Not Interested)
+  // Leads: in progress and completed
   const totalLeads = leads;
-  const leadsHopeful = leadsGrouped.length > 0
-    ? leadsGrouped.filter((l: any) => !['LOST', 'DROPPED', 'NOT_INTERESTED'].includes(l.stage)).reduce((acc: number, curr: any) => acc + (curr.count || 0), 0)
-    : Math.round(totalLeads * 0.76);
-  const leadsHopeless = totalLeads - leadsHopeful;
+  const leadsCompleted = leadsGrouped
+    .filter((l: any) => ['PAYMENT_DONE', 'PROCESS_COMPLETED'].includes(l.stage))
+    .reduce((acc: number, curr: any) => acc + (curr.count || 0), 0);
+  const leadsInProgress = Math.max(0, totalLeads - leadsCompleted);
 
-  // Claims: Active, Settled, Inprogress
-  const rawClaimActive = claims
-    .filter((c: any) => ['INTIMATED', 'DOC_COLLECTION', 'FILED'].includes(c.status))
-    .reduce((acc: number, curr: any) => acc + (curr.count || 0), 0);
-  const rawClaimInProgress = claims
-    .filter((c: any) => c.status === 'IN_REVIEW' || c.status === 'IN_PROGRESS')
-    .reduce((acc: number, curr: any) => acc + (curr.count || 0), 0);
-  const rawClaimSettled = claims
-    .filter((c: any) => c.status === 'SETTLED' || c.status === 'APPROVED')
-    .reduce((acc: number, curr: any) => acc + (curr.count || 0), 0);
+  // Claims: open, settled and rejected
   const rawClaimTotal = claims.reduce((acc: number, curr: any) => acc + (curr.count || 0), 0);
-
   const claimTotal = rawClaimTotal;
-  const claimActive = rawClaimActive;
-  const claimSettled = rawClaimSettled;
-  const claimInProgress = rawClaimInProgress;
+  const claimSettled = claims
+    .filter((c: any) => c.status === 'SETTLED')
+    .reduce((acc: number, curr: any) => acc + (curr.count || 0), 0);
+  const claimRejected = claims
+    .filter((c: any) => c.status === 'REJECTED')
+    .reduce((acc: number, curr: any) => acc + (curr.count || 0), 0);
+  const claimOpen = Math.max(0, claimTotal - claimSettled - claimRejected);
 
   return (
     <div className="bg-white rounded-2xl border border-gray-100 p-5 shadow-sm h-full flex flex-col justify-between">
@@ -769,34 +776,32 @@ function DatabaseSummary({ summaryData }: { summaryData: any }) {
                   <span className="text-gray-400 font-medium">{contactsInactive} Inactive</span>
                 </td>
               </tr>
-              {/* Leads: Hopeful & Hopeless */}
+              {/* Leads: in progress & completed */}
               <tr className="hover:bg-gray-50/50">
                 <td className="px-4 py-3 font-semibold text-gray-950">Leads</td>
                 <td className="px-4 py-3 font-bold text-indigo-600">{totalLeads}</td>
                 <td className="px-4 py-3 text-gray-500">
-                  <span className="text-emerald-600 font-semibold">{leadsHopeful} Hopeful</span>{' '}
-                  <span className="text-gray-400 text-[10px]">(Interested & above)</span> •{' '}
-                  <span className="text-rose-500 font-semibold">{leadsHopeless} Hopeless</span>{' '}
-                  <span className="text-gray-400 text-[10px]">(Lost / Not interested)</span>
+                  <span className="text-emerald-600 font-semibold">{leadsInProgress} In Progress</span> •{' '}
+                  <span className="text-blue-600 font-semibold">{leadsCompleted} Completed</span>
                 </td>
               </tr>
-              {/* Policies: Active & Expired */}
+              {/* Policies: Active & other statuses */}
               <tr className="hover:bg-gray-50/50">
                 <td className="px-4 py-3 font-semibold text-gray-950">Policies</td>
                 <td className="px-4 py-3 font-bold text-blue-600">{policyTotal}</td>
                 <td className="px-4 py-3 text-gray-500">
                   <span className="text-emerald-600 font-semibold">{policyActive} Active</span> •{' '}
-                  <span className="text-amber-500 font-medium">{policyExpired} Expired</span>
+                  <span className="text-amber-500 font-medium">{policyOther} Other / Inactive</span>
                 </td>
               </tr>
-              {/* Claims: Active, Settled, Inprogress */}
+              {/* Claims: open, settled and rejected */}
               <tr className="hover:bg-gray-50/50">
                 <td className="px-4 py-3 font-semibold text-gray-950">Claims</td>
                 <td className="px-4 py-3 font-bold text-red-500">{claimTotal}</td>
                 <td className="px-4 py-3 text-gray-500">
-                  <span className="text-blue-500 font-semibold">{claimActive} Active</span> •{' '}
+                  <span className="text-blue-500 font-semibold">{claimOpen} Open</span> •{' '}
                   <span className="text-emerald-600 font-semibold">{claimSettled} Settled</span> •{' '}
-                  <span className="text-amber-500 font-medium">{claimInProgress} In-Progress</span>
+                  <span className="text-rose-500 font-medium">{claimRejected} Rejected</span>
                 </td>
               </tr>
             </tbody>
@@ -827,13 +832,57 @@ function ClaimsReportsTab() {
   const [graphCompanySelect, setGraphCompanySelect] = useState('ALL');
   const [pieChartMetric, setPieChartMetric] = useState<'count' | 'claimed' | 'settled'>('count');
   const [timeGraphMonths, setTimeGraphMonths] = useState<string>('12');
+  const [hoveredMonth, setHoveredMonth] = useState<number | null>(null);
+  const [claimsPage, setClaimsPage] = useState(1);
+
+  // Normalization Helpers matching Claims module
+  const normalizeClaimType = (rawType?: string | null): 'Cashless' | 'Reimbursement' => {
+    const t = String(rawType || '').trim().toUpperCase();
+    if (t.includes('CASHLESS')) return 'Cashless';
+    return 'Reimbursement';
+  };
+
+  const getClaimAmount = (c: any): number => {
+    const notes = getClaimNotesData(c.notes);
+    if (c.claimAmount !== undefined && c.claimAmount !== null && Number(c.claimAmount) > 0) {
+      return Number(c.claimAmount);
+    }
+    if (notes.amtFinalBill !== undefined && notes.amtFinalBill !== null && Number(notes.amtFinalBill) > 0) {
+      return Number(notes.amtFinalBill);
+    }
+    return Number(c.claimAmount || 0);
+  };
+
+  const getClaimSettledAmount = (c: any): number => {
+    const notes = getClaimNotesData(c.notes);
+    const statusStr = getClaimUiStatus(c);
+    const isSettled = statusStr === 'Settled' || (c.status || '').toUpperCase() === 'SETTLED' || (notes.uiClaimStatus || '').toLowerCase().includes('settle');
+    if (!isSettled) return 0;
+    if (c.approvedAmount !== undefined && c.approvedAmount !== null && (c.approvedAmount as any) !== '' && Number.isFinite(Number(c.approvedAmount))) {
+      return Number(c.approvedAmount);
+    }
+    if (notes.amtPayableToInsured !== undefined && notes.amtPayableToInsured !== null && Number(notes.amtPayableToInsured) > 0) {
+      return Number(notes.amtPayableToInsured);
+    }
+    return Number(c.claimAmount || 0);
+  };
+
+  const getClaimCompany = (c: any): string => {
+    const notes = getClaimNotesData(c.notes);
+    return c.policy?.plan?.company?.name || notes.insuranceCompany || (c.policy as any)?.companyName || 'Other';
+  };
+
+  const getClaimHospital = (c: any): string => {
+    const notes = getClaimNotesData(c.notes);
+    return (notes.hospital || notes.hospitalName || '').trim() || 'Outpatient / Daycare';
+  };
 
   // Extract unique companies for filter dropdown
   const companies = useMemo(() => {
     const set = new Set<string>();
     claims.forEach((c: any) => {
-      const name = c.policy?.plan?.company?.name;
-      if (name) set.add(name);
+      const name = getClaimCompany(c);
+      if (name && name !== 'Other') set.add(name);
     });
     return Array.from(set).sort();
   }, [claims]);
@@ -841,23 +890,21 @@ function ClaimsReportsTab() {
   // Filter claims
   const filteredClaims = useMemo(() => {
     return claims.filter((c: any) => {
-      const notesData = getClaimNotesData(c.notes);
-
       // Filter by Type
       if (claimType !== 'ALL') {
-        const typeMatch = (c.claimType || '').toUpperCase() === claimType.toUpperCase();
-        if (!typeMatch) return false;
+        const normType = normalizeClaimType(c.claimType);
+        if (normType.toUpperCase() !== claimType.toUpperCase()) return false;
       }
 
       // Filter by Company
       if (selectedCompany !== 'ALL') {
-        const comp = c.policy?.plan?.company?.name || '';
+        const comp = getClaimCompany(c);
         if (comp.toLowerCase() !== selectedCompany.toLowerCase()) return false;
       }
 
       // Filter by Hospital
       if (hospitalQuery.trim()) {
-        const hospName = (notesData.hospital || '').toLowerCase();
+        const hospName = getClaimHospital(c).toLowerCase();
         if (!hospName.includes(hospitalQuery.toLowerCase())) return false;
       }
 
@@ -895,6 +942,26 @@ function ClaimsReportsTab() {
     });
   }, [claims, claimType, selectedCompany, hospitalQuery, startDate, endDate, duration, selectedAgent]);
 
+  const claimsPerPage = 10;
+  const sortedClaims = useMemo(
+    () => [...filteredClaims].sort((a: any, b: any) => {
+      const dateA = new Date(a.intimatedAt || a.createdAt || 0).getTime();
+      const dateB = new Date(b.intimatedAt || b.createdAt || 0).getTime();
+      return (Number.isFinite(dateB) ? dateB : 0) - (Number.isFinite(dateA) ? dateA : 0);
+    }),
+    [filteredClaims]
+  );
+  const totalClaimsPages = Math.ceil(sortedClaims.length / claimsPerPage);
+  const currentClaimsPage = Math.min(claimsPage, Math.max(totalClaimsPages, 1));
+  const visibleClaims = sortedClaims.slice(
+    (currentClaimsPage - 1) * claimsPerPage,
+    currentClaimsPage * claimsPerPage
+  );
+
+  useEffect(() => {
+    setClaimsPage(1);
+  }, [filteredClaims]);
+
   // Calculations for Advanced Analytics & KPIs
   const stats = useMemo(() => {
     let totalClaimed = 0;
@@ -902,7 +969,10 @@ function ClaimsReportsTab() {
     let totalPending = 0;
     const companyMap: Record<string, { count: number; claimed: number; settled: number }> = {};
     const hospitalMap: Record<string, { count: number; claimed: number; settled: number }> = {};
-    const typeMap: Record<string, { count: number; claimed: number; settled: number }> = {};
+    const typeMap: Record<string, { count: number; claimed: number; settled: number }> = {
+      Cashless: { count: 0, claimed: 0, settled: 0 },
+      Reimbursement: { count: 0, claimed: 0, settled: 0 },
+    };
     const statusMap: Record<string, { count: number; claimed: number; settled: number }> = {
       Pending: { count: 0, claimed: 0, settled: 0 },
       'In Progress': { count: 0, claimed: 0, settled: 0 },
@@ -912,21 +982,12 @@ function ClaimsReportsTab() {
     };
 
     filteredClaims.forEach((c: any) => {
-      const notes = getClaimNotesData(c.notes);
-      const claimed = Number(c.claimAmount || 0);
-      const approved = Number(c.approvedAmount || 0);
-      const notedSettlement = Number(notes.amtPayableToInsured || 0);
+      const claimed = getClaimAmount(c);
+      const settled = getClaimSettledAmount(c);
       const statusStr = getClaimUiStatus(c);
-      const isSettled = statusStr === 'Settled';
-      const settled = approved > 0
-        ? approved
-        : notedSettlement > 0
-          ? notedSettlement
-          : isSettled ? claimed : (c.status === 'SETTLED' || c.status === 'APPROVED' ? (approved || claimed) : 0);
-
-      const company = c.policy?.plan?.company?.name || 'Unknown Company';
-      const hospital = notes.hospital || 'Outpatient / Other';
-      const type = c.claimType || 'Other';
+      const company = getClaimCompany(c);
+      const hospital = getClaimHospital(c);
+      const type = normalizeClaimType(c.claimType);
 
       totalClaimed += claimed;
       totalSettled += settled;
@@ -945,7 +1006,6 @@ function ClaimsReportsTab() {
       hospitalMap[hospital].settled += settled;
 
       // Type
-      if (!typeMap[type]) typeMap[type] = { count: 0, claimed: 0, settled: 0 };
       typeMap[type].count++;
       typeMap[type].claimed += claimed;
       typeMap[type].settled += settled;
@@ -968,9 +1028,9 @@ function ClaimsReportsTab() {
       pendingClaimed,
       settlementRatio,
       avgClaim,
-      companies: Object.entries(companyMap).map(([name, v]) => ({ name, ...v })),
-      hospitals: Object.entries(hospitalMap).map(([name, v]) => ({ name, ...v })),
-      types: Object.entries(typeMap).map(([name, v]) => ({ name, ...v })),
+      companies: Object.entries(companyMap).map(([name, v]) => ({ name, ...v })).sort((a, b) => b.claimed - a.claimed),
+      hospitals: Object.entries(hospitalMap).map(([name, v]) => ({ name, ...v })).sort((a, b) => b.count - a.count),
+      types: Object.entries(typeMap).filter(([, v]) => v.count > 0).map(([name, v]) => ({ name, ...v })),
       statuses: Object.entries(statusMap).map(([name, v]) => ({ name, ...v })),
     };
   }, [filteredClaims]);
@@ -982,9 +1042,12 @@ function ClaimsReportsTab() {
     filteredClaims.forEach((c: any) => {
       const dStr = c.intimatedAt || c.createdAt;
       if (dStr) {
-        const m = new Date(dStr).getMonth();
-        if (m >= 0 && m < 12) {
-          values[m] += Number(c.claimAmount || 0);
+        const d = new Date(dStr);
+        if (!isNaN(d.getTime())) {
+          const m = d.getMonth();
+          if (m >= 0 && m < 12) {
+            values[m] += getClaimAmount(c);
+          }
         }
       }
     });
@@ -1030,78 +1093,87 @@ function ClaimsReportsTab() {
 
   // Graph Data 1: Company wise (Claimed vs Settled)
   const companyGraphData = useMemo(() => {
-    const map = new Map<string, { company: string; claimed: number; settled: number }>();
-    filteredClaims.forEach((c: any) => {
-      const comp = c.policy?.plan?.company?.name || 'Other';
-      const entry = map.get(comp) || { company: comp, claimed: 0, settled: 0 };
-      entry.claimed += Number(c.claimAmount || 0);
-      if (c.status === 'SETTLED' || c.status === 'APPROVED' || getClaimUiStatus(c) === 'Settled') {
-        entry.settled += Number(c.approvedAmount || c.claimAmount || 0);
-      }
-      map.set(comp, entry);
-    });
-
-    const sorted = Array.from(map.values()).sort((a, b) => b.claimed - a.claimed);
+    const list = stats.companies.map(c => ({ company: c.name, claimed: c.claimed, settled: c.settled }));
     if (graphCompanySelect === 'ALL') {
-      return sorted.slice(0, 5);
+      return list.slice(0, 5);
     }
-    return sorted.filter(c => c.company === graphCompanySelect);
-  }, [filteredClaims, graphCompanySelect]);
+    return list.filter(c => c.company === graphCompanySelect);
+  }, [stats.companies, graphCompanySelect]);
 
   // Graph Data 2: Cashless vs Reimburse
   const typeGraphData = useMemo(() => {
-    const map = new Map<string, { count: number; claimed: number; settled: number }>();
-    filteredClaims.forEach((c: any) => {
-      const type = c.claimType || 'Unknown';
-      const entry = map.get(type) || { count: 0, claimed: 0, settled: 0 };
-      entry.count += 1;
-      entry.claimed += Number(c.claimAmount || 0);
-      if (c.status === 'SETTLED' || c.status === 'APPROVED' || getClaimUiStatus(c) === 'Settled') {
-        entry.settled += Number(c.approvedAmount || c.claimAmount || 0);
-      }
-      map.set(type, entry);
-    });
-    return Array.from(map.entries()).map(([name, data]) => ({ name, ...data }));
-  }, [filteredClaims]);
+    return stats.types.map(t => ({
+      name: t.name,
+      count: t.count,
+      claimed: t.claimed,
+      settled: t.settled,
+      value: pieChartMetric === 'count' ? t.count : pieChartMetric === 'claimed' ? t.claimed : t.settled,
+    }));
+  }, [stats.types, pieChartMetric]);
 
   // Graph Data 3: Hospital wise (Claims count)
   const hospitalGraphData = useMemo(() => {
-    const map = new Map<string, number>();
-    filteredClaims.forEach((c: any) => {
-      const notesData = getClaimNotesData(c.notes);
-      const hosp = notesData.hospital || 'Direct Clinic/Other';
-      map.set(hosp, (map.get(hosp) ?? 0) + 1);
-    });
-    return Array.from(map.entries())
-      .map(([name, value]) => ({ name, value }))
-      .sort((a, b) => b.value - a.value)
-      .slice(0, 8);
-  }, [filteredClaims]);
+    return stats.hospitals
+      .slice(0, 8)
+      .map(h => ({ name: h.name, value: h.count }));
+  }, [stats.hospitals]);
 
   // Graph Data 4: Duration / Timeline (Claimed vs Settled)
   const timeGraphData = useMemo(() => {
-    const map = new Map<string, { month: string; claimed: number; settled: number }>();
-    const sorted = [...filteredClaims].sort((a: any, b: any) => {
-      const da = a.intimatedAt ? new Date(a.intimatedAt) : new Date(a.createdAt);
-      const db = b.intimatedAt ? new Date(b.intimatedAt) : new Date(b.createdAt);
-      return da.getTime() - db.getTime();
-    });
+    const now = new Date();
+    const monthsCount = timeGraphMonths === 'ALL' ? 12 : parseInt(timeGraphMonths, 10) || 12;
+    const buckets: { key: string; month: string; claimed: number; settled: number }[] = [];
 
-    sorted.forEach((c: any) => {
-      const date = c.intimatedAt ? new Date(c.intimatedAt) : new Date(c.createdAt);
-      const key = format(date, 'MMM yyyy');
-      const entry = map.get(key) || { month: key, claimed: 0, settled: 0 };
-      entry.claimed += Number(c.claimAmount || 0);
-      if (c.status === 'SETTLED' || c.status === 'APPROVED' || getClaimUiStatus(c) === 'Settled') {
-        entry.settled += Number(c.approvedAmount || c.claimAmount || 0);
+    if (timeGraphMonths === 'ALL') {
+      let oldestDate = new Date();
+      filteredClaims.forEach((c: any) => {
+        const dStr = c.intimatedAt || c.createdAt;
+        if (dStr) {
+          const d = new Date(dStr);
+          if (!isNaN(d.getTime()) && d < oldestDate) oldestDate = d;
+        }
+      });
+      const cur = new Date(oldestDate.getFullYear(), oldestDate.getMonth(), 1);
+      const end = new Date(now.getFullYear(), now.getMonth(), 1);
+      while (cur <= end) {
+        buckets.push({
+          key: format(cur, 'yyyy-MM'),
+          month: format(cur, 'MMM yyyy'),
+          claimed: 0,
+          settled: 0,
+        });
+        cur.setMonth(cur.getMonth() + 1);
       }
-      map.set(key, entry);
+    } else {
+      for (let i = monthsCount - 1; i >= 0; i--) {
+        const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+        buckets.push({
+          key: format(d, 'yyyy-MM'),
+          month: format(d, 'MMM yyyy'),
+          claimed: 0,
+          settled: 0,
+        });
+      }
+    }
+
+    filteredClaims.forEach((c: any) => {
+      const dStr = c.intimatedAt || c.createdAt;
+      if (!dStr) return;
+      const d = new Date(dStr);
+      if (isNaN(d.getTime())) return;
+      const bucketKey = format(d, 'yyyy-MM');
+      const b = buckets.find(x => x.key === bucketKey);
+      if (b) {
+        b.claimed += getClaimAmount(c);
+        b.settled += getClaimSettledAmount(c);
+      }
     });
 
-    const values = Array.from(map.values());
-    if (timeGraphMonths === 'ALL') return values;
-    const num = parseInt(timeGraphMonths, 10) || 12;
-    return values.slice(-num);
+    return buckets.map(b => ({
+      month: b.month,
+      claimed: b.claimed,
+      settled: b.settled,
+    }));
   }, [filteredClaims, timeGraphMonths]);
 
   if (claimsLoading) {
@@ -1332,9 +1404,16 @@ function ClaimsReportsTab() {
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         {/* Chart 1: Claims Trend (Monthly) */}
         <div className="bg-white p-5 rounded-2xl border border-gray-100 shadow-sm space-y-4">
-          <div>
-            <h4 className="text-xs font-bold text-gray-800 uppercase tracking-wider">Claims Trend (Monthly)</h4>
-            <p className="text-[10px] text-gray-400 font-semibold">Total claimed amount in ₹ across months</p>
+          <div className="flex items-center justify-between">
+            <div>
+              <h4 className="text-xs font-bold text-gray-800 uppercase tracking-wider">Claims Trend (Monthly)</h4>
+              <p className="text-[10px] text-gray-400 font-semibold">Total claimed amount in ₹ across months</p>
+            </div>
+            {hoveredMonth !== null && monthlyData.values[hoveredMonth] > 0 && (
+              <span className="text-[10px] font-bold text-blue-600 bg-blue-50 px-2 py-0.5 rounded-md border border-blue-100">
+                {monthlyData.months[hoveredMonth]}: ₹{monthlyData.values[hoveredMonth].toLocaleString('en-IN')}
+              </span>
+            )}
           </div>
           <div className="relative h-44 flex items-end justify-center">
             <svg viewBox="0 0 240 120" className="w-full h-full">
@@ -1357,9 +1436,24 @@ function ClaimsReportsTab() {
                     {monthlyData.values.map((val, idx) => {
                       const x = 10 + idx * 20;
                       const y = 100 - (val / maxVal) * 80;
-                      if (val === 0) return null;
+                      const isHovered = hoveredMonth === idx;
                       return (
-                        <circle key={idx} cx={x} cy={y} r="3.5" fill="#2563eb" stroke="#ffffff" strokeWidth="1.5" />
+                        <g
+                          key={idx}
+                          onMouseEnter={() => setHoveredMonth(idx)}
+                          onMouseLeave={() => setHoveredMonth(null)}
+                          className="cursor-pointer"
+                        >
+                          <circle
+                            cx={x}
+                            cy={y}
+                            r={isHovered ? "5" : "3.5"}
+                            fill={isHovered ? "#1d4ed8" : "#2563eb"}
+                            stroke="#ffffff"
+                            strokeWidth="1.5"
+                          />
+                          <rect x={x - 10} y={10} width={20} height={100} fill="transparent" />
+                        </g>
                       );
                     })}
                   </>
@@ -1368,7 +1462,17 @@ function ClaimsReportsTab() {
 
               {/* X Axis Labels */}
               {monthlyData.months.map((m, idx) => (
-                <text key={m} x={10 + idx * 20} y="115" fontSize="6.5" fill="#94a3b8" textAnchor="middle">{m}</text>
+                <text
+                  key={m}
+                  x={10 + idx * 20}
+                  y="115"
+                  fontSize="6.5"
+                  fill={hoveredMonth === idx ? "#1d4ed8" : "#94a3b8"}
+                  fontWeight={hoveredMonth === idx ? "bold" : "normal"}
+                  textAnchor="middle"
+                >
+                  {m}
+                </text>
               ))}
             </svg>
           </div>
@@ -1386,8 +1490,11 @@ function ClaimsReportsTab() {
                 <circle cx="18" cy="18" r="15.915" fill="none" stroke="#f1f5f9" strokeWidth="3" />
                 {(() => {
                   let accumulatedPercent = 0;
-                  const colors = ['#3b82f6', '#10b981', '#f59e0b', '#ec4899', '#6366f1'];
-                  return stats.types.map((type, idx) => {
+                  const typeColors: Record<string, string> = {
+                    Cashless: '#10b981',
+                    Reimbursement: '#3b82f6',
+                  };
+                  return stats.types.map((type) => {
                     const pct = stats.totalClaims > 0 ? (type.count / stats.totalClaims) * 100 : 0;
                     const dashArray = `${pct} ${100 - pct}`;
                     const dashOffset = 100 - accumulatedPercent + 25;
@@ -1399,7 +1506,7 @@ function ClaimsReportsTab() {
                         cy="18"
                         r="15.915"
                         fill="none"
-                        stroke={colors[idx % colors.length]}
+                        stroke={typeColors[type.name] || '#6366f1'}
                         strokeWidth="3.5"
                         strokeDasharray={dashArray}
                         strokeDashoffset={dashOffset}
@@ -1413,15 +1520,18 @@ function ClaimsReportsTab() {
                 <span className="text-base font-bold text-gray-800">{stats.totalClaims}</span>
               </div>
             </div>
-            <div className="w-1/2 space-y-1.5 max-h-36 overflow-y-auto pr-1">
-              {stats.types.map((t, idx) => {
-                const colors = ['bg-blue-500', 'bg-emerald-500', 'bg-amber-500', 'bg-pink-500', 'bg-indigo-500'];
+            <div className="w-1/2 space-y-2 max-h-36 overflow-y-auto pr-1">
+              {stats.types.map((t) => {
+                const colorDot: Record<string, string> = {
+                  Cashless: 'bg-emerald-500',
+                  Reimbursement: 'bg-blue-500',
+                };
                 const pct = stats.totalClaims > 0 ? (t.count / stats.totalClaims) * 100 : 0;
                 return (
-                  <div key={t.name} className="flex flex-wrap items-center gap-1.5 text-[9px] text-gray-600">
-                    <span className={`w-2 h-2 rounded-full ${colors[idx % colors.length]}`} />
-                    <span className="truncate font-medium flex-1">{t.name}</span>
-                    <span className="font-bold text-gray-800">{pct.toFixed(0)}%</span>
+                  <div key={t.name} className="flex flex-wrap items-center gap-1.5 text-[10px] text-gray-600">
+                    <span className={`w-2.5 h-2.5 rounded-full ${colorDot[t.name] || 'bg-indigo-500'}`} />
+                    <span className="truncate font-semibold flex-1">{t.name}</span>
+                    <span className="font-bold text-gray-800">{pct.toFixed(0)}% ({t.count})</span>
                   </div>
                 );
               })}
@@ -1699,8 +1809,8 @@ function ClaimsReportsTab() {
                   { name: 'Older (90+ Days)', filter: (c: any) => (Date.now() - new Date(c.intimatedAt || c.createdAt).getTime()) / 86400000 > 90 },
                 ].map(range => {
                   const matched = filteredClaims.filter(range.filter);
-                  const claimed = matched.reduce((sum: number, c: any) => sum + Number(c.claimAmount || 0), 0);
-                  const settled = matched.reduce((sum: number, c: any) => sum + Number(c.approvedAmount || 0), 0);
+                  const claimed = matched.reduce((sum: number, c: any) => sum + getClaimAmount(c), 0);
+                  const settled = matched.reduce((sum: number, c: any) => sum + getClaimSettledAmount(c), 0);
                   const pct = stats.totalClaimed > 0 ? (claimed / stats.totalClaimed) * 100 : 0;
                   return (
                     <tr key={range.name} className="hover:bg-gray-50/50">
@@ -1737,7 +1847,7 @@ function ClaimsReportsTab() {
           </button>
         </div>
 
-        <div className="overflow-x-auto -mx-5 -mb-5">
+        <div className="overflow-x-auto -mx-5">
           <table className="w-full text-sm">
             <thead>
               <tr className="bg-gray-50/70 border-b border-gray-100">
@@ -1752,46 +1862,56 @@ function ClaimsReportsTab() {
                   <td colSpan={9} className="text-center py-8 text-xs text-gray-400">No claims match the filter</td>
                 </tr>
               ) : (
-                filteredClaims.map((c: any) => {
-                  const client = c.policy?.contact ? `${c.policy.contact.firstName} ${c.policy.contact.lastName}` : (c.contactName || 'Amit Sharma');
-                  const compName = c.policy?.plan?.company?.name || 'Star Health';
+                visibleClaims.map((c: any) => {
                   const notesData = getClaimNotesData(c.notes);
-                  const amount = Number(c.claimAmount ?? c.amount ?? 0);
-                  const approved = Number(c.approvedAmount ?? (c.status === 'SETTLED' ? amount : 0));
+                  const contactName = [c.contact?.firstName, c.contact?.lastName].filter(Boolean).join(' ');
+                  const policyContactName = [c.policy?.contact?.firstName, c.policy?.contact?.lastName].filter(Boolean).join(' ');
+                  const client = contactName || policyContactName || notesData.proposerName || notesData.patientName || c.contactName || '—';
+                  const compName = getClaimCompany(c);
+                  const amount = getClaimAmount(c);
+                  const settled = getClaimSettledAmount(c);
                   const uiStatus = getClaimUiStatus(c);
+                  const normType = normalizeClaimType(c.claimType);
+                  const claimTypeLabel = String(c.claimType || notesData.claimType || '—').trim() || '—';
+                  const claimDateValue = c.intimatedAt || c.createdAt;
+                  const claimDate = claimDateValue ? new Date(claimDateValue) : null;
+                  const hospitalDiagnosis = [
+                    notesData.hospital || notesData.hospitalName,
+                    notesData.diagnosis || notesData.diagnosisSimple,
+                  ].filter(Boolean).join(' • ') || '—';
 
                   return (
                     <tr key={c.id} className="hover:bg-blue-50/30 transition-colors text-xs">
-                      <td className="px-5 py-3.5 font-bold text-gray-900">{c.claimNumber ?? `CLM-${c.id.slice(-4).toUpperCase()}`}</td>
+                      <td className="px-5 py-3.5 font-bold text-gray-900">{c.claimNumber || '—'}</td>
                       <td className="px-5 py-3.5 text-gray-500 whitespace-nowrap">
-                        {c.intimatedAt
-                          ? format(new Date(c.intimatedAt), 'dd MMM yyyy')
-                          : c.createdAt
-                          ? format(new Date(c.createdAt), 'dd MMM yyyy')
-                          : '—'}
+                        {claimDate && Number.isFinite(claimDate.getTime()) ? format(claimDate, 'dd MMM yyyy') : '—'}
                       </td>
                       <td className="px-5 py-3.5 font-semibold text-gray-800">{client}</td>
                       <td className="px-5 py-3.5 text-gray-600">{compName}</td>
                       <td className="px-5 py-3.5">
-                        <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-slate-100 text-slate-700">
-                          {c.claimType || 'CASHLESS'}
+                        <span className={clsx(
+                          "text-[10px] font-bold px-2 py-0.5 rounded",
+                          normType === 'Cashless' ? 'bg-emerald-100 text-emerald-700' : 'bg-blue-100 text-blue-700'
+                        )}>
+                          {claimTypeLabel}
                         </span>
                       </td>
-                      <td className="px-5 py-3.5 text-gray-600 max-w-[200px] truncate">
-                        {notesData.hospital ? `${notesData.hospital} • ${notesData.diagnosis}` : (notesData.diagnosis || 'Hospitalization')}
+                      <td className="px-5 py-3.5 text-gray-600 max-w-[200px] truncate" title={hospitalDiagnosis}>
+                        {hospitalDiagnosis}
                       </td>
                       <td className="px-5 py-3.5 font-bold text-gray-900">₹{amount.toLocaleString('en-IN')}</td>
-                      <td className="px-5 py-3.5 font-bold text-emerald-600">{approved > 0 ? `₹${approved.toLocaleString('en-IN')}` : '—'}</td>
+                      <td className="px-5 py-3.5 font-bold text-emerald-600">{settled > 0 ? `₹${settled.toLocaleString('en-IN')}` : '—'}</td>
                       <td className="px-5 py-3.5">
                         <span className={clsx(
                           'inline-flex items-center px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider',
-                          uiStatus === 'Settled' || c.status === 'SETTLED' || c.status === 'APPROVED' ? 'bg-green-100 text-green-700' :
-                            uiStatus === 'Pending' || c.status === 'PENDING' ? 'bg-amber-100 text-amber-700' :
-                              uiStatus === 'In Progress' || c.status === 'IN_PROGRESS' ? 'bg-blue-100 text-blue-700' :
-                                uiStatus === 'Rejected' || c.status === 'REJECTED' ? 'bg-red-100 text-red-700' :
-                                  'bg-gray-100 text-gray-700'
+                          uiStatus === 'Settled' ? 'bg-emerald-100 text-emerald-700' :
+                            uiStatus === 'Approved' ? 'bg-purple-100 text-purple-700' :
+                              uiStatus === 'In Progress' ? 'bg-amber-100 text-amber-700' :
+                                uiStatus === 'Pending' ? 'bg-blue-100 text-blue-700' :
+                                  uiStatus === 'Rejected' ? 'bg-red-100 text-red-700' :
+                                    'bg-gray-100 text-gray-700'
                         )}>
-                          {uiStatus || c.status || 'PENDING'}
+                          {uiStatus}
                         </span>
                       </td>
                     </tr>
@@ -1800,6 +1920,32 @@ function ClaimsReportsTab() {
               )}
             </tbody>
           </table>
+        </div>
+        <div className="-mx-5 mt-3 flex items-center justify-between border-t border-gray-100 px-5 pt-3">
+          <span className="text-xs text-gray-500">
+            Showing {sortedClaims.length === 0 ? 0 : (currentClaimsPage - 1) * claimsPerPage + 1}–{Math.min(currentClaimsPage * claimsPerPage, sortedClaims.length)} of {sortedClaims.length} claims
+          </span>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setClaimsPage(page => Math.max(1, page - 1))}
+              disabled={currentClaimsPage <= 1}
+              className="rounded-md border border-gray-200 px-3 py-1.5 text-xs font-semibold text-gray-600 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              Previous
+            </button>
+            <span className="text-xs font-medium text-gray-500">
+              Page {totalClaimsPages === 0 ? 0 : currentClaimsPage} of {totalClaimsPages}
+            </span>
+            <button
+              type="button"
+              onClick={() => setClaimsPage(page => Math.min(totalClaimsPages, page + 1))}
+              disabled={currentClaimsPage >= totalClaimsPages}
+              className="rounded-md border border-gray-200 px-3 py-1.5 text-xs font-semibold text-gray-600 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              Next
+            </button>
+          </div>
         </div>
       </div>
     </div>
@@ -1843,6 +1989,7 @@ export default function Dashboard() {
   const { data: pipelineRes, isLoading: pipelineLoading } = useDashboardPipeline();
   const { data: summaryRes, isLoading: summaryLoading } = useDashboardDbSummary();
   const { data: analyticsRes, isLoading: analyticsLoading } = useDashboardAnalytics();
+  const { data: dashboardClaimsRes, isLoading: dashboardClaimsLoading } = useDashboardClaims();
   const analytics = analyticsRes?.data ?? analyticsRes;
 
   // Load claims and agents directly for the Overview sections
@@ -1858,7 +2005,7 @@ export default function Dashboard() {
     staleTime: 5 * 60_000,
   });
 
-  // Normalise KPIs with realistic fallback
+  // Normalize KPIs while data is loading.
   const kpis = kpiRes?.data ?? { totalPolicies: 0, activeLeads: 0, totalPremium: 0, totalContacts: 0 };
   const revenue = (revenueRes?.data && revenueRes.data.length > 0) ? revenueRes.data : [];
 
@@ -1911,6 +2058,15 @@ export default function Dashboard() {
 
   const pipelineData = (pipelineRes?.data && Array.isArray(pipelineRes.data)) ? pipelineRes.data : [];
   const summaryData = (summaryRes?.data ?? summaryRes) || {};
+  const claimsByStatus = Array.isArray(dashboardClaimsRes?.data)
+    ? dashboardClaimsRes.data
+      .filter((claim: any) => Number(claim.count) > 0)
+      .map((claim: any) => ({
+        name: String(claim.status).replace(/_/g, ' '),
+        value: Number(claim.count),
+      }))
+    : [];
+  const leadsStatusWise = analytics?.leadsStatusWiseByRange?.[leadsDateRange] || analytics?.leadsStatusWise || [];
   const claims = (claimsListRes?.data && Array.isArray(claimsListRes.data)) ? claimsListRes.data : [];
   const agents = (agentsRes?.data && Array.isArray(agentsRes.data)) ? agentsRes.data : [];
 
@@ -1971,7 +2127,6 @@ export default function Dashboard() {
                 <PremiumKpiCard
                   label="Total Policies"
                   value={fmt(kpis?.totalPolicies ?? kpis?.activePolicies)}
-                  trend={kpis?.totalPolicies ? "12.5%" : undefined}
                   trendUp={true}
                   icon={<Shield size={18} className="text-blue-600" />}
                   color="bg-blue-50"
@@ -1980,7 +2135,6 @@ export default function Dashboard() {
                 <PremiumKpiCard
                   label="Active Leads"
                   value={fmt(kpis?.openLeads)}
-                  trend={kpis?.openLeads ? "10.2%" : undefined}
                   trendUp={true}
                   icon={<TrendingUp size={18} className="text-amber-600" />}
                   color="bg-amber-50"
@@ -1988,8 +2142,7 @@ export default function Dashboard() {
                 />
                 <PremiumKpiCard
                   label="Total Premium"
-                  value={fmtINR(kpis?.monthlyPremium)}
-                  trend={kpis?.monthlyPremium ? "15.6%" : undefined}
+                  value={fmtINR(kpis?.totalPremium)}
                   trendUp={true}
                   icon={<DollarSign size={18} className="text-indigo-600" />}
                   color="bg-indigo-50"
@@ -1998,7 +2151,6 @@ export default function Dashboard() {
                 <PremiumKpiCard
                   label="Total Contacts"
                   value={fmt(analytics?.contactsDemographics?.total ?? kpis?.totalContacts ?? summaryData?.contacts ?? 0)}
-                  trend={kpis?.totalContacts ? "7.8%" : undefined}
                   trendUp={true}
                   icon={<Users size={18} className="text-teal-600" />}
                   color="bg-teal-50"
@@ -2020,7 +2172,7 @@ export default function Dashboard() {
                 >
                   <option value="this_month">This Month</option>
                   <option value="this_quarter">This Quarter</option>
-                  <option value="this_year">This Year (FY)</option>
+                  <option value="this_year">This Year</option>
                   <option value="all_time">All Time</option>
                 </select>
               </div>
@@ -2058,9 +2210,9 @@ export default function Dashboard() {
                   onChange={e => setRevenueMonths(Number(e.target.value))}
                   className="py-1 px-2.5 text-xs bg-gray-50 border border-gray-200 rounded-lg outline-none font-bold text-gray-600"
                 >
-                  <option value={3}>This Quarter</option>
+                  <option value={3}>Last 3 Months</option>
                   <option value={6}>Last 6 Months</option>
-                  <option value={12}>This Year</option>
+                  <option value={12}>Last 12 Months</option>
                 </select>
               </div>
               {revenueLoading ? (
@@ -2246,7 +2398,7 @@ export default function Dashboard() {
           <div className="grid grid-cols-1 gap-6 mb-6">
             <div className="bg-white rounded-2xl border border-gray-100 p-5 shadow-sm">
               <div className="flex flex-wrap justify-between items-center mb-6 gap-4">
-                <h3 className="text-sm font-semibold text-gray-700">New Leads Created (Stage Wise & Status Wise)</h3>
+              <h3 className="text-sm font-semibold text-gray-700">Leads by Stage</h3>
                 <div className="flex items-center gap-2">
                   <label className="text-[10px] font-bold text-gray-400 uppercase tracking-wide">Date Range:</label>
                   <select
@@ -2262,7 +2414,7 @@ export default function Dashboard() {
                 </div>
               </div>
               <BarChartWidget
-                data={analytics?.leadsStatusWise || []}
+                data={leadsStatusWise}
                 xKey="stage"
                 bars={LEAD_STATUS_BARS}
                 height={300}
@@ -2282,7 +2434,20 @@ export default function Dashboard() {
               />
             </div>
             <div className="lg:col-span-1">
-              <MfLeadsSummaryCard data={analytics?.mfBusiness || { inforceFolios: 0, monthlySip: 0, sipAum: 0, lumpsumAum: 0, totalAum: 0 }} />
+              {dashboardClaimsLoading ? (
+                <SkeletonChart height={240} />
+              ) : claimsByStatus.length > 0 ? (
+                <PieChartWidget
+                  title="Claims by Status"
+                  data={claimsByStatus}
+                  nameKey="name"
+                  valueKey="value"
+                />
+              ) : (
+                <div className="h-full min-h-[240px] bg-white rounded-2xl border border-gray-100 p-5 shadow-sm flex items-center justify-center text-sm text-gray-400">
+                  No claim data available
+                </div>
+              )}
             </div>
           </div>
 
@@ -2296,7 +2461,7 @@ export default function Dashboard() {
                 <p className="text-xs font-bold text-gray-400 uppercase tracking-wide">Policy Retention Rate</p>
                 <p className="text-xl font-black text-gray-900 mt-1">{analytics?.retentionRate !== undefined ? `${analytics.retentionRate}%` : '0%'}</p>
                 {analytics?.retentionRate ? (
-                  <span className="text-[10px] font-bold text-green-600">▲ +2.4% <span className="text-gray-400 font-medium">vs last month</span></span>
+                  <span className="text-[10px] font-medium text-gray-400">Based on current policy statuses</span>
                 ) : (
                   <span className="text-[10px] font-medium text-gray-400">No active policies</span>
                 )}
@@ -2311,7 +2476,7 @@ export default function Dashboard() {
                 <p className="text-xs font-bold text-gray-400 uppercase tracking-wide">Renewal Rate</p>
                 <p className="text-xl font-black text-gray-900 mt-1">{analytics?.renewalRate !== undefined ? `${analytics.renewalRate}%` : '0%'}</p>
                 {analytics?.renewalRate ? (
-                  <span className="text-[10px] font-bold text-green-600">▲ +3.7% <span className="text-gray-400 font-medium">vs last month</span></span>
+                  <span className="text-[10px] font-medium text-gray-400">Based on linked renewal policies</span>
                 ) : (
                   <span className="text-[10px] font-medium text-gray-400">No renewals yet</span>
                 )}
@@ -2323,9 +2488,9 @@ export default function Dashboard() {
                 <Star size={22} />
               </div>
               <div>
-                <p className="text-xs font-bold text-gray-400 uppercase tracking-wide">Customer Satisfaction</p>
-                <p className="text-xl font-black text-gray-900 mt-1">{analytics?.customerSatisfaction !== undefined ? `${analytics.customerSatisfaction}/5` : '0/5'}</p>
-                <span className="text-[10px] font-medium text-gray-400">Based on verified feedback</span>
+                <p className="text-xs font-bold text-gray-400 uppercase tracking-wide">Open Claims</p>
+                <p className="text-xl font-black text-gray-900 mt-1">{fmt(kpis?.openClaims ?? 0)}</p>
+                <span className="text-[10px] font-medium text-gray-400">Claims not settled or rejected</span>
               </div>
             </div>
           </div>

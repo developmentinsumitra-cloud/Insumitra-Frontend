@@ -5,7 +5,8 @@ import { insuranceService, contactsService, leadsService, policiesService, claim
 import {
   Plus, Pencil, Trash2, Building2, Shield, ChevronDown, ChevronRight,
   Download, FileText, Users, TrendingUp, Briefcase, Type, X, ShieldCheck,
-  ArrowLeft, Search, Check, Lock, Calendar, Star
+  ArrowLeft, Search, Check, Lock, Calendar, Star,
+  Eye, Phone, Copy, CheckCheck, Filter, ChevronUp
 } from 'lucide-react';
 import Modal from '@comps/common/Modal';
 import SettingsPanel from './SettingsPanel';
@@ -15,7 +16,8 @@ import { z } from 'zod';
 import { zodResolver } from '@hookform/resolvers/zod';
 import toast from 'react-hot-toast';
 import { DatePicker } from '@comps/common/DatePicker';
-import { getActiveDropdownOptions } from '../../utils/masterDropdowns';
+import { getActiveDropdownOptions, getHospitalTypeOptions } from '../../utils/masterDropdowns';
+import { useMasterDropdowns } from '../../hooks/useMasterDropdowns';
 import { useUiSettingsStore, FONT_SIZE_MAP, type FontSizeLevel } from '@store/ui-settings.store';
 import { useAuthStore } from '@store/auth.store';
 import { deletionRequestsService } from '@api/deletionRequestsService';
@@ -556,9 +558,197 @@ function FontSizePanel() {
   );
 }
 
+/* ─── Hospital Doctors Cell Component ───────────────────────────────────────── */
+interface HospitalDoctorsCellProps {
+  hospital: any;
+  globalSearch?: string;
+  onViewAll: () => void;
+}
+
+function HospitalDoctorsCell({ hospital, globalSearch = '', onViewAll }: HospitalDoctorsCellProps) {
+  const [cellSearch, setCellSearch] = useState('');
+  const [isExpanded, setIsExpanded] = useState(false);
+  const [copiedPhone, setCopiedPhone] = useState<string | null>(null);
+
+  const doctors: any[] = useMemo(() => {
+    return Array.isArray(hospital?.doctors) ? hospital.doctors : [];
+  }, [hospital?.doctors]);
+
+  const activeSearch = (cellSearch || globalSearch).trim().toLowerCase();
+
+  const filteredDoctors = useMemo(() => {
+    if (!activeSearch) return doctors;
+    return doctors.filter((d: any) => {
+      const matchName = String(d.name || '').toLowerCase().includes(activeSearch);
+      const matchDegree = String(d.degree || '').toLowerCase().includes(activeSearch);
+      const matchSpec = String(d.specialty || d.speciality || '').toLowerCase().includes(activeSearch);
+      const cleanPhone = String(d.phone || d.contactNo || '').replace(/\D/g, '');
+      const searchDigits = activeSearch.replace(/\D/g, '');
+      const matchPhone = searchDigits && cleanPhone ? cleanPhone.includes(searchDigits) : false;
+      return matchName || matchDegree || matchSpec || matchPhone;
+    });
+  }, [doctors, activeSearch]);
+
+  const copyNumber = (phone: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!phone) return;
+    navigator.clipboard?.writeText(phone);
+    setCopiedPhone(phone);
+    toast.success(`Copied ${phone}`);
+    setTimeout(() => setCopiedPhone(null), 2000);
+  };
+
+  if (doctors.length === 0) {
+    return (
+      <span className="text-slate-400 italic text-xs font-medium inline-flex items-center gap-1.5 py-1">
+        No Doctors Mapped
+      </span>
+    );
+  }
+
+  const visibleDoctors = activeSearch
+    ? filteredDoctors
+    : isExpanded
+    ? doctors
+    : doctors.slice(0, 2);
+
+  const hiddenCount = doctors.length - visibleDoctors.length;
+
+  return (
+    <div className="space-y-2 min-w-[240px] max-w-[340px]">
+      {/* Header bar: Count Badge & Directory button */}
+      <div className="flex items-center justify-between gap-1.5">
+        <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-lg bg-blue-50 text-blue-800 text-[11px] font-black border border-blue-200/80 shadow-2xs">
+          <span className="text-blue-600 font-bold">👨‍⚕️</span>
+          <span>{doctors.length} {doctors.length === 1 ? 'Doctor' : 'Doctors'}</span>
+        </span>
+
+        {doctors.length > 1 && (
+          <button
+            type="button"
+            onClick={onViewAll}
+            className="inline-flex items-center gap-1 text-[11px] font-bold text-blue-600 hover:text-blue-800 hover:bg-blue-50 px-2 py-0.5 rounded-lg border border-blue-200/70 transition-colors shadow-2xs cursor-pointer"
+            title="Open full doctors directory modal"
+          >
+            <Eye size={12} />
+            <span>View All ({doctors.length})</span>
+          </button>
+        )}
+      </div>
+
+      {/* Quick Search Input (visible if 2+ doctors) */}
+      {doctors.length >= 2 && (
+        <div className="relative">
+          <Search size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+          <input
+            type="text"
+            value={cellSearch}
+            onChange={(e) => setCellSearch(e.target.value)}
+            placeholder={`Quick find in ${doctors.length} doctors...`}
+            className="w-full bg-slate-50/80 hover:bg-white focus:bg-white border border-slate-200 focus:border-blue-400 rounded-lg pl-7 pr-6 py-1 text-[11px] font-medium text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-blue-500/20 transition-all shadow-2xs"
+          />
+          {cellSearch && (
+            <button
+              type="button"
+              onClick={() => setCellSearch('')}
+              className="absolute right-1.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 p-0.5 rounded cursor-pointer"
+              title="Clear filter"
+            >
+              <X size={12} />
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* Doctor Cards */}
+      {activeSearch && filteredDoctors.length === 0 ? (
+        <div className="p-2.5 text-center text-[11px] text-slate-400 bg-slate-50 border border-dashed border-slate-200 rounded-xl">
+          No doctor matches "{activeSearch}"
+        </div>
+      ) : (
+        <div className="space-y-1.5 max-h-72 overflow-y-auto pr-0.5 custom-scrollbar">
+          {visibleDoctors.map((d: any, idx: number) => {
+            const phone = d.phone || d.contactNo;
+            const specialty = d.specialty || d.speciality || 'General';
+            return (
+              <div
+                key={d.id || idx}
+                className="group relative rounded-xl border border-slate-200 hover:border-blue-300 bg-white p-2 transition-all shadow-2xs hover:shadow-xs"
+              >
+                <div className="flex items-start justify-between gap-1.5">
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <span className="font-extrabold text-xs text-slate-900 group-hover:text-blue-700 transition-colors">
+                        {d.name}
+                      </span>
+                      {d.degree && (
+                        <span className="rounded bg-blue-50 px-1.5 py-0.2 text-[9px] font-black text-blue-700 border border-blue-200/60 uppercase">
+                          {d.degree}
+                        </span>
+                      )}
+                    </div>
+                    <div className="mt-1 flex items-center gap-2 flex-wrap text-[11px]">
+                      <span className="text-slate-500 font-semibold inline-flex items-center gap-1 bg-slate-50 px-1.5 py-0.5 rounded border border-slate-100">
+                        🩺 {specialty}
+                      </span>
+                      {phone && (
+                        <button
+                          type="button"
+                          onClick={(e) => copyNumber(phone, e)}
+                          className="font-bold text-blue-600 hover:text-blue-800 hover:underline inline-flex items-center gap-1 cursor-pointer"
+                          title="Click to copy phone number"
+                        >
+                          <Phone size={10} className="text-blue-500 shrink-0" />
+                          <span>{phone}</span>
+                          {copiedPhone === phone ? (
+                            <CheckCheck size={11} className="text-emerald-600" />
+                          ) : (
+                            <Copy size={9} className="opacity-0 group-hover:opacity-100 text-slate-400 transition-opacity" />
+                          )}
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Expand / Collapse Toggle (when not searching and > 2 doctors) */}
+      {!activeSearch && doctors.length > 2 && (
+        <div className="pt-0.5">
+          {!isExpanded ? (
+            <button
+              type="button"
+              onClick={() => setIsExpanded(true)}
+              className="w-full py-1 text-center text-[10px] font-extrabold text-blue-600 hover:text-blue-800 hover:bg-blue-50/70 rounded-lg border border-dashed border-blue-200 transition-all flex items-center justify-center gap-1 cursor-pointer"
+            >
+              <span>+ View {hiddenCount} more {hiddenCount === 1 ? 'doctor' : 'doctors'}</span>
+              <ChevronDown size={11} />
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setIsExpanded(false)}
+              className="w-full py-1 text-center text-[10px] font-bold text-slate-500 hover:text-slate-700 hover:bg-slate-100/70 rounded-lg border border-slate-200 transition-all flex items-center justify-center gap-1 cursor-pointer"
+            >
+              <span>Show Less</span>
+              <ChevronUp size={11} />
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 /* ─── Main Insurance / Operations Page ─────────────────────────────────────── */
 export default function Insurance() {
   const qc = useQueryClient();
+  const { dropdownMenus } = useMasterDropdowns();
+  const hospitalTypeOptions = useMemo(() => getHospitalTypeOptions(dropdownMenus), [dropdownMenus]);
   const { user: authUser } = useAuthStore();
   const [searchParams, setSearchParams] = useSearchParams();
   const tabParam = searchParams.get('tab');
@@ -730,6 +920,10 @@ export default function Insurance() {
   const [hospitalModal, setHospitalModal] = useState(false);
   const [editHospitalId, setEditHospitalId] = useState<string | null>(null);
   const [hospitalDoctorSearch, setHospitalDoctorSearch] = useState('');
+  const [selectedDirectoryHospital, setSelectedDirectoryHospital] = useState<any | null>(null);
+  const [directorySearch, setDirectorySearch] = useState('');
+  const [directorySpecialty, setDirectorySpecialty] = useState('ALL');
+  const [doctorFormSearch, setDoctorFormSearch] = useState('');
 
   // Add/Edit Hospital form states
   const [hospitalForm, setHospitalForm] = useState({
@@ -917,7 +1111,7 @@ export default function Insurance() {
   const [editCompany, setEditCompany]     = useState<any | null>(null);
   const [deleteCompany, setDeleteCompany] = useState<any | null>(null);
   
-  const handleAgentSubmit = (e: React.FormEvent) => {
+  const handleAgentSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (isFieldRequired('Agent', 'category', true) && !agentForm.category) {
       toast.error('Insurance Company Category is required');
@@ -985,6 +1179,29 @@ export default function Insurance() {
       comment: agentForm.comment || '',
       status: editAgent?.status || 'Active'
     };
+    if (!editAgent) {
+      const [firstName, ...lastNameParts] = newAgent.agentName.trim().split(/\s+/);
+      try {
+        await contactsService.create({
+          firstName,
+          lastName: lastNameParts.join(' '),
+          phone: newAgent.phone.trim(),
+          email: newAgent.email.trim() || undefined,
+          role: 'Contact',
+          tags: ['Agent'],
+          notes: [
+            `Agency: ${newAgent.agencyName}`,
+            newAgent.agencyCode ? `Agency Code: ${newAgent.agencyCode}` : '',
+            newAgent.category ? `Category: ${newAgent.category}` : '',
+          ].filter(Boolean).join('\n'),
+        });
+        qc.invalidateQueries({ queryKey: ['contacts'] });
+      } catch (error: any) {
+        const message = error?.response?.data?.message;
+        toast.error(Array.isArray(message) ? message.join(', ') : message || 'Failed to create agent contact');
+        return;
+      }
+    }
     if (editAgent) {
       // Update existing agent in-place
       setAgentsList(prev => {
@@ -1476,6 +1693,7 @@ export default function Insurance() {
       contactNo: d.phone || d.contactNo || '',
       speciality: d.specialty || d.speciality || '',
     })));
+    setDoctorFormSearch('');
     setHospitalModal(true);
   };
 
@@ -2166,11 +2384,16 @@ export default function Insurance() {
 
               {/* 10. MAPPING */}
               {currentView === 'mapping' && (
-                <div className="space-y-4">
+                <div className="space-y-5">
                   <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                    <div>
-                      <h3 className="text-sm font-black text-slate-900 uppercase tracking-wide">Hospital List &amp; Doctors Mapping</h3>
-                      <p className="text-[11px] text-slate-500">Registered hospitals &amp; consulting providers available across Claims</p>
+                    <div className="flex items-start gap-3">
+                      <div className="mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-blue-600 ring-1 ring-blue-100">
+                        <Building2 size={19} />
+                      </div>
+                      <div>
+                        <h3 className="text-sm font-black tracking-tight text-slate-900">Hospitals &amp; Doctors</h3>
+                        <p className="mt-1 text-xs text-slate-500">Manage hospital details and the doctors available across Claims.</p>
+                      </div>
                     </div>
                     <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
                       <div className="relative sm:w-72">
@@ -2181,11 +2404,12 @@ export default function Insurance() {
                           onChange={e => setHospitalDoctorSearch(e.target.value)}
                           placeholder="Search hospitals or doctors..."
                           aria-label="Search hospitals or doctors"
-                          className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-9 pr-3 py-2 text-xs font-semibold text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:bg-white transition-all"
+                          className="w-full rounded-xl border border-slate-200 bg-white py-2.5 pl-9 pr-3 text-xs font-medium text-slate-800 shadow-sm placeholder-slate-400 transition-all focus:border-blue-400 focus:outline-none focus:ring-4 focus:ring-blue-500/10"
                         />
                       </div>
-                      <span className="text-xs bg-slate-100 text-slate-600 font-bold px-2 py-1 rounded-full text-center whitespace-nowrap">
-                        {hospitalDoctorSearch.trim() ? `${filteredMappingHospitals.length} of ${hospitals.length}` : hospitals.length} Hospitals
+                      <span className="inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-xs font-semibold text-slate-600 shadow-sm">
+                        <Building2 size={14} className="text-slate-400" />
+                        {hospitalDoctorSearch.trim() ? `${filteredMappingHospitals.length} of ${hospitals.length}` : hospitals.length} hospitals
                       </span>
                       <button
                         type="button"
@@ -2207,7 +2431,7 @@ export default function Insurance() {
                           setHospitalDoctors([]);
                           setHospitalModal(true);
                         }}
-                        className="btn-primary text-xs py-1.5 px-3 rounded-xl flex items-center gap-1.5 cursor-pointer shadow-sm"
+                        className="btn-primary flex items-center justify-center gap-1.5 rounded-xl px-4 py-2.5 text-xs font-bold shadow-sm transition-all hover:shadow-md cursor-pointer"
                       >
                         <Plus size={14} /> Add Hospital
                       </button>
@@ -2229,104 +2453,97 @@ export default function Insurance() {
                       </button>
                     </div>
                   ) : (
-                    <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-xs">
+                    <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
                       <div className="overflow-x-auto">
-                        <table className="w-full text-left border-collapse">
+                        <table className="w-full min-w-[1080px] border-collapse text-left">
                           <thead>
-                            <tr className="bg-slate-50/80 border-b border-slate-200 text-xs font-black text-slate-700 uppercase tracking-wider">
-                              <th className="py-4 px-5">Hospital Info</th>
-                              <th className="py-4 px-5">Claims Department</th>
-                              <th className="py-4 px-5">Doctors ({hospitalDoctorSearch.trim() ? visibleDoctorCount : totalDoctors})</th>
-                              <th className="py-4 px-5">Comment</th>
-                              <th className="py-4 px-5 text-right">Actions</th>
+                            <tr className="border-b border-slate-200 bg-slate-50 text-[10px] font-bold uppercase tracking-wider text-slate-500">
+                              <th className="w-[27%] px-4 py-3">Hospital</th>
+                              <th className="w-[18%] px-4 py-3">Claims Department</th>
+                              <th className="w-[34%] px-4 py-3">
+                                Doctors <span className="ml-1 rounded-md bg-white px-1.5 py-0.5 text-[10px] font-semibold text-slate-600 ring-1 ring-slate-200">{hospitalDoctorSearch.trim() ? visibleDoctorCount : totalDoctors}</span>
+                              </th>
+                              <th className="w-[13%] px-4 py-3">Comment</th>
+                              <th className="w-[8%] px-4 py-3 text-right">Actions</th>
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-slate-100">
                             {filteredMappingHospitals.length === 0 ? (
                               <tr>
-                                <td colSpan={5} className="py-8 px-5 text-center text-xs text-slate-500">
-                                  No hospitals or doctors match your search.
+                                <td colSpan={5} className="px-5 py-12 text-center">
+                                  <div className="mx-auto flex max-w-xs flex-col items-center gap-2">
+                                    <Search size={20} className="text-slate-300" />
+                                    <p className="text-sm font-semibold text-slate-700">No matching hospitals</p>
+                                    <p className="text-xs text-slate-500">Try another hospital name, doctor, specialty, or phone number.</p>
+                                  </div>
                                 </td>
                               </tr>
-                            ) : filteredMappingHospitals.map((h: any) => (
-                              <tr key={h.id} className="hover:bg-slate-50/60 transition-colors">
-                                <td className="py-4 px-5 space-y-1.5 align-top">
+                            ) : filteredMappingHospitals.map((h: any, rowIndex: number) => (
+                              <tr key={h.id} className={`group transition-colors hover:bg-blue-50/40 ${rowIndex % 2 === 1 ? 'bg-slate-50/40' : 'bg-white'}`}>
+                                <td className="space-y-2 px-4 py-3.5 align-top">
                                   <div className="flex items-center gap-2.5 flex-wrap">
-                                    <span className="text-base font-black text-slate-900 capitalize tracking-tight">{h.name}</span>
-                                    <span className={`px-2.5 py-0.5 rounded-full text-xs font-extrabold border ${
+                                    <span className="text-sm font-bold capitalize tracking-tight text-slate-900">{h.name}</span>
+                                    <span className={`rounded-full border px-2 py-0.5 text-[10px] font-bold ${
                                       h.type === 'Network' ? 'bg-emerald-50 text-emerald-700 border-emerald-200/80' :
                                       h.type === 'Blacklisted' ? 'bg-red-50 text-red-700 border-red-200/80' :
                                       'bg-slate-100 text-slate-700 border-slate-200/80'
                                     }`}>{h.type}</span>
                                   </div>
-                                  <div className="text-xs font-bold text-slate-600 flex flex-wrap items-center gap-2">
+                                  <div className="flex flex-wrap items-center gap-1.5 text-xs font-medium text-slate-600">
                                     <span className="text-slate-800">{h.city}</span>
-                                    {h.pincode && <span className="text-slate-500 font-semibold">- {h.pincode}</span>}
+                                    {h.pincode && <span className="text-slate-400">·</span>}
+                                    {h.pincode && <span className="text-slate-500">{h.pincode}</span>}
                                   </div>
                                   {h.phone && (
-                                    <div className="text-xs font-bold text-blue-700 bg-blue-50/80 border border-blue-100 rounded-lg px-2.5 py-1 inline-flex items-center gap-1.5">
-                                      <span>📞</span> {h.phone}
+                                    <div className="inline-flex items-center gap-1.5 rounded-lg border border-blue-100 bg-blue-50 px-2 py-1 text-xs font-semibold text-blue-700">
+                                      <Phone size={12} /> {h.phone}
                                     </div>
                                   )}
                                   {h.address && (
-                                    <div className="text-xs text-slate-500 font-medium max-w-[280px]" title={h.address}>
+                                    <div className="max-w-[280px] text-xs font-medium text-slate-500" title={h.address}>
                                       {h.address}
                                     </div>
                                   )}
                                 </td>
-                                <td className="py-4 px-5 space-y-2 align-top">
+                                <td className="space-y-2 px-4 py-3.5 align-top">
                                   {h.claimsPerson1Name && (
-                                    <div className="text-xs text-slate-800 bg-slate-50/80 border border-slate-200/70 rounded-xl p-2.5 space-y-0.5">
-                                      <div className="font-extrabold text-slate-900 text-xs">{h.claimsPerson1Name}</div>
-                                      <div className="font-bold text-blue-700 text-xs">📞 {h.claimsPerson1Contact || 'No contact'}</div>
+                                    <div className="space-y-1 rounded-xl border border-slate-200 bg-white p-2.5 shadow-sm">
+                                      <div className="text-xs font-semibold text-slate-800">{h.claimsPerson1Name}</div>
+                                      <div className="inline-flex items-center gap-1.5 text-xs font-medium text-blue-700"><Phone size={11} /> {h.claimsPerson1Contact || 'No contact'}</div>
                                     </div>
                                   )}
                                   {h.claimsPerson2Name && (
-                                    <div className="text-xs text-slate-800 bg-slate-50/80 border border-slate-200/70 rounded-xl p-2.5 space-y-0.5">
-                                      <div className="font-extrabold text-slate-900 text-xs">{h.claimsPerson2Name}</div>
-                                      <div className="font-bold text-blue-700 text-xs">📞 {h.claimsPerson2Contact || 'No contact'}</div>
+                                    <div className="space-y-1 rounded-xl border border-slate-200 bg-white p-2.5 shadow-sm">
+                                      <div className="text-xs font-semibold text-slate-800">{h.claimsPerson2Name}</div>
+                                      <div className="inline-flex items-center gap-1.5 text-xs font-medium text-blue-700"><Phone size={11} /> {h.claimsPerson2Contact || 'No contact'}</div>
                                     </div>
                                   )}
                                   {!h.claimsPerson1Name && !h.claimsPerson2Name && (
-                                    <span className="text-slate-400 italic text-xs font-medium">Not Provided</span>
+                                    <span className="inline-flex rounded-lg bg-slate-100 px-2 py-1 text-xs font-medium text-slate-400">Not provided</span>
                                   )}
                                 </td>
-                                <td className="py-4 px-5 align-top">
-                                  {h.doctors && h.doctors.length > 0 ? (
-                                    <div className="max-h-64 min-w-[220px] max-w-[320px] space-y-1.5 overflow-y-auto pr-1">
-                                      {h.doctors.map((d: any, idx: number) => (
-                                        <div key={d.id || idx} className="rounded-lg border border-slate-200 bg-white px-2.5 py-2">
-                                          <div className="flex items-center justify-between gap-2">
-                                            <span className="truncate text-xs font-bold text-slate-800">{d.name}</span>
-                                            {d.degree && (
-                                              <span className="shrink-0 rounded-md bg-blue-50 px-1.5 py-0.5 text-[10px] font-semibold text-blue-700">
-                                                {d.degree}
-                                              </span>
-                                            )}
-                                          </div>
-                                          <div className="mt-1 flex flex-wrap items-center gap-x-2 text-[11px] text-slate-500">
-                                            <span>{d.specialty || d.speciality || 'General'}</span>
-                                            {(d.phone || d.contactNo) && (
-                                              <span className="font-semibold text-blue-700">{d.phone || d.contactNo}</span>
-                                            )}
-                                          </div>
-                                        </div>
-                                      ))}
-                                    </div>
-                                  ) : (
-                                    <span className="text-slate-400 italic text-xs font-medium">No Doctors Mapped</span>
-                                  )}
+                                <td className="px-4 py-3.5 align-top">
+                                  <HospitalDoctorsCell
+                                    hospital={h}
+                                    globalSearch={hospitalDoctorSearch}
+                                    onViewAll={() => {
+                                      setSelectedDirectoryHospital(h);
+                                      setDirectorySearch('');
+                                      setDirectorySpecialty('ALL');
+                                    }}
+                                  />
                                 </td>
-                                <td className="py-4 px-5 text-xs text-slate-600 font-medium max-w-[180px] align-top" title={h.comment}>
+                                <td className="max-w-[180px] px-4 py-3.5 align-top text-xs font-medium text-slate-600" title={h.comment}>
                                   {h.comment || <span className="text-slate-300 italic">-</span>}
                                 </td>
-                                <td className="py-4 px-5 text-right align-top">
+                                <td className="px-4 py-3.5 text-right align-top">
                                   <div className="flex items-center justify-end gap-1.5">
                                     <button
                                       type="button"
                                       onClick={() => openEditHospital(h)}
-                                      className="p-2 text-blue-600 hover:text-blue-700 hover:bg-blue-50 border border-transparent hover:border-blue-100 rounded-xl transition-all cursor-pointer shadow-2xs"
+                                      className="rounded-lg border border-transparent p-2 text-blue-600 transition-all hover:border-blue-100 hover:bg-blue-50 hover:text-blue-700 cursor-pointer"
                                       title="Edit Hospital / Manage Doctors"
+                                      aria-label={`Edit ${h.name}`}
                                     >
                                       <Pencil size={16} />
                                     </button>
@@ -2337,8 +2554,9 @@ export default function Insurance() {
                                           removeHospitalMutation.mutate(h.id);
                                         }
                                       }}
-                                      className="p-2 text-red-600 hover:text-red-700 hover:bg-red-50 border border-transparent hover:border-red-100 rounded-xl transition-all cursor-pointer shadow-2xs"
+                                      className="rounded-lg border border-transparent p-2 text-red-500 transition-all hover:border-red-100 hover:bg-red-50 hover:text-red-700 cursor-pointer"
                                       title="Delete Hospital"
+                                      aria-label={`Delete ${h.name}`}
                                     >
                                       <Trash2 size={16} />
                                     </button>
@@ -3075,6 +3293,7 @@ export default function Insurance() {
             comment: ''
           });
           setHospitalDoctors([]);
+          setDoctorFormSearch('');
         }}
         title={editHospitalId ? 'Edit Hospital & Doctors' : 'Add Hospital'}
         actions={
@@ -3199,12 +3418,8 @@ export default function Insurance() {
                 return;
               }
               const cleanDocContact = (doc.contactNo || '').replace(/\D/g, '');
-              if (!cleanDocContact) {
-                toast.error(`Doctor #${i + 1}: Contact No is required`);
-                return;
-              }
-              if (cleanDocContact.length !== 10) {
-                toast.error(`Doctor #${i + 1}: Contact No must be exactly 10 digits`);
+              if (cleanDocContact && cleanDocContact.length !== 10) {
+                toast.error(`Doctor #${i + 1} (${doc.name || 'Doctor'}): Contact No must be exactly 10 digits if provided`);
                 return;
               }
             }
@@ -3278,10 +3493,9 @@ export default function Insurance() {
                       className="input text-xs"
                       required={isFieldRequired('Hospital', 'type', false)}
                     >
-                      <option value="Network">Network</option>
-                      <option value="Non-Network">Non-Network</option>
-                      <option value="Blacklisted">Blacklisted</option>
-                      <option value="Other">Other</option>
+                      {hospitalTypeOptions.map(option => (
+                        <option key={option.value} value={option.value}>{option.label}</option>
+                      ))}
                     </select>
                   </div>
 
@@ -3453,34 +3667,80 @@ export default function Insurance() {
               </div>
 
               {/* Section 2: Doctor Details */}
-              <div className="border border-slate-100 rounded-2xl p-4 bg-slate-50/50 space-y-4">
-                <div className="flex items-center justify-between border-b border-slate-200 pb-1.5">
-                  <h4 className="text-xs font-black text-slate-900 uppercase tracking-wide">
-                    2. Doctor Details
-                  </h4>
+              <div className="border border-slate-100 rounded-2xl p-4 bg-slate-50/50 space-y-3">
+                <div className="flex items-center justify-between border-b border-slate-200 pb-2">
+                  <div className="flex items-center gap-2">
+                    <h4 className="text-xs font-black text-slate-900 uppercase tracking-wide">
+                      2. Doctor Details
+                    </h4>
+                    <span className="text-[11px] font-bold text-slate-600 bg-slate-200/80 px-2 py-0.5 rounded-full">
+                      {hospitalDoctors.length} {hospitalDoctors.length === 1 ? 'Doctor' : 'Doctors'}
+                    </span>
+                  </div>
                   <button
                     type="button"
                     onClick={handleAddDoctor}
-                    className="text-[10px] sm:text-xs font-bold text-primary-600 hover:text-primary-700 transition-colors flex items-center gap-1 cursor-pointer"
+                    className="text-[10px] sm:text-xs font-bold text-primary-600 hover:text-primary-700 transition-colors flex items-center gap-1 cursor-pointer bg-primary-50 hover:bg-primary-100 px-2.5 py-1 rounded-lg"
                   >
                     <Plus size={12} /> Add Doctor
                   </button>
                 </div>
 
+                {hospitalDoctors.length > 2 && (
+                  <div className="relative">
+                    <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
+                    <input
+                      type="text"
+                      value={doctorFormSearch}
+                      onChange={(e) => setDoctorFormSearch(e.target.value)}
+                      placeholder="Filter doctors in this list (by name, degree, speciality)..."
+                      className="w-full text-xs pl-8 pr-7 py-1.5 rounded-lg border border-slate-200 bg-white focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                    />
+                    {doctorFormSearch && (
+                      <button
+                        type="button"
+                        onClick={() => setDoctorFormSearch('')}
+                        className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 p-0.5"
+                      >
+                        <X size={12} />
+                      </button>
+                    )}
+                  </div>
+                )}
+
                 {hospitalDoctors.length === 0 ? (
                   <p className="text-xs text-slate-400 italic">No doctors mapped yet. Click 'Add Doctor' to map doctors to this hospital.</p>
                 ) : (
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    {hospitalDoctors.map((doc, index) => (
+                    {hospitalDoctors
+                      .map((doc, originalIndex) => ({ doc, originalIndex }))
+                      .filter(({ doc }) => {
+                        if (!doctorFormSearch.trim()) return true;
+                        const q = doctorFormSearch.toLowerCase().trim();
+                        return (
+                          (doc.name || '').toLowerCase().includes(q) ||
+                          (doc.degree || '').toLowerCase().includes(q) ||
+                          (doc.speciality || '').toLowerCase().includes(q) ||
+                          (doc.contactNo || '').toLowerCase().includes(q)
+                        );
+                      })
+                      .map(({ doc, originalIndex }) => (
                       <div key={doc.id} className="relative border border-slate-200 rounded-xl p-3 bg-white space-y-2.5 shadow-2xs">
                         <div className="flex items-center justify-between border-b border-slate-100 pb-1">
-                          <span className="text-[10px] font-black text-slate-700 uppercase tracking-wider">
-                            Doctor #{index + 1}
-                          </span>
+                          <div className="flex items-center gap-1.5 truncate">
+                            <span className="text-[10px] font-black text-slate-700 uppercase tracking-wider shrink-0">
+                              Doctor #{originalIndex + 1}
+                            </span>
+                            {doc.name && (
+                              <span className="text-[11px] font-bold text-slate-800 truncate">
+                                · {doc.name}
+                              </span>
+                            )}
+                          </div>
                           <button
                             type="button"
                             onClick={() => handleRemoveDoctor(doc.id)}
-                            className="p-1 text-red-500 hover:bg-red-50 rounded"
+                            className="p-1 text-red-500 hover:bg-red-50 rounded shrink-0 ml-1"
                             title="Remove Doctor"
                           >
                             <Trash2 size={13} />
@@ -3591,24 +3851,21 @@ export default function Insurance() {
                           <div className="flex flex-col gap-0.5">
                             <div className="flex items-center justify-between">
                               <label className="text-[10px] font-extrabold text-slate-900 uppercase tracking-wider flex items-center">
-                                Contact No <span className="text-red-600 font-black text-xs ml-1" style={{ color: '#dc2626' }}>*</span>
+                                Contact No <span className="text-[10px] font-normal text-slate-500 lowercase ml-1">(optional)</span>
                               </label>
-                              <span className="text-[9px] text-slate-400 font-semibold">10 digits</span>
+                              <span className="text-[9px] text-slate-400 font-semibold">10 digits if provided</span>
                             </div>
                             <input
                               type="text"
                               maxLength={10}
-                              pattern="[0-9]{10}"
-                              title="10 digit contact number"
-                              required
-                              value={doc.contactNo}
+                              value={doc.contactNo || ''}
                               onChange={(e) => handleUpdateDoctor(doc.id, 'contactNo', e.target.value.replace(/\D/g, '').slice(0, 10))}
                               className="input text-xs py-1"
-                              placeholder="e.g. 9876543210"
+                              placeholder="e.g. 9876543210 (optional - add later)"
                             />
-                            {doc.contactNo && doc.contactNo.length < 10 && (
+                            {doc.contactNo && doc.contactNo.length > 0 && doc.contactNo.length < 10 && (
                               <span className="text-[9px] text-amber-600 font-semibold block mt-0.5">
-                                {10 - doc.contactNo.length} more {10 - doc.contactNo.length === 1 ? 'digit' : 'digits'} needed (10 digits required)
+                                {10 - doc.contactNo.length} more {10 - doc.contactNo.length === 1 ? 'digit' : 'digits'} needed (must be 10 digits if provided)
                               </span>
                             )}
                           </div>
@@ -3629,10 +3886,269 @@ export default function Insurance() {
                         </div>
                       </div>
                     ))}
+                    {hospitalDoctors.length > 0 && doctorFormSearch.trim() && !hospitalDoctors.some(doc => {
+                      const q = doctorFormSearch.toLowerCase().trim();
+                      return (
+                        (doc.name || '').toLowerCase().includes(q) ||
+                        (doc.degree || '').toLowerCase().includes(q) ||
+                        (doc.speciality || '').toLowerCase().includes(q) ||
+                        (doc.contactNo || '').toLowerCase().includes(q)
+                      );
+                    }) && (
+                      <div className="col-span-full py-4 text-center text-xs text-slate-500 bg-white border border-dashed border-slate-200 rounded-xl">
+                        No doctors match "{doctorFormSearch}".{' '}
+                        <button
+                          type="button"
+                          onClick={() => setDoctorFormSearch('')}
+                          className="text-blue-600 underline font-semibold cursor-pointer"
+                        >
+                          Clear filter
+                        </button>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
             </form>
+          );
+        })()}
+      </Modal>
+
+      {/* ── Hospital Doctors Directory Modal ─────────────────────────────────────── */}
+      <Modal
+        open={!!selectedDirectoryHospital}
+        onClose={() => {
+          setSelectedDirectoryHospital(null);
+          setDirectorySearch('');
+          setDirectorySpecialty('ALL');
+        }}
+        title={`Doctor Directory · ${selectedDirectoryHospital?.name || 'Hospital'}`}
+        size="3xl"
+        actions={
+          <div className="flex items-center justify-between w-full">
+            <div className="text-xs text-slate-500 font-medium">
+              Total Doctors: <span className="font-bold text-slate-800">{selectedDirectoryHospital?.doctors?.length || 0}</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  const h = selectedDirectoryHospital;
+                  setSelectedDirectoryHospital(null);
+                  if (h) openEditHospital(h);
+                }}
+                className="btn-secondary py-1 px-3 text-xs flex items-center gap-1.5"
+              >
+                <Pencil size={12} /> Edit Doctors
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setSelectedDirectoryHospital(null);
+                  setDirectorySearch('');
+                  setDirectorySpecialty('ALL');
+                }}
+                className="btn-primary py-1 px-3.5 text-xs"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        }
+      >
+        {selectedDirectoryHospital && (() => {
+          const allDocs = selectedDirectoryHospital.doctors || [];
+          
+          // Unique specialties for filtering
+          const specialties = Array.from(
+            new Set(allDocs.map((d: any) => (d.specialty || d.speciality || '').trim()).filter(Boolean) as string[])
+          );
+
+          const filteredDocs = allDocs.filter((d: any) => {
+            const matchesSearch = !directorySearch.trim() || [
+              d.name,
+              d.degree,
+              d.specialty,
+              d.speciality,
+              d.phone,
+              d.contactNo
+            ].some(f => (f || '').toLowerCase().includes(directorySearch.toLowerCase().trim()));
+
+            const docSpec = (d.specialty || d.speciality || '').trim().toLowerCase();
+            const matchesSpecialty = directorySpecialty === 'ALL' || docSpec === directorySpecialty.toLowerCase();
+
+            return matchesSearch && matchesSpecialty;
+          });
+
+          return (
+            <div className="space-y-4">
+              {/* Hospital Overview Header */}
+              <div className="bg-gradient-to-r from-blue-50/70 via-indigo-50/40 to-slate-50 border border-blue-100 rounded-xl p-3 flex flex-wrap items-center justify-between gap-3">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-10 h-10 rounded-xl bg-blue-600 text-white flex items-center justify-center font-bold shadow-xs">
+                    <Building2 size={20} />
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <h3 className="text-sm font-bold text-slate-900">{selectedDirectoryHospital.name}</h3>
+                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                        selectedDirectoryHospital.type === 'Network'
+                          ? 'bg-emerald-100 text-emerald-800 border border-emerald-200'
+                          : 'bg-amber-100 text-amber-800 border border-amber-200'
+                      }`}>
+                        {selectedDirectoryHospital.type || 'Network'}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-3 text-xs text-slate-500 mt-0.5">
+                      {selectedDirectoryHospital.city && (
+                        <span>📍 {selectedDirectoryHospital.city}{selectedDirectoryHospital.pincode ? ` - ${selectedDirectoryHospital.pincode}` : ''}</span>
+                      )}
+                      {(selectedDirectoryHospital.phone || selectedDirectoryHospital.contactNo) && (
+                        <span>📞 {selectedDirectoryHospital.phone || selectedDirectoryHospital.contactNo}</span>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="text-right">
+                  <span className="text-xs font-semibold text-slate-500">Mapped Doctors</span>
+                  <p className="text-lg font-black text-blue-600">{allDocs.length}</p>
+                </div>
+              </div>
+
+              {/* Search & Filter Bar */}
+              <div className="space-y-2">
+                <div className="relative">
+                  <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                  <input
+                    type="text"
+                    value={directorySearch}
+                    onChange={(e) => setDirectorySearch(e.target.value)}
+                    placeholder="Search doctor by name, degree, speciality, or contact number..."
+                    className="w-full text-xs pl-9 pr-8 py-2 rounded-xl border border-slate-200 bg-white shadow-2xs focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                  />
+                  {directorySearch && (
+                    <button
+                      type="button"
+                      onClick={() => setDirectorySearch('')}
+                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 p-0.5"
+                    >
+                      <X size={13} />
+                    </button>
+                  )}
+                </div>
+
+                {/* Specialty Pills */}
+                {specialties.length > 0 && (
+                  <div className="flex items-center gap-1.5 flex-wrap pt-0.5">
+                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1 mr-1">
+                      <Filter size={10} /> Speciality:
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setDirectorySpecialty('ALL')}
+                      className={`text-[11px] px-2 py-0.5 rounded-full font-semibold transition-all cursor-pointer ${
+                        directorySpecialty === 'ALL'
+                          ? 'bg-blue-600 text-white shadow-2xs'
+                          : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
+                      }`}
+                    >
+                      All ({allDocs.length})
+                    </button>
+                    {specialties.map((spec: any) => {
+                      const count = allDocs.filter((d: any) => (d.specialty || d.speciality || '').trim().toLowerCase() === spec.toLowerCase()).length;
+                      return (
+                        <button
+                          key={spec}
+                          type="button"
+                          onClick={() => setDirectorySpecialty(spec)}
+                          className={`text-[11px] px-2 py-0.5 rounded-full font-semibold transition-all cursor-pointer ${
+                            directorySpecialty.toLowerCase() === spec.toLowerCase()
+                              ? 'bg-blue-600 text-white shadow-2xs'
+                              : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
+                          }`}
+                        >
+                          {spec} ({count})
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+              {/* Doctors Card Grid */}
+              {filteredDocs.length === 0 ? (
+                <div className="py-12 text-center bg-slate-50 border border-dashed border-slate-200 rounded-xl space-y-1">
+                  <p className="text-sm font-semibold text-slate-700">No doctors match your search</p>
+                  <p className="text-xs text-slate-400">Try searching with a different doctor name, specialty, or degree.</p>
+                  {(directorySearch || directorySpecialty !== 'ALL') && (
+                    <button
+                      type="button"
+                      onClick={() => { setDirectorySearch(''); setDirectorySpecialty('ALL'); }}
+                      className="mt-2 text-xs text-blue-600 font-semibold hover:underline cursor-pointer"
+                    >
+                      Reset filters
+                    </button>
+                  )}
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 max-h-[50vh] overflow-y-auto pr-1">
+                  {filteredDocs.map((doc: any, idx: number) => {
+                    const phone = doc.phone || doc.contactNo || '';
+                    const spec = doc.specialty || doc.speciality || '';
+                    return (
+                      <div
+                        key={doc.id || idx}
+                        className="p-3 bg-white border border-slate-200 rounded-xl hover:border-blue-300 hover:shadow-xs transition-all space-y-2 group"
+                      >
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="flex items-center gap-2">
+                            <div className="w-8 h-8 rounded-lg bg-blue-50 text-blue-600 font-bold text-xs flex items-center justify-center shrink-0 border border-blue-100">
+                              {(doc.name || 'Dr').replace(/^dr\.?\s*/i, '').charAt(0).toUpperCase() || 'D'}
+                            </div>
+                            <div>
+                              <h4 className="text-xs font-bold text-slate-900 group-hover:text-blue-600 transition-colors">
+                                {doc.name || 'Unnamed Doctor'}
+                              </h4>
+                              {spec && (
+                                <p className="text-[11px] text-indigo-600 font-medium">
+                                  {spec}
+                                </p>
+                              )}
+                            </div>
+                          </div>
+
+                          {doc.degree && (
+                            <span className="text-[10px] font-bold text-blue-700 bg-blue-50 border border-blue-200 px-1.5 py-0.5 rounded shrink-0">
+                              {doc.degree}
+                            </span>
+                          )}
+                        </div>
+
+                        {phone && (
+                          <div className="flex items-center justify-between pt-1 border-t border-slate-100 text-xs">
+                            <span className="text-slate-500 font-mono flex items-center gap-1">
+                              <Phone size={11} className="text-slate-400" /> {phone}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                navigator.clipboard.writeText(phone);
+                                toast.success(`Copied: ${phone}`);
+                              }}
+                              className="text-[10px] font-medium text-slate-500 hover:text-blue-600 flex items-center gap-1 cursor-pointer px-1.5 py-0.5 rounded hover:bg-slate-100"
+                              title="Copy contact number"
+                            >
+                              <Copy size={11} /> Copy
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
           );
         })()}
       </Modal>

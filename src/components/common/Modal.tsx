@@ -58,7 +58,7 @@ export default function Modal({
         </Transition.Child>
 
         {/* Panel container */}
-        <div className={`fixed inset-0 flex items-center justify-center p-4 sm:p-6 overflow-y-auto ${zIndexClass || 'z-50'}`}>
+        <div className={`fixed inset-0 flex items-center justify-center p-4 sm:p-6 overflow-hidden ${zIndexClass || 'z-50'}`}>
           <Transition.Child
             as={Fragment}
             enter="ease-out duration-250"
@@ -113,7 +113,7 @@ export default function Modal({
               </div>
 
               {/* Body */}
-              <div className="overflow-y-auto flex-1 custom-scrollbar px-4 sm:px-8 pt-3 pb-5 bg-slate-50/30">
+              <div className="modal-scroll-body min-h-0 overflow-y-auto flex-1 custom-scrollbar px-4 sm:px-8 pt-3 pb-5 bg-slate-50/30">
                 {children}
               </div>
             </Dialog.Panel>

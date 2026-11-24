@@ -379,6 +379,22 @@ function cleanKey(str: string): string {
   return str.toLowerCase().replace(/[^a-z0-9]/g, '').replace(/ies$/, 'y').replace(/s$/, '');
 }
 
+export function getHospitalTypeOptions(providedMenus?: DropdownMenu[]): Array<{ value: string; label: string }> {
+  const menus = (providedMenus && providedMenus.length > 0) ? providedMenus : getStoredDropdownMenus();
+  const configuredOptions = menus
+    .filter(menu =>
+      menu.status === 'Active' &&
+      cleanKey(menu.module) === 'hospital' &&
+      ['hospitaltype', 'hospitaltypes'].includes(cleanKey(menu.name))
+    )
+    .flatMap(menu => Array.isArray(menu.options) ? menu.options : [])
+    .map(option => option.trim())
+    .filter(Boolean);
+  const options = [...new Set(['Network', 'Non-Network', 'Blacklisted', 'Other', ...configuredOptions])];
+
+  return options.map(value => ({ value, label: value }));
+}
+
 export function getActiveDropdownOptions(
   moduleName: string,
   fieldName: string,
@@ -470,7 +486,8 @@ export function getModuleCustomDropdowns(moduleName: string, providedMenus?: Dro
     'gender', 'maritalstatus', 'education', 'occupation', 'relationship', 'relationships', 'contactrole',
     'claimtype', 'claimtypes', 'claimstatus', 'claimstatuses', 'claimstatuse', 'claimstatu', 'hospitaltype', 'hospitaltypes',
     'companycategory', 'companycategories', 'insurancecompanycategory', 'insurancecompanycategories',
-    'plancategory', 'plancategories', 'insuranceplancategory'
+    'plancategory', 'plancategories', 'insuranceplancategory',
+    'familysize', 'familysizes'
   ]);
 
   return menus.filter(m => {

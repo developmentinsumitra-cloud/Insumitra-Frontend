@@ -26,6 +26,8 @@ import CustomSelect from '@comps/common/CustomSelect';
 import { getActiveDropdownOptions, isCategoryMatch } from '../../utils/masterDropdowns';
 import { useMasterDropdowns } from '../../hooks/useMasterDropdowns';
 import { formatPolicyRelationship } from './CreatePolicyModal';
+import { PolicyRidersSelector } from './PolicyRidersSelector';
+import PhcFamilyAllocations, { PhcFamilyAllocationButton, sumPhcFamilyAllocations, type PhcFamilyAllocation } from './PhcFamilyAllocations';
 import ClaimDetailModal from '../Claims/ClaimDetailModal';
 import * as XLSX from 'xlsx';
 
@@ -532,6 +534,7 @@ export function parseExtraNotes(notesText?: string | null): Record<string, any> 
     phcFrequency: '',
     phcFollowUpDate: '',
     phcComment: '',
+    phcFamilyAllocations: [] as PhcFamilyAllocation[],
     nominees: [] as { name: string; relationship: string; contact: string; dob: string; sharePercent: number }[],
     connectedPersons: [] as { name: string; relationship: string; contact: string; dob: string; gender: string }[],
     policyStatus: '',
@@ -586,14 +589,18 @@ export function parseExtraNotes(notesText?: string | null): Record<string, any> 
       res.policyTenure = line.replace('Policy Tenure: ', '').trim();
     } else if (line.startsWith('Policy Term: ')) {
       res.policyTerm = line.replace('Policy Term: ', '').trim();
+    } else if (line.startsWith('Family Sizes: ')) {
+      res['Family Sizes'] = line.replace('Family Sizes: ', '').trim();
+    } else if (line.startsWith('Lead Types: ')) {
+      res['Lead Types'] = line.replace('Lead Types: ', '').trim();
     } else if (line.startsWith('Deductible: ')) {
       res.deductible = line.replace('Deductible: ', '').trim();
     } else if (/^Bonus 1(?:\s*\(No Claim Bonus\))?:\s*/i.test(line)) {
       res.bonus1 = line.replace(/^Bonus 1(?:\s*\(No Claim Bonus\))?:\s*/i, '').trim();
     } else if (/^Bonus 2(?:\s*\(Super\s*\/\s*Cumulative\))?:\s*/i.test(line)) {
       res.bonus2 = line.replace(/^Bonus 2(?:\s*\(Super\s*\/\s*Cumulative\))?:\s*/i, '').trim();
-    } else if (line.startsWith('Riders/Addons: ')) {
-      res.riders = line.replace('Riders/Addons: ', '').split(',').map(s => s.trim());
+    } else if (/^Riders?(?:\s*\/\s*Addons?)?:\s*/i.test(line)) {
+      res.riders = line.replace(/^Riders?(?:\s*\/\s*Addons?)?:\s*/i, '').split(',').map(s => s.trim()).filter(Boolean);
     } else if (line.startsWith('First Premium Date: ')) {
       res.firstPremiumDate = line.replace('First Premium Date: ', '').trim();
     } else if (line.startsWith('1st Year Premium Amount: ')) {
@@ -676,6 +683,25 @@ export function parseExtraNotes(notesText?: string | null): Record<string, any> 
       res.loanAmount = Number(line.replace('Loan Amount: ', '').replace('₹', '').replace(/,/g, '').trim()) || undefined;
     } else if (line.startsWith('Installment Comment: ') || line.startsWith('EMI Comment: ')) {
       res.emiComment = line.replace(/^(Installment Comment|EMI Comment):\s*/, '').trim();
+    } else if (line.startsWith('PHC Family Allocations: ')) {
+      let allocationText = line.replace(/^PHC Family Allocations:\s*/i, '').trim();
+      let allocations: any = null;
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        try {
+          allocations = JSON.parse(allocationText);
+          if (typeof allocations === 'string') {
+            allocationText = allocations;
+            continue;
+          }
+          break;
+        } catch {
+          const unescapedText = allocationText.replace(/\\"/g, '"');
+          if (unescapedText === allocationText) break;
+          allocationText = unescapedText;
+        }
+      }
+      if (Array.isArray(allocations)) res.phcFamilyAllocations = allocations;
+      else cleanLines.push(line);
     } else if (line.startsWith('PHC Insured Person: ')) {
       res.phcInsuredPerson = line.replace('PHC Insured Person: ', '').trim();
     } else if (line.startsWith('Insured Person for PHC: ')) {
@@ -832,6 +858,14 @@ export function parseExtraNotes(notesText?: string | null): Record<string, any> 
   return res;
 }
 
+const getPolicyDurationYears = (startDate?: string, endDate?: string): number | null => {
+  if (!startDate || !endDate) return null;
+  const start = new Date(startDate);
+  const end = new Date(endDate);
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || end < start) return null;
+  return Math.max(1, Math.round((end.getTime() - start.getTime()) / (365.25 * 24 * 60 * 60 * 1000)));
+};
+
 export const policyEditFormSchema = z.object({
   status: z.string().optional(),
   premiumAmount: z.coerce.number().positive('Enter a valid premium'),
@@ -862,6 +896,8 @@ export const policyEditFormSchema = z.object({
   phcAmount: z.coerce.number().optional(),
   phcStatus: z.string().optional(),
   phcClaimSettled: z.boolean().optional(),
+  firstYearPremium: z.coerce.number().optional(),
+  secondYearPremium: z.coerce.number().optional(),
   downpaymentAmount: z.coerce.number().optional(),
   processingFee: z.coerce.number().optional(),
   installmentAmount: z.coerce.number().optional(),
@@ -1007,7 +1043,10 @@ export default function Policies() {
   }, [getOptions, dropdownMenus]);
 
   const customPolicyDropdowns = useMemo(() => {
-    return getCustomDropdowns('Policy');
+    return getCustomDropdowns('Policy').filter(cd => {
+      const k = cd.name.toLowerCase().replace(/[^a-z0-9]/g, '');
+      return k !== 'familysize' && k !== 'familysizes';
+    });
   }, [getCustomDropdowns, dropdownMenus]);
 
   const familySizeOptions = useMemo(() => {
@@ -1080,7 +1119,9 @@ export default function Policies() {
     settlementDate: '',
     phcStage: 'TO_CONTACT',
   });
+  const [phcFamilyAllocations, setPhcFamilyAllocations] = useState<PhcFamilyAllocation[]>([]);
   const [isCustomPhcPersonManual, setIsCustomPhcPersonManual] = useState(false);
+  const [selectedPhcPolicyYear, setSelectedPhcPolicyYear] = useState(1);
 
   const [isDocUploadModalOpen, setIsDocUploadModalOpen] = useState(false);
   const [pendingDocs, setPendingDocs] = useState<{ type: string; title: string; description: string; file: File }[]>([]);
@@ -1465,21 +1506,30 @@ export default function Policies() {
     try {
       let fileToUpload = file;
       if (/\.(xlsx|xls)$/i.test(file.name)) {
-        const workbook = XLSX.read(await file.arrayBuffer(), { type: 'array', cellDates: true });
+        const workbook = XLSX.read(await file.arrayBuffer(), { type: 'array' });
         const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
         if (!firstSheet) throw new Error('The Excel file does not contain a worksheet');
         const csvContent = XLSX.utils.sheet_to_csv(firstSheet, { dateNF: 'YYYY-MM-DD' });
         fileToUpload = new File(['\uFEFF' + csvContent], file.name.replace(/\.[^/.]+$/, '.csv'), { type: 'text/csv;charset=utf-8' });
       }
-      const res = await policiesService.importCsv(fileToUpload);
-      if (res.created === 0 && res.skipped && res.skipped.length > 0) {
-        toast.error(res.message || `No policies imported. Skipped: ${res.skipped.slice(0, 3).join(', ')}`, { id: toastId, duration: 8000 });
+      const response = await policiesService.importCsv(fileToUpload);
+      const res = response?.data ?? response;
+      const skipped = Array.isArray(res.skipped) ? res.skipped : [];
+      const importedCount = Number(res.created || 0) + Number(res.updated || 0);
+      if (skipped.length > 0) {
+        const skippedDetails = skipped.slice(0, 3).join(', ');
+        const remaining = skipped.length - Math.min(skipped.length, 3);
+        toast.error(
+          `${res.message || `Imported ${importedCount} policies`}. Skipped: ${skippedDetails}${remaining > 0 ? `, and ${remaining} more` : ''}`,
+          { id: toastId, duration: 10000 },
+        );
       } else {
-        toast.success(res.message || `Successfully imported ${res.created} policies!`, { id: toastId });
+        toast.success(res.message || `Successfully imported ${importedCount} policies!`, { id: toastId });
       }
       qc.invalidateQueries({ queryKey: ['policies'] });
       qc.invalidateQueries({ queryKey: ['contacts'] });
       qc.invalidateQueries({ queryKey: ['stats'] });
+      setPage(1);
       if (fileInputRef.current) fileInputRef.current.value = '';
     } catch (err: any) {
       toast.error(err?.response?.data?.message || err?.message || 'Failed to import policies', { id: toastId });
@@ -2333,6 +2383,10 @@ export default function Policies() {
   const handleCompanyCategoryChange = (newCat: string) => {
     setSelectedCompanyCategory(newCat);
     setSelectedType(newCat);
+    if (!newCat.toUpperCase().includes('HEALTH')) {
+      setValue('phcRequired', false, { shouldValidate: true });
+      setEditValue('phcRequired', false, { shouldValidate: true });
+    }
 
     if (selectedCompany && newCat) {
       const catKey = newCat.toUpperCase();
@@ -2446,21 +2500,122 @@ export default function Policies() {
   const watchLastPremiumDate = watch('lastPremiumDate');
   const watchEmiCase = watch('emiCase');
   const watchPhcRequired = watch('phcRequired');
-  const isLifeOrTerm = Boolean(
-    [
-      selectedPlanCategory,
-      selectedCompanyCategory,
-      selectedType,
-      selectedPlan?.category,
-      selectedPlan?.company?.category,
-    ].some(cat => {
-      if (!cat) return false;
-      const upper = String(cat).toUpperCase();
-      return upper.includes('LIFE') || upper.includes('TERM');
-    })
-  );
+  const selectedPolicyCategory = String(
+    selectedCompanyCategory || selectedType || selectedPlanCategory || selectedPlan?.category || selectedPlan?.company?.category || '',
+  ).toUpperCase();
+  const isLifeTermPlanCategory = selectedPlanCategory.trim().toUpperCase().replace(/[\s_-]+/g, ' ') === 'LIFE TERM';
+  const isLifeOrTerm = isLifeTermPlanCategory || selectedPolicyCategory.includes('LIFE') || selectedPolicyCategory.includes('TERM');
+  const isHealthPolicy = selectedPolicyCategory.includes('HEALTH');
   const showLifeTermInstallmentFields = isLifeOrTerm && Boolean(watchEmiCase);
-  const showInstallmentAndYearlyFields = isLifeOrTerm && Boolean(watchEmiCase);
+  const showLifeTermPolicyFields = showLifeTermInstallmentFields || isLifeTermPlanCategory;
+  const showInstallmentAndYearlyFields = showLifeTermInstallmentFields || isLifeTermPlanCategory;
+  const showPhcFields = isHealthPolicy && Boolean(watchPhcRequired ?? true);
+
+  const phcPolicyYears = useMemo(() => {
+    const parseDate = (value?: string | Date | null): Date | null => {
+      if (!value) return null;
+      if (value instanceof Date) return Number.isNaN(value.getTime()) ? null : new Date(value.getFullYear(), value.getMonth(), value.getDate());
+      const text = String(value).trim();
+      const iso = text.match(/^(\d{4})-(\d{2})-(\d{2})/);
+      if (iso) return new Date(Number(iso[1]), Number(iso[2]) - 1, Number(iso[3]));
+      const dmy = text.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})/);
+      if (dmy) return new Date(Number(dmy[3]), Number(dmy[2]) - 1, Number(dmy[1]));
+      const parsed = new Date(text);
+      return Number.isNaN(parsed.getTime()) ? null : new Date(parsed.getFullYear(), parsed.getMonth(), parsed.getDate());
+    };
+    const dateKey = (date: Date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+    const policyStart = parseDate(watchStartDate);
+    const policyEnd = parseDate(watchEndDate);
+    if (!policyStart || !policyEnd || policyEnd < policyStart) return [];
+
+    const eligibilityStart = parseDate(phcExtraDetails.eligibilityStartDate);
+    const effectiveEligibilityStart = eligibilityStart && eligibilityStart > policyStart ? eligibilityStart : policyStart;
+    const phcActivityDate = parseDate(
+      phcExtraDetails.settlementDate ||
+      phcExtraDetails.reportReceivedDate ||
+      phcExtraDetails.appointmentDate ||
+      phcExtraDetails.bookingDate,
+    );
+    const yearDifference = policyEnd.getFullYear() - policyStart.getFullYear();
+    const anniversary = new Date(policyStart);
+    anniversary.setFullYear(policyStart.getFullYear() + yearDifference);
+    const totalYears = Math.max(1, yearDifference + (dateKey(policyEnd) > dateKey(anniversary) ? 1 : 0));
+    const currentDate = new Date();
+    currentDate.setHours(0, 0, 0, 0);
+    const hasCurrentPolicyYear = currentDate >= policyStart && currentDate <= policyEnd;
+    const allocations: PhcFamilyAllocation[] = [];
+    const flattenAllocations = (items: PhcFamilyAllocation[]) => items.forEach(item => {
+      allocations.push(item);
+      flattenAllocations(item.children || []);
+    });
+    flattenAllocations(phcFamilyAllocations);
+
+    const years: {
+      yearNo: number;
+      startDate: Date;
+      endDate: Date;
+      isEligible: boolean;
+      familyMembers: PhcFamilyAllocation[];
+      utilizedAmount: number;
+    }[] = [];
+    for (let yearNo = 1; yearNo <= totalYears; yearNo += 1) {
+      const yearStart = new Date(policyStart.getFullYear() + yearNo - 1, policyStart.getMonth(), policyStart.getDate());
+      const nextYearStart = new Date(policyStart.getFullYear() + yearNo, policyStart.getMonth(), policyStart.getDate());
+      const yearEnd = new Date(nextYearStart);
+      yearEnd.setDate(yearEnd.getDate() - 1);
+      const actualEnd = yearNo === totalYears ? policyEnd : yearEnd;
+      const eligibleStartForYear = effectiveEligibilityStart > yearStart ? effectiveEligibilityStart : yearStart;
+      const isEligible = eligibleStartForYear <= actualEnd;
+      const familyMembers = allocations.filter(allocation => {
+        if (!allocation.personName?.trim() || !isEligible) return false;
+        const eventDate = parseDate(
+          allocation.appointmentDate ||
+          allocation.bookingDate ||
+          allocation.reportReceivedDate ||
+          allocation.settlementDate,
+        );
+        if (eventDate) return eventDate >= eligibleStartForYear && eventDate <= actualEnd;
+        return effectiveEligibilityStart >= yearStart && effectiveEligibilityStart <= actualEnd;
+      });
+      const familyUtilizedAmount = familyMembers.reduce(
+        (sum, allocation) => sum + Math.max(0, Number(allocation.utilizedAmount) || 0),
+        0,
+      );
+      const isCurrentYear = currentDate >= yearStart && currentDate <= actualEnd;
+      const includePrimaryUtilized = isEligible && (
+        phcActivityDate
+          ? phcActivityDate >= eligibleStartForYear && phcActivityDate <= actualEnd
+          : isCurrentYear || (!hasCurrentPolicyYear && yearNo === 1)
+      );
+      const utilizedAmount = familyUtilizedAmount + (
+        includePrimaryUtilized ? Math.max(0, Number(phcExtraDetails.utilizedAmount) || 0) : 0
+      );
+      years.push({ yearNo, startDate: yearStart, endDate: actualEnd, isEligible, familyMembers, utilizedAmount });
+    }
+    return years.map(year => ({
+      ...year,
+      eligibilityStartDate: effectiveEligibilityStart,
+      startDateLabel: format(year.startDate, 'dd MMM yyyy'),
+      endDateLabel: format(year.endDate, 'dd MMM yyyy'),
+      key: dateKey(year.startDate),
+    }));
+  }, [
+    watchStartDate,
+    watchEndDate,
+    phcExtraDetails.eligibilityStartDate,
+    phcExtraDetails.settlementDate,
+    phcExtraDetails.reportReceivedDate,
+    phcExtraDetails.appointmentDate,
+    phcExtraDetails.bookingDate,
+    phcExtraDetails.utilizedAmount,
+    phcFamilyAllocations,
+  ]);
+
+  useEffect(() => {
+    if (!isHealthPolicy && activePolicyTab === 'phcDetails') {
+      setActivePolicyTab('policyPlan');
+    }
+  }, [activePolicyTab, isHealthPolicy]);
   const [durationYears, setDurationYears] = useState<number>(1);
   const [policyTerm, setPolicyTerm] = useState<string>('1 Year');
   const [insuredPerson, setInsuredPerson] = useState<string>('');
@@ -2636,6 +2791,22 @@ export default function Policies() {
 
     return list;
   }, [insuredPerson, selectedContact, connectedPersons, phcExtraDetails.insuredPersonName]);
+
+  const phcFamilyMemberOptions = useMemo(() => {
+    const seen = new Set<string>();
+    return connectedPersons.reduce<{ value: string; label: string; sublabel?: string }[]>((options, person) => {
+      const name = (person.name || '').trim();
+      const key = name.toLowerCase();
+      if (!name || seen.has(key)) return options;
+      seen.add(key);
+      options.push({
+        value: name,
+        label: `${name} (${person.relationship || 'Member'})`,
+        sublabel: person.relationship ? `Relationship: ${person.relationship}` : 'Family Member',
+      });
+      return options;
+    }, []);
+  }, [connectedPersons]);
 
   const syncContactFamilyMembers = useCallback((contact: any) => {
     if (!contact) return;
@@ -2859,6 +3030,7 @@ export default function Policies() {
       settlementDate: '',
       phcStage: 'TO_CONTACT',
     });
+    setPhcFamilyAllocations([]);
     setIsCustomPhcPersonManual(false);
     setKeepCreateOpen(false);
     setEmiComment('');
@@ -2919,6 +3091,7 @@ export default function Policies() {
     const planCat = extra.planCategory || p.plan?.category || '';
     const matchPlanCat = planCategoryOptions.find((o: any) => o.value.toLowerCase() === planCat.toLowerCase());
     setSelectedPlanCategory(matchPlanCat ? matchPlanCat.value : planCat);
+    const policyCategoryForEdit = String(matchCompCat?.value || compCat || matchPlanCat?.value || planCat).toUpperCase();
 
     // Set Agent Name
     if (extra.agentName) {
@@ -3010,12 +3183,14 @@ export default function Policies() {
     setValue('firstPremiumDate', extra.firstPremiumDate || '');
     setValue('premiumPaymentPeriod', extra.premiumPaymentPeriod || undefined);
     setValue('lastPremiumDate', extra.lastPremiumDate || '');
+    setValue('firstYearPremium', extra.firstYearPremium || undefined);
+    setValue('secondYearPremium', extra.secondYearPremium || undefined);
     setValue('emiCase', extra.emiCase || false, { shouldValidate: true, shouldDirty: true });
     setValue('emiGateway', extra.emiGateway ? extra.emiGateway.trim() : '', { shouldValidate: true, shouldDirty: true });
     const cleanEmiDate = normalizeInstallmentDay(extra.emiDate);
     setValue('emiDate', cleanEmiDate, { shouldValidate: true, shouldDirty: true });
     setValue('emiPremium', extra.emiPremium || undefined);
-    setValue('phcRequired', extra.phcRequired || false);
+    setValue('phcRequired', policyCategoryForEdit.includes('HEALTH') && Boolean(extra.phcRequired));
     setValue('phcAmount', extra.phcAmount || undefined);
     setValue('phcStatus', extra.phcStatus || '');
     setValue('phcClaimSettled', extra.phcClaimSettled || false);
@@ -3066,16 +3241,11 @@ export default function Policies() {
         phcStage: extra.phcStage || prev.phcStage || 'TO_CONTACT',
       }));
     }
+    setPhcFamilyAllocations(Array.isArray(extra.phcFamilyAllocations) ? extra.phcFamilyAllocations : []);
 
+    const dateBasedTenure = getPolicyDurationYears(p.startDate, p.endDate);
     const parsedTenureNum = parseInt((extra.policyTenure || '').replace(/\D/g, ''), 10);
-    if (!isNaN(parsedTenureNum) && parsedTenureNum > 0) {
-      setDurationYears(parsedTenureNum);
-    } else if (p.startDate && p.endDate) {
-      const years = Math.max(1, Math.round((new Date(p.endDate).getTime() - new Date(p.startDate).getTime()) / (365.25 * 24 * 60 * 60 * 1000)));
-      setDurationYears(years);
-    } else {
-      setDurationYears(1);
-    }
+    setDurationYears(dateBasedTenure || (parsedTenureNum > 0 ? parsedTenureNum : 1));
     setPolicyTerm(extra.policyTerm || (extra.policyTenure ? extra.policyTenure : '1 Year'));
     setInsuredPerson(extra.insuredPerson || (p.contact ? `${p.contact.firstName} ${p.contact.lastName || ''}`.trim() : ''));
 
@@ -3912,6 +4082,8 @@ export default function Policies() {
   const submitEdit = async (body: EditForm) => {
     if (!editTarget) return;
     const assignedEmployeeId = body.assignedEmployeeId?.trim() ? body.assignedEmployeeId : undefined;
+    const editLifeTermFieldsEnabled = isLifeTermPlanCategory || (isLifeOrTerm && Boolean(body.emiCase ?? watchEditEmiCase));
+    const editPhcRequired = isHealthPolicy && Boolean(body.phcRequired ?? watchEditPhcRequired ?? false);
 
     // Format notes to include extra Excel fields
     let extraNotes = body.notes ? body.notes.trim() : '';
@@ -3920,7 +4092,15 @@ export default function Policies() {
     if (body.bonus2) extraNotes += `\nBonus 2 (Super / Cumulative): ${body.bonus2}`;
     if (body.riders && body.riders.length > 0) extraNotes += `\nRiders/Addons: ${body.riders.join(', ')}`;
     if (body.firstPremiumDate) extraNotes += `\nFirst Premium Date: ${body.firstPremiumDate}`;
-    if (body.premiumPaymentPeriod) extraNotes += `\nPremium Payment Period: ${body.premiumPaymentPeriod} Years`;
+    if (editLifeTermFieldsEnabled) {
+      if (body.firstYearPremium) extraNotes += `\n1st Year Premium Amount: ₹${body.firstYearPremium}`;
+      if (body.secondYearPremium) extraNotes += `\n2nd Year Onwards Premium Amount: ₹${body.secondYearPremium}`;
+      if (policyTerm) extraNotes += `\nPolicy Term: ${policyTerm}`;
+      if (ageAtEntry) extraNotes += `\nAge at Entry: ${ageAtEntry}`;
+      if (ageAtLastPremium) extraNotes += `\nAge at Last Premium: ${ageAtLastPremium}`;
+      if (ageAtMaturity) extraNotes += `\nAge at Maturity: ${ageAtMaturity}`;
+    }
+    if (editLifeTermFieldsEnabled && body.premiumPaymentPeriod) extraNotes += `\nPremium Payment Period: ${body.premiumPaymentPeriod} Years`;
     if (body.lastPremiumDate) extraNotes += `\nLast Premium Date: ${body.lastPremiumDate}`;
     if (body.emiCase) {
       const emiGw = (body.emiGateway || '').trim();
@@ -3929,7 +4109,7 @@ export default function Policies() {
       if (emiGw) extraNotes += `\nInstallment Gateway: ${emiGw}`;
       if (emiDt) extraNotes += `\nInstallment Date: ${emiDt}`;
     }
-    if (body.phcRequired || watchPhcRequired) {
+    if (editPhcRequired) {
       const isCompleted = phcExtraDetails.phcStage === 'PROCESS_COMPLETED' ||
         phcExtraDetails.phcStage === 'Process Completed' ||
         phcExtraDetails.phcStage?.toUpperCase().includes('COMPLET') ||
@@ -3938,7 +4118,7 @@ export default function Policies() {
       const effectivePhcStatus = isCompleted ? 'Completed' : (body.phcStatus || 'N/A');
       const phcAmountNum = Number(body.phcAmount || 0);
       const utilizedNum = Number(phcExtraDetails.utilizedAmount || 0);
-      const balanceNum = Math.max(0, phcAmountNum - utilizedNum);
+      const balanceNum = Math.max(0, phcAmountNum - utilizedNum - sumPhcFamilyAllocations(phcFamilyAllocations));
 
       extraNotes += `\nPreventive Health Checkup: Yes (Amount: ₹${phcAmountNum}, Status: ${effectivePhcStatus}, Claim Settled: ${body.phcClaimSettled ? 'Yes' : 'No'}${phcExtraDetails.insuredPersonName ? `, Insured Person: ${phcExtraDetails.insuredPersonName}` : ''})`;
       extraNotes += `\nPHC Required: Yes`;
@@ -3955,6 +4135,7 @@ export default function Policies() {
         extraNotes += `\nPHC Utilized Amount: ₹${utilizedNum}`;
       }
       extraNotes += `\nPHC Balance Amount: ₹${balanceNum}`;
+      if (phcFamilyAllocations.length > 0) extraNotes += `\nPHC Family Allocations: ${JSON.stringify(phcFamilyAllocations)}`;
       if (phcExtraDetails.bookingDate) extraNotes += `\nPHC Booking Date: ${phcExtraDetails.bookingDate}`;
       if (phcExtraDetails.appointmentDate) extraNotes += `\nPHC Appointment Date: ${phcExtraDetails.appointmentDate}`;
       if (phcExtraDetails.centreName) extraNotes += `\nPHC Centre / Lab Name: ${phcExtraDetails.centreName}`;
@@ -3975,7 +4156,7 @@ export default function Policies() {
       sumAssured: body.sumAssured ? Number(body.sumAssured) : undefined,
       endDate: body.endDate,
       nextDueDate: body.nextDueDate || undefined,
-      maturityDate: body.maturityDate || undefined,
+      maturityDate: editLifeTermFieldsEnabled ? body.maturityDate || undefined : undefined,
       paymentFrequency: body.paymentFrequency,
       agentCode: body.agentCode || undefined,
       assignedEmployeeId,
@@ -4109,7 +4290,8 @@ export default function Policies() {
 
       const finalStartDate = body.startDate || format(new Date(), 'yyyy-MM-dd');
       const finalEndDate = body.endDate || format(addYears(new Date(finalStartDate), Number(durationYears) || 1), 'yyyy-MM-dd');
-      const finalMaturityDate = body.maturityDate || finalEndDate;
+      const finalLifeTermFieldsEnabled = isLifeTermPlanCategory || (isLifeOrTerm && Boolean(body.emiCase ?? watchEmiCase));
+      const finalMaturityDate = finalLifeTermFieldsEnabled ? (body.maturityDate || finalEndDate) : undefined;
       const finalLastInstDate = body.lastInstallmentDate || body.lastPremiumDate || watch('lastInstallmentDate') || watch('lastPremiumDate') || '';
       const finalNoOfInst = body.noOfInstallments || watch('noOfInstallments') || (body.paymentFrequency === 'SINGLE' ? 1 : undefined);
 
@@ -4132,16 +4314,16 @@ export default function Policies() {
       if (durationYears) {
         extraNotes += `\nPolicy Tenure: ${durationYears} ${Number(durationYears) === 1 ? 'Year' : 'Years'}`;
       }
-      if (policyTerm) {
+      if (finalLifeTermFieldsEnabled && policyTerm) {
         extraNotes += `\nPolicy Term: ${policyTerm}`;
       }
-      if (ageAtEntry) {
+      if (finalLifeTermFieldsEnabled && ageAtEntry) {
         extraNotes += `\nAge at Entry: ${ageAtEntry}`;
       }
-      if (ageAtLastPremium) {
+      if (finalLifeTermFieldsEnabled && ageAtLastPremium) {
         extraNotes += `\nAge at Last Premium: ${ageAtLastPremium}`;
       }
-      if (ageAtMaturity) {
+      if (finalLifeTermFieldsEnabled && ageAtMaturity) {
         extraNotes += `\nAge at Maturity: ${ageAtMaturity}`;
       }
       if (insuredPerson) {
@@ -4152,7 +4334,11 @@ export default function Policies() {
       if (body.bonus2) extraNotes += `\nBonus 2 (Super / Cumulative): ${body.bonus2}`;
       if (body.riders && body.riders.length > 0) extraNotes += `\nRiders/Addons: ${body.riders.join(', ')}`;
       if (body.firstPremiumDate) extraNotes += `\nFirst Premium Date: ${body.firstPremiumDate}`;
-      if (body.premiumPaymentPeriod) extraNotes += `\nPremium Payment Period: ${body.premiumPaymentPeriod} Years`;
+      if (finalLifeTermFieldsEnabled) {
+        if (body.firstYearPremium) extraNotes += `\n1st Year Premium Amount: ₹${body.firstYearPremium}`;
+        if (body.secondYearPremium) extraNotes += `\n2nd Year Onwards Premium Amount: ₹${body.secondYearPremium}`;
+        if (body.premiumPaymentPeriod) extraNotes += `\nPremium Payment Period: ${body.premiumPaymentPeriod} Years`;
+      }
       if (finalLastInstDate) extraNotes += `\nLast Premium Date: ${finalLastInstDate}`;
       const formVals = getValues ? getValues() : ({} as any);
       const finalEmiCase = body.emiCase !== undefined ? body.emiCase : (formVals.emiCase !== undefined ? formVals.emiCase : watchEmiCase);
@@ -4223,7 +4409,8 @@ export default function Policies() {
         ].filter(Boolean);
         if (parts.length > 0) extraNotes += `\nBank Details: ${parts.join(', ')}`;
       }
-      if (body.phcRequired || watchPhcRequired) {
+      const shouldSavePhc = isHealthPolicy && Boolean(body.phcRequired ?? watchPhcRequired ?? false);
+      if (shouldSavePhc) {
         const isCompleted = phcExtraDetails.phcStage === 'PROCESS_COMPLETED' ||
           phcExtraDetails.phcStage === 'Process Completed' ||
           phcExtraDetails.phcStage?.toUpperCase().includes('COMPLET') ||
@@ -4232,7 +4419,7 @@ export default function Policies() {
         const effectivePhcStatus = isCompleted ? 'Completed' : (body.phcStatus || 'N/A');
         const phcAmountNum = Number(body.phcAmount || 0);
         const utilizedNum = Number(phcExtraDetails.utilizedAmount || 0);
-        const balanceNum = Math.max(0, phcAmountNum - utilizedNum);
+        const balanceNum = Math.max(0, phcAmountNum - utilizedNum - sumPhcFamilyAllocations(phcFamilyAllocations));
 
         extraNotes += `\nPreventive Health Checkup: Yes (Amount: ₹${phcAmountNum}, Status: ${effectivePhcStatus}, Claim Settled: ${body.phcClaimSettled ? 'Yes' : 'No'}${phcExtraDetails.insuredPersonName ? `, Insured Person: ${phcExtraDetails.insuredPersonName}` : ''})`;
         extraNotes += `\nPHC Required: Yes`;
@@ -4249,6 +4436,7 @@ export default function Policies() {
           extraNotes += `\nPHC Utilized Amount: ₹${utilizedNum}`;
         }
         extraNotes += `\nPHC Balance Amount: ₹${balanceNum}`;
+        if (phcFamilyAllocations.length > 0) extraNotes += `\nPHC Family Allocations: ${JSON.stringify(phcFamilyAllocations)}`;
         if (phcExtraDetails.bookingDate) extraNotes += `\nPHC Booking Date: ${phcExtraDetails.bookingDate}`;
         if (phcExtraDetails.appointmentDate) extraNotes += `\nPHC Appointment Date: ${phcExtraDetails.appointmentDate}`;
         if (phcExtraDetails.centreName) extraNotes += `\nPHC Centre / Lab Name: ${phcExtraDetails.centreName}`;
@@ -4261,7 +4449,7 @@ export default function Policies() {
         if (phcExtraDetails.eligibilityStartDate) extraNotes += `\nPHC Eligibility Start Date: ${phcExtraDetails.eligibilityStartDate}`;
         if (phcExtraDetails.frequency) extraNotes += `\nPHC Frequency: ${phcExtraDetails.frequency}`;
         if (phcExtraDetails.followUpDate) extraNotes += `\nPHC Follow-up Date: ${phcExtraDetails.followUpDate}`;
-      } else if (body.phcRequired === false || watchPhcRequired === false) {
+      } else if (isHealthPolicy && (body.phcRequired === false || watchPhcRequired === false)) {
         extraNotes += `\nPreventive Health Checkup: No\nPHC Required: No`;
       }
       const seenPersonNames = new Set<string>();
@@ -5317,27 +5505,21 @@ export default function Policies() {
               <Users size={14} />
               Connected Persons ({displayedConnectedPersons.length})
             </button>
-            <button
-              type="button"
-              onClick={() => {
-                setActivePolicyTab('phcDetails');
-                if (watchPhcRequired === undefined) {
-                  setValue('phcRequired', true);
-                  if (!selectedCompanyCategory) {
-                    handleCompanyCategoryChange('Health');
-                  }
-                }
-              }}
-              className={clsx(
-                'px-3 sm:px-4 py-2 rounded-xl text-xs font-extrabold tracking-wide transition-all cursor-pointer whitespace-nowrap flex items-center gap-1.5 sm:gap-2',
-                activePolicyTab === 'phcDetails'
-                  ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-md shadow-blue-500/25 scale-[1.02]'
-                  : 'text-slate-600 hover:text-slate-900 hover:bg-white/80'
-              )}
-            >
-              <Activity size={14} />
-              Preventive Health Checkup
-            </button>
+            {isHealthPolicy && (
+              <button
+                type="button"
+                onClick={() => setActivePolicyTab('phcDetails')}
+                className={clsx(
+                  'px-3 sm:px-4 py-2 rounded-xl text-xs font-extrabold tracking-wide transition-all cursor-pointer whitespace-nowrap flex items-center gap-1.5 sm:gap-2',
+                  activePolicyTab === 'phcDetails'
+                    ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-md shadow-blue-500/25 scale-[1.02]'
+                    : 'text-slate-600 hover:text-slate-900 hover:bg-white/80'
+                )}
+              >
+                <Activity size={14} />
+                Preventive Health Checkup
+              </button>
+            )}
             <button
               type="button"
               onClick={() => setActivePolicyTab('policyDocs')}
@@ -6020,40 +6202,13 @@ export default function Policies() {
                         </div>
 
                         {/* Riders / Addons */}
-                        <div className="flex flex-col gap-1 pt-2">
-                          <label className="label text-[10px] font-extrabold text-slate-900 uppercase tracking-wider block mb-1">
-                            Riders / Addons
-                          </label>
-                          <div className="grid grid-cols-1 sm:grid-cols-2 sm:grid-cols-3 gap-2 p-3 bg-slate-50 rounded-xl border border-slate-200 text-xs">
-                            {[
-                              { id: 'CRITICAL_ILLNESS', label: 'Critical Illness' },
-                              { id: 'ACCIDENTAL_DEATH', label: 'Accidental Death Rider' },
-                              { id: 'ROOM_RENT_WAIVER', label: 'Room Rent Limit Waiver' },
-                              { id: 'MATERNITY_COVER', label: 'Maternity Cover Option' },
-                              { id: 'OPD_BENEFIT', label: 'OPD Benefit Rider' },
-                              { id: 'WAIVER_OF_PREMIUM', label: 'Waiver of Premium' },
-                            ].map(rider => {
-                              const currentRiders = Array.isArray(watch('riders')) ? (watch('riders') as string[]) : [];
-                              const isChecked = currentRiders.includes(rider.id);
-                              return (
-                                <label key={rider.id} className="flex flex-wrap items-center gap-2 cursor-pointer text-gray-700 hover:text-blue-600 transition-colors">
-                                  <input
-                                    type="checkbox"
-                                    checked={isChecked}
-                                    onChange={e => {
-                                      const nextRiders = e.target.checked
-                                        ? [...currentRiders.filter(id => id !== rider.id), rider.id]
-                                        : currentRiders.filter(id => id !== rider.id);
-                                      setValue('riders', nextRiders, { shouldValidate: true, shouldDirty: true });
-                                    }}
-                                    className="rounded border-gray-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
-                                  />
-                                  <span className="text-[11px] font-medium">{rider.label}</span>
-                                </label>
-                              );
-                            })}
-                          </div>
-                        </div>
+                        <PolicyRidersSelector
+                          selectedRiders={Array.isArray(watch('riders')) ? (watch('riders') as string[]) : []}
+                          onChange={nextRiders => setValue('riders', nextRiders, { shouldValidate: true, shouldDirty: true })}
+                          planId={watch('planId')}
+                          plansList={plansList}
+                          disabled={isViewMode}
+                        />
                       </div>
                     )}
                   </div>
@@ -6154,17 +6309,19 @@ export default function Policies() {
                           </div>
                         )}
 
-                        <div>
-                          <label className="label text-[10px] font-extrabold text-slate-900 uppercase tracking-wider block mb-1">
-                            Premium Payment Period (Years)
-                          </label>
-                          <input
-                            type="number"
-                            {...register('premiumPaymentPeriod')}
-                            className="input w-full h-10 text-xs rounded-xl bg-white border border-slate-200 focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
-                            placeholder="e.g. 10"
-                          />
-                        </div>
+                        {showLifeTermInstallmentFields && (
+                          <div>
+                            <label className="label text-[10px] font-extrabold text-slate-900 uppercase tracking-wider block mb-1">
+                              Premium Payment Period (Years)
+                            </label>
+                            <input
+                              type="number"
+                              {...register('premiumPaymentPeriod')}
+                              className="input w-full h-10 text-xs rounded-xl bg-white border border-slate-200 focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
+                              placeholder="e.g. 10"
+                            />
+                          </div>
+                        )}
                       </div>
                     )}
                   </div>
@@ -6192,7 +6349,7 @@ export default function Policies() {
                       <div className="p-4 grid grid-cols-1 md:grid-cols-3 gap-3.5 animate-fadeIn">
                         <div>
                           <label className="label text-[10px] font-extrabold text-slate-900 uppercase tracking-wider block mb-1">
-                            Policy Tenure (Years)
+                            {isLifeTermPlanCategory ? 'Policy Term (Period of Coverage in Years)' : 'Policy Tenure (Years)'}
                           </label>
                           <div className="relative">
                             <input
@@ -6220,20 +6377,6 @@ export default function Policies() {
                           </div>
                         </div>
 
-                        {showLifeTermInstallmentFields && (
-                          <div>
-                            <label className="label text-[10px] font-extrabold text-slate-900 uppercase tracking-wider block mb-1">
-                              Policy Term
-                            </label>
-                            <input
-                              type="text"
-                              className="input w-full h-10 text-xs rounded-xl bg-white border border-slate-200 focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 text-slate-800 font-bold"
-                              value={policyTerm}
-                              onChange={e => setPolicyTerm(e.target.value)}
-                              placeholder="e.g. 1 Year"
-                            />
-                          </div>
-                        )}
                         <div>
                           <label className="label text-[10px] font-extrabold text-slate-900 uppercase tracking-wider block mb-1">
                             Policy Start Date <span className="text-red-600 font-black text-sm ml-0.5" style={{ color: '#dc2626' }}>*</span>
@@ -6255,13 +6398,17 @@ export default function Policies() {
                           </label>
                           <DatePicker
                             value={watchEndDate}
-                            onDateChange={val => setValue('endDate', val, { shouldValidate: true, shouldDirty: true })}
+                            onDateChange={val => {
+                              setValue('endDate', val, { shouldValidate: true, shouldDirty: true });
+                              const dateBasedTenure = getPolicyDurationYears(watchStartDate, val);
+                              if (dateBasedTenure) setDurationYears(dateBasedTenure);
+                            }}
                             className="input w-full h-10 text-xs rounded-xl bg-white border border-slate-200"
                             placeholder="DD/MM/YYYY"
                           />
                         </div>
 
-                        {showLifeTermInstallmentFields && (
+                        {showLifeTermPolicyFields && (
                           <div>
                             <label className="label text-[10px] font-extrabold text-slate-900 uppercase tracking-wider block mb-1">
                               Date of Maturity
@@ -6276,7 +6423,7 @@ export default function Policies() {
                         )}
 
 
-                        {showLifeTermInstallmentFields && (
+                        {showLifeTermPolicyFields && (
                           <div>
                             <label className="label text-[10px] font-extrabold text-slate-900 uppercase tracking-wider block mb-1">
                               Age at Entry
@@ -6291,7 +6438,7 @@ export default function Policies() {
                           </div>
                         )}
 
-                        {showLifeTermInstallmentFields && (
+                        {showLifeTermPolicyFields && (
                           <div>
                             <label className="label text-[10px] font-extrabold text-slate-900 uppercase tracking-wider block mb-1">
                               Age at Last Premium
@@ -6306,7 +6453,7 @@ export default function Policies() {
                           </div>
                         )}
 
-                        {showLifeTermInstallmentFields && (
+                        {showLifeTermPolicyFields && (
                           <div>
                             <label className="label text-[10px] font-extrabold text-slate-900 uppercase tracking-wider block mb-1">
                               Age at Maturity
@@ -6887,6 +7034,7 @@ export default function Policies() {
                   </div>
 
                   {/* Section 7: Preventive Health Checkup Option */}
+                  {isHealthPolicy && (
                   <div className="border border-slate-200/90 rounded-2xl bg-white shadow-2xs hover:shadow-xs transition-all overflow-visible">
                     <div
                       className="bg-gradient-to-r from-teal-50/80 via-slate-50 to-emerald-50/30 px-4 py-2.5 border-b border-slate-100 flex items-center justify-between cursor-pointer select-none rounded-t-2xl"
@@ -6917,9 +7065,6 @@ export default function Policies() {
                               onChange={val => {
                                 const isYes = val === 'yes';
                                 setValue('phcRequired', isYes, { shouldValidate: true, shouldDirty: true });
-                                if (isYes && !selectedCompanyCategory) {
-                                  handleCompanyCategoryChange('Health');
-                                }
                               }}
                               placeholder="Select Option"
                               options={[
@@ -6932,6 +7077,7 @@ export default function Policies() {
                       </div>
                     )}
                   </div>
+                  )}
                 </div>
               )}
 
@@ -7248,7 +7394,7 @@ export default function Policies() {
               )}
 
               {/* ════════════════ TAB 5: Preventive Health Checkup ════════════════ */}
-              {activePolicyTab === 'phcDetails' && (
+              {activePolicyTab === 'phcDetails' && isHealthPolicy && (
                 <div className="space-y-4 animate-fadeIn">
                   {/* PHC Info Header Banner */}
                   <div className="bg-gradient-to-r from-teal-50 via-slate-50 to-blue-50 border border-teal-200/80 rounded-2xl p-3 sm:p-4 flex flex-wrap items-center justify-between gap-3 shadow-2xs">
@@ -7264,21 +7410,97 @@ export default function Policies() {
                         <p className="text-[11px] text-slate-500">Configure health checkup allowance, lab booking, appointments and claim settlements.</p>
                       </div>
                     </div>
-                    {selectedCompanyCategory?.toUpperCase() !== 'HEALTH' && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          handleCompanyCategoryChange('Health');
-                          setValue('phcRequired', true);
-                          toast.success('Insurance Company Category set to Health');
-                        }}
-                        className="text-[11px] font-bold px-3 py-1.5 rounded-xl bg-teal-600 hover:bg-teal-700 text-white transition-all shadow-2xs cursor-pointer flex items-center gap-1.5"
-                      >
-                        <CheckCircle2 size={13} />
-                        <span>Set Policy as Health</span>
-                      </button>
-                    )}
                   </div>
+
+                  {isViewMode && showPhcFields && phcPolicyYears.length > 0 && (() => {
+                    const selectedYear = phcPolicyYears.find(year => year.yearNo === selectedPhcPolicyYear)
+                      || phcPolicyYears.find(year => new Date() >= year.startDate && new Date() <= year.endDate)
+                      || phcPolicyYears[0];
+                    return (
+                      <div className="space-y-3 rounded-2xl border border-teal-100 bg-white p-3 sm:p-4 shadow-2xs">
+                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                          {phcPolicyYears.map(year => {
+                            const isCurrentYear = new Date() >= year.startDate && new Date() <= year.endDate;
+                            const isSelectedYear = selectedYear.yearNo === year.yearNo;
+                            return (
+                              <div
+                                key={year.key}
+                                role="button"
+                                tabIndex={0}
+                                aria-pressed={isSelectedYear}
+                                onClick={() => setSelectedPhcPolicyYear(year.yearNo)}
+                                onKeyDown={event => {
+                                  if (event.key === 'Enter' || event.key === ' ') {
+                                    event.preventDefault();
+                                    setSelectedPhcPolicyYear(year.yearNo);
+                                  }
+                                }}
+                                className={clsx(
+                                  'rounded-xl border p-3 text-left cursor-pointer transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500/30',
+                                  isSelectedYear
+                                    ? 'border-blue-300 bg-blue-50 text-blue-800'
+                                    : 'border-slate-200 bg-slate-50 text-slate-700 hover:border-blue-200 hover:bg-blue-50/50',
+                                )}
+                              >
+                                <span className="flex items-center justify-between gap-1">
+                                  <span className="text-xs font-extrabold">Year {year.yearNo}</span>
+                                  {isCurrentYear && <span className="rounded bg-blue-600 px-1 py-0.5 text-[8px] font-black text-white">CURRENT</span>}
+                                </span>
+                                <span className="mt-1 block text-[9px] font-semibold">{year.startDateLabel} – {year.endDateLabel}</span>
+                                <span className="mt-1 block text-[9px] font-bold">
+                                  {year.isEligible ? `${year.familyMembers.length} family PHC entr${year.familyMembers.length === 1 ? 'y' : 'ies'}` : 'Not eligible yet'}
+                                </span>
+                                {year.isEligible && (
+                                  <span className="mt-1 block text-[9px] font-extrabold text-blue-700">
+                                    Utilized ₹{year.utilizedAmount.toLocaleString('en-IN')}
+                                  </span>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+
+                        <div className="rounded-xl border border-slate-200">
+                          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 bg-slate-50 px-3 py-2">
+                            <div>
+                              <p className="text-xs font-extrabold text-slate-800">Year {selectedYear.yearNo} Family PHC</p>
+                              <p className="text-[10px] font-semibold text-slate-500">{selectedYear.startDateLabel} – {selectedYear.endDateLabel}</p>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <span className="rounded-full bg-blue-50 px-2 py-1 text-[10px] font-bold text-blue-700">
+                                Utilized ₹{selectedYear.utilizedAmount.toLocaleString('en-IN')}
+                              </span>
+                              <span className="rounded-full bg-teal-50 px-2 py-1 text-[10px] font-bold text-teal-700">
+                                {selectedYear.familyMembers.length} entr{selectedYear.familyMembers.length === 1 ? 'y' : 'ies'}
+                              </span>
+                            </div>
+                          </div>
+                          {selectedYear.familyMembers.length > 0 ? (
+                            <div className="divide-y divide-slate-100">
+                              {selectedYear.familyMembers.map((member, index) => (
+                                <div key={member.id || `${member.personName}-${index}`} className="grid grid-cols-1 gap-1 px-3 py-2 sm:grid-cols-4 sm:items-center">
+                                  <span className="text-xs font-bold text-slate-800">{member.personName}</span>
+                                  <span className="text-[10px] font-semibold text-slate-600">{member.phcStage?.replace(/_/g, ' ') || 'To Contact'}</span>
+                                  <span className="text-[10px] font-semibold text-slate-500">
+                                    {member.bookingDate ? `Booked ${member.bookingDate}` : 'Booking date not set'}
+                                  </span>
+                                  <span className="text-[10px] font-bold text-blue-700 sm:text-right">
+                                    Utilized ₹{(Number(member.utilizedAmount) || 0).toLocaleString('en-IN')}
+                                  </span>
+                                </div>
+                              ))}
+                            </div>
+                          ) : (
+                            <p className="px-3 py-4 text-center text-[11px] font-semibold text-slate-500">
+                              {selectedYear.isEligible
+                                ? 'No family PHC entries are recorded for this policy year.'
+                                : `PHC eligibility starts ${format(selectedYear.eligibilityStartDate, 'dd MMM yyyy')}.`}
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })()}
 
                   <div className="space-y-4">
                     {/* Card 1A: PHC Configuration & Eligibility */}
@@ -7311,9 +7533,6 @@ export default function Policies() {
                                 value={(watchPhcRequired ?? true) ? 'yes' : 'no'}
                                 onChange={val => {
                                   setValue('phcRequired', val === 'yes');
-                                  if (val === 'yes' && !selectedCompanyCategory) {
-                                    handleCompanyCategoryChange('Health');
-                                  }
                                 }}
                                 placeholder="Select Option"
                                 options={[
@@ -7323,13 +7542,16 @@ export default function Policies() {
                               />
                             </div>
 
-                            {(watchPhcRequired ?? true) && (
+                            {showPhcFields && (
                               <>
                                 <div>
                                   <label className="label text-[10px] font-extrabold text-slate-900 uppercase tracking-wider block mb-1">PHC Amount (₹)</label>
                                   <input
                                     type="number"
                                     {...register('phcAmount')}
+                                    min={phcFamilyAllocations.length > 0
+                                      ? (Number(phcExtraDetails.utilizedAmount) || 0) + sumPhcFamilyAllocations(phcFamilyAllocations)
+                                      : undefined}
                                     className="input w-full h-10 text-xs rounded-xl bg-white border border-slate-200 focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
                                     placeholder="e.g. 5000"
                                   />
@@ -7339,7 +7561,7 @@ export default function Policies() {
                                   <label className="label text-[10px] font-extrabold text-slate-900 uppercase tracking-wider block mb-1">PHC Balance Amount (₹)</label>
                                   <input
                                     type="text"
-                                    value={`₹${Math.max(0, (Number(watch('phcAmount')) || 0) - (Number(phcExtraDetails.utilizedAmount) || 0))}`}
+                                    value={`₹${Math.max(0, (Number(watch('phcAmount')) || 0) - (Number(phcExtraDetails.utilizedAmount) || 0) - sumPhcFamilyAllocations(phcFamilyAllocations))}`}
                                     readOnly
                                     className="input w-full h-10 text-xs rounded-xl bg-white border border-slate-200 focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 font-bold text-slate-800"
                                   />
@@ -7409,8 +7631,16 @@ export default function Policies() {
                       )}
                     </div>
 
+                    {showPhcFields && (
+                      <PhcFamilyAllocationButton
+                        allocations={phcFamilyAllocations}
+                        onChange={setPhcFamilyAllocations}
+                        availableAmount={Math.max(0, (Number(watch('phcAmount')) || 0) - (Number(phcExtraDetails.utilizedAmount) || 0))}
+                      />
+                    )}
+
                     {/* Card 1B: PHC Booking & Centre Details */}
-                    {(watchPhcRequired ?? true) && (
+                    {showPhcFields && (
                       <div className="border border-slate-200/90 rounded-2xl bg-white shadow-2xs hover:shadow-xs transition-all overflow-visible">
                         <div
                           className="bg-gradient-to-r from-blue-50/80 via-slate-50 to-indigo-50/30 px-4 py-2.5 border-b border-slate-100 flex items-center justify-between cursor-pointer select-none rounded-t-2xl"
@@ -7508,7 +7738,7 @@ export default function Policies() {
                     )}
 
                     {/* Card 1C: PHC Claim & Settlement Details */}
-                    {(watchPhcRequired ?? true) && (
+                    {showPhcFields && (
                       <div className="border border-slate-200/90 rounded-2xl bg-white shadow-2xs hover:shadow-xs transition-all overflow-visible">
                         <div
                           className="bg-gradient-to-r from-emerald-50/80 via-slate-50 to-teal-50/30 px-4 py-2.5 border-b border-slate-100 flex items-center justify-between cursor-pointer select-none rounded-t-2xl"
@@ -7534,7 +7764,15 @@ export default function Policies() {
                               <input
                                 type="number"
                                 value={phcExtraDetails.utilizedAmount}
-                                onChange={e => setPhcExtraDetails(p => ({ ...p, utilizedAmount: e.target.value }))}
+                                onChange={e => {
+                                  const entered = Number(e.target.value) || 0;
+                                  const hasAllocations = phcFamilyAllocations.length > 0;
+                                  const maxUtilized = Math.max(0, (Number(watch('phcAmount')) || 0) - sumPhcFamilyAllocations(phcFamilyAllocations));
+                                  setPhcExtraDetails(p => ({
+                                    ...p,
+                                    utilizedAmount: String(hasAllocations ? Math.min(entered, maxUtilized) : entered),
+                                  }));
+                                }}
                                 className="input w-full h-10 text-xs rounded-xl bg-white border border-slate-200"
                                 placeholder="Utilized Amount"
                               />
@@ -7614,6 +7852,15 @@ export default function Policies() {
                           </div>
                         )}
                       </div>
+                    )}
+                    {showPhcFields && (
+                      <PhcFamilyAllocations
+                        allocations={phcFamilyAllocations}
+                        onChange={setPhcFamilyAllocations}
+                        availableAmount={Math.max(0, (Number(watch('phcAmount')) || 0) - (Number(phcExtraDetails.utilizedAmount) || 0))}
+                        stageOptions={PHC_STAGE_OPTIONS}
+                        familyMemberOptions={phcFamilyMemberOptions}
+                      />
                     )}
                   </div>
                 </div>

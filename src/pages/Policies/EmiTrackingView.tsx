@@ -14,6 +14,7 @@ import toast from 'react-hot-toast';
 import clsx from 'clsx';
 import { sortData } from '../../utils/sortUtils';
 import { parseExtraNotes } from './index';
+import { useAuthStore } from '@store/auth.store';
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 export interface EmiRecord {
@@ -48,10 +49,71 @@ export interface EmiRecord {
   status: 'DUE' | 'PAID' | 'UPCOMING' | 'OVERDUE' | 'MESSAGE SENT' | 'CUSTOMER CONTACTED' | 'PAYMENT FAILED';
   nextAction: 'Send Reminder' | 'View Receipt' | 'Upcoming' | 'Call Customer' | 'Follow Up';
   employee: string;
-  history: Array<{ id: string; date: string; type: 'whatsapp' | 'call' | 'payment' | 'note'; note: string; author: string }>;
-  schedule: Array<{ emiNo: number; dueDate: string; rawDueDate?: string; amount: number; status: 'PAID' | 'DUE' | 'UPCOMING' | 'OVERDUE'; paidDate?: string }>;
+  history: EmiHistoryEntry[];
+  schedule: Array<{ emiNo: number; paymentId?: string; dueDate: string; rawDueDate?: string; amount: number; status: EmiRecord['status']; paidDate?: string }>;
+  notes?: string;
+  installmentTrackingData: EmiTrackingData;
+}
+
+interface EmiHistoryEntry {
+  id: string;
+  date: string;
+  type: 'whatsapp' | 'call' | 'payment' | 'note' | 'status';
+  note: string;
+  author: string;
+}
+
+interface EmiTrackingData {
+  statusOverrides: Record<string, EmiRecord['status']>;
+  history: EmiHistoryEntry[];
   notes?: string;
 }
+
+const EMI_STATUSES: EmiRecord['status'][] = [
+  'DUE',
+  'PAID',
+  'UPCOMING',
+  'OVERDUE',
+  'MESSAGE SENT',
+  'CUSTOMER CONTACTED',
+  'PAYMENT FAILED',
+];
+
+const normalizeEmiTrackingData = (value: unknown): EmiTrackingData => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return { statusOverrides: {}, history: [] };
+  }
+
+  const raw = value as Record<string, unknown>;
+  const rawOverrides = raw.statusOverrides && typeof raw.statusOverrides === 'object'
+    ? raw.statusOverrides as Record<string, unknown>
+    : {};
+  const statusOverrides = Object.fromEntries(
+    Object.entries(rawOverrides).filter(([, status]) => EMI_STATUSES.includes(status as EmiRecord['status']) && status !== 'PAID')
+  ) as Record<string, EmiRecord['status']>;
+  const history = Array.isArray(raw.history)
+    ? raw.history.filter((entry): entry is EmiHistoryEntry =>
+      Boolean(
+        entry &&
+        typeof entry === 'object' &&
+        typeof (entry as EmiHistoryEntry).id === 'string' &&
+        typeof (entry as EmiHistoryEntry).date === 'string' &&
+        typeof (entry as EmiHistoryEntry).note === 'string' &&
+        typeof (entry as EmiHistoryEntry).author === 'string' &&
+        ['whatsapp', 'call', 'payment', 'note', 'status'].includes((entry as EmiHistoryEntry).type)
+      )
+    )
+    : [];
+
+  return {
+    statusOverrides,
+    history,
+    ...(typeof raw.notes === 'string' ? { notes: raw.notes } : {}),
+  };
+};
+
+const emiPaymentTrackingKey = (paymentId: unknown, emiNo: number) =>
+  typeof paymentId === 'string' && paymentId ? paymentId : `emi-${emiNo}`;
 
 // ── Initial Mock Data ──────────────────────────────────────────────────────────
 const INITIAL_EMI_DATA: EmiRecord[] = [];
@@ -454,6 +516,7 @@ export default function EmiTrackingView({ selectedMonth }: { selectedMonth: stri
       })
       .map((p: any) => {
         const extra = parseExtraNotes(p.notes);
+        const installmentTrackingData = normalizeEmiTrackingData(p.installmentTrackingData);
         const totalPremiumAmount = Number(p.premiumAmount || 0);
         const downpaymentAmount = Number(extra.downpaymentAmount || 0);
 
@@ -463,8 +526,12 @@ export default function EmiTrackingView({ selectedMonth }: { selectedMonth: stri
 
         let expectedCount = extra.noOfInstallments || 0;
         const isEmi = Boolean(extra.emiCase || (p as any).emiCase || (p as any).installmentCase || expectedCount > 1);
+        const rawPolicyFreq = String(p.paymentFrequency || (extra as any).paymentFrequency || '').toUpperCase().replace(/[-_\s]/g, '');
         const rawInstFreq = String((extra as any).installmentFrequency || (extra as any).emiFrequency || '').toUpperCase().replace(/[-_\s]/g, '');
-        const freq = rawInstFreq || (isEmi ? 'MONTHLY' : String((extra as any).paymentFrequency || p.paymentFrequency || 'YEARLY').toUpperCase().replace(/[-_\s]/g, ''));
+        const explicitFreq = rawInstFreq || rawPolicyFreq;
+        const freq = (explicitFreq && explicitFreq !== 'YEARLY')
+          ? explicitFreq
+          : (isEmi ? (explicitFreq || 'MONTHLY') : (explicitFreq || 'YEARLY'));
 
         const rawStart = parseDateSafe(p.startDate) || parseDateSafe(extra.firstPremiumDate) || parseDateSafe(extra.firstInstallmentDate) || parseDateSafe(extra.paymentDate) || new Date();
         const rawEnd = parseDateSafe(p.endDate) || parseDateSafe(p.maturityDate) || parseDateSafe(extra.lastInstallmentDate) || new Date(rawStart.getTime() + 365 * 24 * 3600 * 1000);
@@ -511,6 +578,16 @@ export default function EmiTrackingView({ selectedMonth }: { selectedMonth: stri
         const dbPaidPayments = dbPayments.filter((pmt: any) => pmt.isPaid || pmt.paidDate);
         const totalDbPaidCount = dbPaidPayments.length;
 
+        const expectedStepMonths = freq === 'QUARTERLY'
+          ? 3
+          : freq === 'HALFYEARLY' || freq === 'SEMIANNUAL'
+            ? 6
+            : freq === 'YEARLY'
+              ? 12
+              : freq === 'SINGLE' || freq === 'ONETIME' || freq === 'FULLPAYMENT'
+                ? 0
+                : 1;
+
         // Check if DB payments match this policy's configuration and are not stale/corrupted
         const isDbPaymentsValid =
           dbPayments.length === expectedCount &&
@@ -525,7 +602,8 @@ export default function EmiTrackingView({ selectedMonth }: { selectedMonth: stri
             const d1 = parseDateSafe(dbPayments[1]?.dueDate);
             if (!d0 || !d1) return true;
             const diffDays = Math.abs((d1.getTime() - d0.getTime()) / (1000 * 3600 * 24));
-            return diffDays < 180; // Valid installment schedule shouldn't be 1-year apart
+            const expectedDays = expectedStepMonths * 30;
+            return Math.abs(diffDays - expectedDays) <= 35;
           })());
 
         let payments: any[] = [];
@@ -658,9 +736,13 @@ export default function EmiTrackingView({ selectedMonth }: { selectedMonth: stri
         const dueCheck = parseDateSafe(nextDueDateObj) || (nextDueDateObj instanceof Date ? new Date(nextDueDateObj) : new Date());
         dueCheck.setHours(0, 0, 0, 0);
 
+        const currentPaymentKey = emiPaymentTrackingKey(currentPmt.id, currentEmiNo);
+        const currentStatusOverride = installmentTrackingData.statusOverrides[currentPaymentKey];
         let status: EmiRecord['status'] = 'DUE';
         if (isAllPaid) {
           status = 'PAID';
+        } else if (currentStatusOverride) {
+          status = currentStatusOverride;
         } else if (dueCheck.getTime() < today.getTime()) {
           status = 'OVERDUE';
         } else if (dueCheck.getTime() === today.getTime()) {
@@ -691,6 +773,13 @@ export default function EmiTrackingView({ selectedMonth }: { selectedMonth: stri
         const tenureDisplay = extra.policyTenure || extra.policyTerm || p.tenure || '1 Year';
         const paymentModeDisplay = extra.paymentMode || extra.emiGateway || (p.paymentFrequency && !String(p.paymentFrequency).toUpperCase().includes('YEAR') ? p.paymentFrequency : 'Direct');
 
+        const displayFreq =
+          freq === 'QUARTERLY' ? 'Quarterly' :
+          (freq === 'HALFYEARLY' || freq === 'SEMIANNUAL') ? 'Half-Yearly' :
+          (freq === 'SINGLE' || freq === 'ONETIME' || freq === 'FULLPAYMENT') ? 'Single' :
+          freq === 'YEARLY' ? 'Yearly' :
+          'Monthly';
+
         return {
           id: p.id,
           createdAt: p.createdAt,
@@ -710,7 +799,7 @@ export default function EmiTrackingView({ selectedMonth }: { selectedMonth: stri
           processingFee: Number(extra.processingFee || 0),
           loanAmount: Number(extra.loanAmount || 0),
           premiumAmount: totalPolicyAmount,
-          installmentFrequency: isEmi ? 'Monthly' : (p.paymentFrequency ? (String(p.paymentFrequency).toUpperCase() === 'YEARLY' ? 'Yearly' : p.paymentFrequency) : 'Monthly'),
+          installmentFrequency: displayFreq,
           tenure: tenureDisplay,
           paymentMode: paymentModeDisplay,
           totalEmis,
@@ -723,13 +812,17 @@ export default function EmiTrackingView({ selectedMonth }: { selectedMonth: stri
           status,
           nextAction: status === 'PAID' ? 'View Receipt' : status === 'OVERDUE' ? 'Call Customer' : 'Send Reminder',
           employee: `${emp.firstName || ''} ${emp.lastName || ''}`.trim() || 'Unassigned',
-          history: [],
+          history: installmentTrackingData.history,
           schedule: payments.map((pmt: any, index: number) => {
             const d = parseDateSafe(pmt.dueDate) || new Date();
             d.setHours(0, 0, 0, 0);
-            let sStatus: 'PAID' | 'DUE' | 'UPCOMING' | 'OVERDUE' = 'DUE';
+            const paymentKey = emiPaymentTrackingKey(pmt.id, index + 1);
+            const statusOverride = installmentTrackingData.statusOverrides[paymentKey];
+            let sStatus: EmiRecord['status'] = 'DUE';
             if (pmt.isPaid) {
               sStatus = 'PAID';
+            } else if (statusOverride) {
+              sStatus = statusOverride;
             } else if (d.getTime() < today.getTime()) {
               sStatus = 'OVERDUE';
             } else if (d.getTime() === today.getTime()) {
@@ -741,6 +834,7 @@ export default function EmiTrackingView({ selectedMonth }: { selectedMonth: stri
             const pmtPaidDateObj = parseDateSafe(pmt.paidDate) || (pmt.isPaid ? parseDateSafe(pmt.updatedAt || pmt.dueDate) : null);
             return {
               emiNo: index + 1,
+              paymentId: paymentKey,
               dueDate: pmtDueDateObj ? pmtDueDateObj.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : 'N/A',
               rawDueDate: pmtDueDateObj ? pmtDueDateObj.toISOString() : undefined,
               amount: pmt.amount || expectedInstAmt,
@@ -748,7 +842,8 @@ export default function EmiTrackingView({ selectedMonth }: { selectedMonth: stri
               paidDate: pmtPaidDateObj ? pmtPaidDateObj.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : undefined,
             };
           }),
-          notes: p.notes || '',
+          notes: typeof installmentTrackingData.notes === 'string' ? installmentTrackingData.notes : extra.cleanNotes || '',
+          installmentTrackingData,
         };
       }).filter(Boolean) as EmiRecord[];
 
@@ -764,11 +859,28 @@ export default function EmiTrackingView({ selectedMonth }: { selectedMonth: stri
   const [drawerRecord, setDrawerRecord] = useState<EmiRecord | null>(null);
   const [drawerTab, setDrawerTab] = useState<'overview' | 'schedule' | 'communication' | 'notes'>('overview');
   const [newNoteInput, setNewNoteInput] = useState('');
+  const [notesDraft, setNotesDraft] = useState('');
   const [statusUpdateOpen, setStatusUpdateOpen] = useState(false);
+  const [selectedStatus, setSelectedStatus] = useState<EmiRecord['status']>('DUE');
   const [currentPage, setCurrentPage] = useState(1);
 
   const [sortKey, setSortKey] = useState<string>('');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
+  const user = useAuthStore(state => state.user);
+  const historyAuthor = `${user?.firstName || ''} ${user?.lastName || ''}`.trim() || 'System';
+
+  useEffect(() => {
+    setDrawerRecord(current => current ? data.find(record => record.id === current.id) || current : null);
+  }, [data]);
+
+  const openInstallmentRecord = (record: EmiRecord) => {
+    setDrawerRecord(record);
+    setDrawerTab('overview');
+    setNewNoteInput('');
+    setNotesDraft(record.notes || '');
+    setSelectedStatus(record.status);
+    setStatusUpdateOpen(false);
+  };
 
   const availableEmployees = useMemo(() => {
     const set = new Set<string>();
@@ -1098,157 +1210,98 @@ export default function EmiTrackingView({ selectedMonth }: { selectedMonth: stri
     printWindow.document.close();
   };
 
+  const persistInstallmentTrackingData = async (recordId: string, trackingData: EmiTrackingData) => {
+    await policiesService.update(recordId, { installmentTrackingData: trackingData });
+    await Promise.all([
+      qc.invalidateQueries({ queryKey: ['policies-emi-tracking'] }),
+      qc.invalidateQueries({ queryKey: ['policies'] }),
+    ]);
+  };
+
   // Handler for Mark as Paid
   const handleMarkAsPaid = async (recordId: string) => {
+    const record = data.find(item => item.id === recordId) || drawerRecord;
+    const unpaidInstallment = record?.schedule.find(installment => installment.status !== 'PAID');
+    if (!record || !unpaidInstallment) {
+      toast.error('There is no unpaid installment to mark as paid.');
+      return;
+    }
+
+    const dueDate = parseDateSafe(unpaidInstallment.rawDueDate || unpaidInstallment.dueDate);
+    if (!dueDate) {
+      toast.error('The installment due date is invalid. No payment was recorded.');
+      return;
+    }
+
+    const paymentDate = new Date();
+    let paymentRecorded = false;
     try {
-      const rec = data.find(r => r.id === recordId) || drawerRecord;
-      if (rec) {
-        const nextPaidEmis = rec.paidEmis + 1;
-        const isAll = nextPaidEmis >= rec.totalEmis;
-
-        if (isAll) {
-          await policiesService.markAllPaymentsPaid(recordId);
-        } else {
-          const nextUnpaid = rec.schedule.find(sc => sc.status !== 'PAID') || rec.schedule[rec.paidEmis];
-          const parsedDue = nextUnpaid?.rawDueDate ? parseDateSafe(nextUnpaid.rawDueDate) : (nextUnpaid?.dueDate ? parseDateSafe(nextUnpaid.dueDate) : null);
-          const safeIsoDueDate = parsedDue && !isNaN(parsedDue.getTime()) ? parsedDue.toISOString() : new Date().toISOString();
-          await policiesService.recordPayment(recordId, {
-            amount: nextUnpaid?.amount || rec.amount || (rec.premiumAmount ? Math.round(rec.premiumAmount / rec.totalEmis) : 0),
-            isPaid: true,
-            dueDate: safeIsoDueDate,
-            paidDate: new Date().toISOString(),
-          });
-        }
-        qc.invalidateQueries({ queryKey: ['policies-emi-tracking'] });
-        qc.invalidateQueries({ queryKey: ['policies'] });
-      }
-    } catch {
-      // ignore
-    }
-
-    const todayStr = new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
-
-    setData(prev => prev.map(rec => {
-      if (rec.id === recordId) {
-        const newPaidEmis = Math.min(rec.totalEmis, rec.paidEmis + 1);
-        const isAll = newPaidEmis >= rec.totalEmis;
-        const instAmt = rec.amount > 0 ? rec.amount : (rec.totalInstallmentAmount && rec.totalEmis ? Math.round(rec.totalInstallmentAmount / rec.totalEmis) : 0);
-        const newHistory = [
-          ...rec.history,
-          {
-            id: `h-${Date.now()}`,
-            date: `${todayStr}, ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`,
-            type: 'payment' as const,
-            note: `Installment #${newPaidEmis} Payment Confirmed`,
-            author: 'by Admin'
-          }
-        ];
-        // Required 2: Total Collected / Paid Amount:
-        // totalPaidAmount = downpayment + (paidInstallmentsCount * installmentAmount)
-        const newPaidInstAmt = newPaidEmis * instAmt;
-        const newPaidTotal = (rec.downpaymentAmount || 0) + newPaidInstAmt;
-        // Required 3: Total Pending / Outstanding Amount:
-        // pendingAmount = totalPremium - totalPaidAmount
-        const newRemainingTotal = isAll ? 0 : Math.max(0, (rec.premiumAmount || 0) - newPaidTotal);
-        const nextSchedule = rec.schedule.map((sc, idx) => idx < newPaidEmis ? { ...sc, status: 'PAID' as const, paidDate: sc.paidDate || todayStr } : sc);
-        const nextDueItem = nextSchedule.find(s => s.status !== 'PAID');
-
-        let nextStatus: EmiRecord['status'] = 'DUE';
-        if (isAll) {
-          nextStatus = 'PAID';
-        } else if (nextDueItem?.dueDate) {
-          const nextDueD = parseDateSafe(nextDueItem.dueDate);
-          const tDay = new Date();
-          tDay.setHours(0, 0, 0, 0);
-          if (nextDueD && nextDueD.getTime() < tDay.getTime()) {
-            nextStatus = 'OVERDUE';
-          } else {
-            nextStatus = 'DUE';
-          }
-        }
-
-        return {
-          ...rec,
-          amount: instAmt,
-          status: nextStatus,
-          nextAction: isAll ? ('View Receipt' as const) : nextStatus === 'OVERDUE' ? ('Call Customer' as const) : ('Send Reminder' as const),
-          paidEmis: newPaidEmis,
-          paidInstallmentsAmount: newPaidInstAmt,
-          paidAmountTotal: newPaidTotal,
-          remainingAmountTotal: newRemainingTotal,
-          dueDate: isAll ? rec.dueDate : (nextDueItem?.dueDate || rec.dueDate),
-          history: newHistory,
-          schedule: nextSchedule,
-        };
-      }
-      return rec;
-    }));
-
-    if (drawerRecord && drawerRecord.id === recordId) {
-      setDrawerRecord(prev => {
-        if (!prev) return null;
-        const newPaidEmis = Math.min(prev.totalEmis, prev.paidEmis + 1);
-        const isAll = newPaidEmis >= prev.totalEmis;
-        const instAmt = prev.amount > 0 ? prev.amount : (prev.totalInstallmentAmount && prev.totalEmis ? Math.round(prev.totalInstallmentAmount / prev.totalEmis) : 0);
-        const newPaidInstAmt = newPaidEmis * instAmt;
-        const newPaidTotal = (prev.downpaymentAmount || 0) + newPaidInstAmt;
-        const newRemainingTotal = isAll ? 0 : Math.max(0, (prev.premiumAmount || 0) - newPaidTotal);
-        const nextSchedule = prev.schedule.map((sc, idx) => idx < newPaidEmis ? { ...sc, status: 'PAID' as const, paidDate: sc.paidDate || todayStr } : sc);
-        const nextDueItem = nextSchedule.find(s => s.status !== 'PAID');
-
-        let nextStatus: EmiRecord['status'] = 'DUE';
-        if (isAll) {
-          nextStatus = 'PAID';
-        } else if (nextDueItem?.dueDate) {
-          const nextDueD = parseDateSafe(nextDueItem.dueDate);
-          const tDay = new Date();
-          tDay.setHours(0, 0, 0, 0);
-          if (nextDueD && nextDueD.getTime() < tDay.getTime()) {
-            nextStatus = 'OVERDUE';
-          } else {
-            nextStatus = 'DUE';
-          }
-        }
-
-        return {
-          ...prev,
-          amount: instAmt,
-          status: nextStatus,
-          nextAction: isAll ? ('View Receipt' as const) : nextStatus === 'OVERDUE' ? ('Call Customer' as const) : ('Send Reminder' as const),
-          paidEmis: newPaidEmis,
-          paidInstallmentsAmount: newPaidInstAmt,
-          paidAmountTotal: newPaidTotal,
-          remainingAmountTotal: newRemainingTotal,
-          dueDate: isAll ? prev.dueDate : (nextDueItem?.dueDate || prev.dueDate),
-          schedule: nextSchedule,
-        };
+      await policiesService.recordPayment(recordId, {
+        amount: unpaidInstallment.amount,
+        isPaid: true,
+        dueDate: dueDate.toISOString(),
+        paidDate: paymentDate.toISOString(),
       });
+      paymentRecorded = true;
+
+      const paymentKey = unpaidInstallment.paymentId || emiPaymentTrackingKey(undefined, unpaidInstallment.emiNo);
+      const statusOverrides = { ...record.installmentTrackingData.statusOverrides };
+      delete statusOverrides[paymentKey];
+      const historyEntry: EmiHistoryEntry = {
+        id: `h-${Date.now()}`,
+        date: `${paymentDate.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}, ${paymentDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`,
+        type: 'payment',
+        note: `Installment #${unpaidInstallment.emiNo} payment recorded (${fmtCurr(unpaidInstallment.amount)}).`,
+        author: historyAuthor,
+      };
+      await persistInstallmentTrackingData(recordId, {
+        ...record.installmentTrackingData,
+        statusOverrides,
+        history: [...record.history, historyEntry],
+      });
+
+      setStatusUpdateOpen(false);
+      toast.success(`Installment #${unpaidInstallment.emiNo} for ${record.customerName} marked as paid.`);
+    } catch (error) {
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: ['policies-emi-tracking'] }),
+        qc.invalidateQueries({ queryKey: ['policies'] }),
+      ]);
+      const reason = error instanceof Error ? ` ${error.message}` : '';
+      toast.error(paymentRecorded
+        ? `Payment was recorded, but its installment history could not be saved.${reason}`
+        : `Could not record the installment payment.${reason}`);
     }
-    toast.success(`Installment for ${drawerRecord?.customerName || 'Customer'} marked as Paid!`);
   };
 
   // Handler for Send Reminder
-  const handleSendReminder = (record: EmiRecord) => {
-    toast.success(`WhatsApp EMI Payment Reminder sent to ${record.customerName}!`);
-    setData(prev => prev.map(rec => {
-      if (rec.id === record.id) {
-        return {
-          ...rec,
-          status: rec.status === 'PAID' ? 'PAID' : 'MESSAGE SENT',
-          history: [
-            ...rec.history,
-            {
-              id: `h-${Date.now()}`,
-              date: `${new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}, ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`,
-              type: 'whatsapp',
-              note: 'Reminder Sent (WhatsApp)',
-              author: 'by Amit Sharma'
-            }
-          ]
-        };
-      }
-      return rec;
-    }));
+  const handleSendReminder = async (record: EmiRecord) => {
+    const currentRecord = data.find(item => item.id === record.id) || record;
+    const unpaidInstallment = currentRecord.schedule.find(installment => installment.status !== 'PAID');
+    const eventDate = new Date();
+    const historyEntry: EmiHistoryEntry = {
+      id: `h-${Date.now()}`,
+      date: `${eventDate.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}, ${eventDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`,
+      type: 'whatsapp',
+      note: 'Reminder Sent (WhatsApp)',
+      author: historyAuthor,
+    };
+    const statusOverrides = { ...currentRecord.installmentTrackingData.statusOverrides };
+    if (unpaidInstallment) {
+      statusOverrides[unpaidInstallment.paymentId || emiPaymentTrackingKey(undefined, unpaidInstallment.emiNo)] = 'MESSAGE SENT';
+    }
+
+    try {
+      await persistInstallmentTrackingData(currentRecord.id, {
+        ...currentRecord.installmentTrackingData,
+        statusOverrides,
+        history: [...currentRecord.history, historyEntry],
+      });
+      toast.success(`WhatsApp EMI Payment Reminder sent to ${currentRecord.customerName}!`);
+    } catch (error) {
+      const reason = error instanceof Error ? ` ${error.message}` : '';
+      toast.error(`Could not save the reminder to installment history.${reason}`);
+    }
   };
 
   // Handler for Call Customer
@@ -1259,73 +1312,81 @@ export default function EmiTrackingView({ selectedMonth }: { selectedMonth: stri
   // Handler for Status Update
   const handleUpdateStatus = async (recordId: string, newStatus: EmiRecord['status']) => {
     if (newStatus === 'PAID') {
-      try {
-        await policiesService.markAllPaymentsPaid(recordId);
-        qc.invalidateQueries({ queryKey: ['policies-emi-tracking'] });
-        qc.invalidateQueries({ queryKey: ['policies'] });
-      } catch {
-        // ignore
-      }
+      await handleMarkAsPaid(recordId);
+      return;
     }
-    setData(prev => prev.map(rec => {
-      if (rec.id === recordId) {
-        if (newStatus === 'PAID') {
-          return {
-            ...rec,
-            status: 'PAID',
-            paidEmis: rec.totalEmis,
-            paidAmountTotal: rec.premiumAmount || (rec.amount * rec.totalEmis),
-            remainingAmountTotal: 0,
-            schedule: rec.schedule.map(sc => ({
-              ...sc,
-              status: 'PAID',
-              paidDate: sc.paidDate || new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })
-            })),
-          };
-        }
-        return { ...rec, status: newStatus };
-      }
-      return rec;
-    }));
-    if (drawerRecord && drawerRecord.id === recordId) {
-      setDrawerRecord(prev => {
-        if (!prev) return null;
-        if (newStatus === 'PAID') {
-          return {
-            ...prev,
-            status: 'PAID',
-            paidEmis: prev.totalEmis,
-            paidAmountTotal: prev.premiumAmount || (prev.amount * prev.totalEmis),
-            remainingAmountTotal: 0,
-            schedule: prev.schedule.map(sc => ({
-              ...sc,
-              status: 'PAID',
-              paidDate: sc.paidDate || new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })
-            })),
-          };
-        }
-        return { ...prev, status: newStatus };
+
+    const record = data.find(item => item.id === recordId) || drawerRecord;
+    if (!record) return;
+    const currentInstallment = record.schedule.find(installment => installment.status !== 'PAID');
+    if (!currentInstallment) {
+      toast.error('All installments are paid; there is no current installment to update.');
+      return;
+    }
+
+    const paymentKey = currentInstallment.paymentId || emiPaymentTrackingKey(undefined, currentInstallment.emiNo);
+    const historyEntry: EmiHistoryEntry = {
+      id: `h-${Date.now()}`,
+      date: `${new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}, ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`,
+      type: 'status',
+      note: `Installment #${currentInstallment.emiNo} status changed from ${currentInstallment.status} to ${newStatus}.`,
+      author: historyAuthor,
+    };
+
+    try {
+      await persistInstallmentTrackingData(recordId, {
+        ...record.installmentTrackingData,
+        statusOverrides: {
+          ...record.installmentTrackingData.statusOverrides,
+          [paymentKey]: newStatus,
+        },
+        history: [...record.history, historyEntry],
       });
+      setSelectedStatus(newStatus);
+      setStatusUpdateOpen(false);
+      toast.success(`Installment #${currentInstallment.emiNo} status updated to ${newStatus}.`);
+    } catch (error) {
+      const reason = error instanceof Error ? ` ${error.message}` : '';
+      toast.error(`Could not update installment status.${reason}`);
     }
-    setStatusUpdateOpen(false);
-    toast.success(`Status updated to ${newStatus}`);
   };
 
   // Handler to Add History Note
-  const handleAddNote = (e: React.FormEvent) => {
+  const handleAddNote = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newNoteInput.trim() || !drawerRecord) return;
-    const noteObj = {
+    const noteObj: EmiHistoryEntry = {
       id: `h-${Date.now()}`,
       date: `${new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}, ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`,
       type: 'note' as const,
       note: newNoteInput.trim(),
-      author: 'by Amit Sharma'
+      author: historyAuthor,
     };
-    setData(prev => prev.map(r => r.id === drawerRecord.id ? { ...r, history: [...r.history, noteObj] } : r));
-    setDrawerRecord(prev => prev ? { ...prev, history: [...prev.history, noteObj] } : null);
-    setNewNoteInput('');
-    toast.success('Note added');
+    try {
+      await persistInstallmentTrackingData(drawerRecord.id, {
+        ...drawerRecord.installmentTrackingData,
+        history: [...drawerRecord.history, noteObj],
+      });
+      setNewNoteInput('');
+      toast.success('Communication log added.');
+    } catch (error) {
+      const reason = error instanceof Error ? ` ${error.message}` : '';
+      toast.error(`Could not save communication log.${reason}`);
+    }
+  };
+
+  const handleSaveNotes = async () => {
+    if (!drawerRecord) return;
+    try {
+      await persistInstallmentTrackingData(drawerRecord.id, {
+        ...drawerRecord.installmentTrackingData,
+        notes: notesDraft,
+      });
+      toast.success('Installment comments saved successfully.');
+    } catch (error) {
+      const reason = error instanceof Error ? ` ${error.message}` : '';
+      toast.error(`Could not save installment comments.${reason}`);
+    }
   };
 
   // Dynamic KPIs Computed from filteredData (respects all active filters)
@@ -1678,7 +1739,7 @@ export default function EmiTrackingView({ selectedMonth }: { selectedMonth: stri
                 paginatedData.map((r, idx) => (
                   <tr
                     key={r.id}
-                    onClick={() => setDrawerRecord(r)}
+                    onClick={() => openInstallmentRecord(r)}
                     className={clsx(
                       "transition-colors cursor-pointer group",
                       idx % 2 === 1 ? 'bg-slate-50/80' : 'bg-white',
@@ -1730,7 +1791,7 @@ export default function EmiTrackingView({ selectedMonth }: { selectedMonth: stri
                     
                     <td className="px-4 py-3.5 border border-slate-200 text-right whitespace-nowrap" onClick={e => e.stopPropagation()}>
                       <button
-                        onClick={() => setDrawerRecord(r)}
+                        onClick={() => openInstallmentRecord(r)}
                         className="px-2.5 py-1 rounded-lg text-xs font-bold text-slate-600 hover:bg-slate-100 border border-slate-200/70 transition-all cursor-pointer"
                       >
                         Actions ▾
@@ -1786,26 +1847,44 @@ export default function EmiTrackingView({ selectedMonth }: { selectedMonth: stri
       {/* ── NEW EMI Details Popup Modal UI (matching Add New Contact popup design) ───────── */}
       <Modal
         open={Boolean(drawerRecord)}
-        onClose={() => setDrawerRecord(null)}
+        onClose={() => {
+          setDrawerRecord(null);
+          setStatusUpdateOpen(false);
+        }}
         title="Installment Details"
         subtitle={`View installment schedule, collections, and customer follow-ups for ${drawerRecord?.customerName || ''}`}
         size="2xl"
         actions={
           <div className="flex flex-wrap items-center gap-2 mr-1">
             {drawerRecord && (
-              <button
-                type="button"
-                onClick={() => handleMarkAsPaid(drawerRecord.id)}
-                disabled={drawerRecord.status === 'PAID'}
-                className={clsx(
-                  'px-3.5 py-1.5 text-xs font-bold rounded-lg cursor-pointer shadow-xs transition-all',
-                  drawerRecord.status === 'PAID'
-                    ? 'bg-slate-100 text-slate-400 cursor-not-allowed border border-slate-200'
-                    : 'bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white shadow-blue-500/20 hover:scale-[1.02]'
-                )}
-              >
-                {drawerRecord.status === 'PAID' ? 'Already Paid' : 'Mark as Paid'}
-              </button>
+              <>
+                <button
+                  type="button"
+                  onClick={() => handleUpdateStatus(drawerRecord.id, selectedStatus)}
+                  disabled={
+                    !statusUpdateOpen ||
+                    !drawerRecord.schedule.some(installment => installment.status !== 'PAID') ||
+                    selectedStatus === drawerRecord.schedule.find(installment => installment.status !== 'PAID')?.status
+                  }
+                  className="px-3.5 py-1.5 text-xs font-bold rounded-lg border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50 cursor-pointer transition-all"
+                  title="Save selected status"
+                >
+                  Save
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleMarkAsPaid(drawerRecord.id)}
+                  disabled={!drawerRecord.schedule.some(installment => installment.status !== 'PAID')}
+                  className={clsx(
+                    'px-3.5 py-1.5 text-xs font-bold rounded-lg cursor-pointer shadow-xs transition-all',
+                    !drawerRecord.schedule.some(installment => installment.status !== 'PAID')
+                      ? 'bg-slate-100 text-slate-400 cursor-not-allowed border border-slate-200'
+                      : 'bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white shadow-blue-500/20 hover:scale-[1.02]'
+                  )}
+                >
+                  {drawerRecord.schedule.some(installment => installment.status !== 'PAID') ? 'Mark as Paid' : 'Already Paid'}
+                </button>
+              </>
             )}
           </div>
         }
@@ -1862,7 +1941,7 @@ export default function EmiTrackingView({ selectedMonth }: { selectedMonth: stri
                 { key: 'overview', label: 'Installment Overview' },
                 { key: 'schedule', label: 'Installment Schedule' },
                 { key: 'communication', label: 'Communication' },
-                { key: 'notes', label: 'Notes' },
+                { key: 'notes', label: 'Comments' },
               ].map(tb => (
                 <button
                   key={tb.key}
@@ -1885,10 +1964,21 @@ export default function EmiTrackingView({ selectedMonth }: { selectedMonth: stri
               {/* TAB 1: OVERVIEW */}
               {drawerTab === 'overview' && (() => {
                 const isAllPaid = drawerRecord.paidEmis >= drawerRecord.totalEmis;
-                const dueCount = isAllPaid ? 0 : 1;
-                const dueAmount = isAllPaid ? 0 : drawerRecord.amount;
+                const currentInstallment = drawerRecord.schedule.find(installment => installment.status !== 'PAID');
+                const currentInstallmentStatus = currentInstallment?.status || 'PAID';
+                const currentDueDate = currentInstallment
+                  ? parseDateSafe(currentInstallment.rawDueDate || currentInstallment.dueDate)
+                  : null;
+                const todayStart = new Date();
+                todayStart.setHours(0, 0, 0, 0);
+                const isCurrentDue = Boolean(currentInstallment && (
+                  ['DUE', 'OVERDUE', 'PAYMENT FAILED'].includes(currentInstallmentStatus) ||
+                  (['MESSAGE SENT', 'CUSTOMER CONTACTED'].includes(currentInstallmentStatus) &&
+                    currentDueDate && currentDueDate.getTime() <= todayStart.getTime())
+                ));
+                const dueCount = isCurrentDue ? 1 : 0;
+                const dueAmount = currentInstallment && isCurrentDue ? currentInstallment.amount : 0;
                 const remainingCount = Math.max(0, drawerRecord.totalEmis - drawerRecord.paidEmis - dueCount);
-                const remainingAmount = remainingCount * drawerRecord.amount;
 
                 return (
                 <div className="space-y-3.5 animate-fadeIn">
@@ -1960,30 +2050,31 @@ export default function EmiTrackingView({ selectedMonth }: { selectedMonth: stri
                   {/* Current Installment Due / Latest Box */}
                   <div className="bg-slate-50 p-3 rounded-xl border border-slate-200/80 space-y-1.5">
                     <span className="text-[10px] font-bold text-slate-700 uppercase tracking-wider block">
-                      Current Installment ({isAllPaid ? 'Settled' : 'Due'})
+                      Current Installment ({isAllPaid ? 'Settled' : currentInstallmentStatus})
                     </span>
                     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2 text-xs items-center">
                       <div>
                         <span className="text-[10px] font-bold text-slate-400 block">Installment No.</span>
-                        <span className="font-bold text-slate-800 text-[11px]">{isAllPaid ? drawerRecord.totalEmis : drawerRecord.paidEmis + 1} of {drawerRecord.totalEmis}</span>
+                        <span className="font-bold text-slate-800 text-[11px]">{currentInstallment?.emiNo || drawerRecord.totalEmis} of {drawerRecord.totalEmis}</span>
                       </div>
                       <div>
                         <span className="text-[10px] font-bold text-slate-400 block">{isAllPaid ? 'Next Renewal Due' : 'Due Date'}</span>
-                        <span className="font-bold text-slate-800 text-[11px]">{drawerRecord.dueDate}</span>
+                        <span className="font-bold text-slate-800 text-[11px]">{currentInstallment?.dueDate || drawerRecord.dueDate}</span>
                       </div>
                       <div>
                         <span className="text-[10px] font-bold text-slate-400 block">Amount</span>
-                        <span className="font-extrabold text-slate-900 text-[11px]">{fmtCurr(isAllPaid ? (drawerRecord.schedule[drawerRecord.totalEmis - 1]?.amount || drawerRecord.premiumAmount || 0) : drawerRecord.amount)}</span>
+                        <span className="font-extrabold text-slate-900 text-[11px]">{fmtCurr(currentInstallment ? currentInstallment.amount : (drawerRecord.schedule[drawerRecord.totalEmis - 1]?.amount || drawerRecord.premiumAmount || 0))}</span>
                       </div>
                       <div>
                         <span className="text-[10px] font-bold text-slate-400 block">Status</span>
                         <span className={clsx(
                           'px-1.5 py-0.5 rounded text-[9px] font-extrabold uppercase',
-                          drawerRecord.status === 'PAID' ? 'bg-emerald-100 text-emerald-700' :
-                          drawerRecord.status === 'OVERDUE' ? 'bg-rose-100 text-rose-700' :
+                          currentInstallmentStatus === 'PAID' ? 'bg-emerald-100 text-emerald-700' :
+                          currentInstallmentStatus === 'OVERDUE' || currentInstallmentStatus === 'PAYMENT FAILED' ? 'bg-rose-100 text-rose-700' :
+                          currentInstallmentStatus === 'UPCOMING' ? 'bg-blue-100 text-blue-700' :
                           'bg-amber-100 text-amber-700'
                         )}>
-                          {drawerRecord.status}
+                          {currentInstallmentStatus}
                         </span>
                       </div>
                     </div>
@@ -1992,51 +2083,67 @@ export default function EmiTrackingView({ selectedMonth }: { selectedMonth: stri
                   {/* Quick Actions */}
                   <div className="space-y-1.5">
                     <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">Quick Actions</span>
-                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                    <div className="grid grid-cols-1 gap-2">
                       <button
                         type="button"
-                        onClick={() => handleSendReminder(drawerRecord)}
-                        className="w-full py-2 px-2.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs flex items-center justify-center gap-1.5 shadow-2xs cursor-pointer truncate"
-                      >
-                        <MessageSquare size={13} className="shrink-0" />
-                        <span>Send Reminder</span>
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() => handleCallCustomer(drawerRecord)}
-                        className="w-full py-2 px-2.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs flex items-center justify-center gap-1.5 shadow-2xs cursor-pointer truncate"
-                      >
-                        <Phone size={13} className="shrink-0" />
-                        <span>Call Customer</span>
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() => setStatusUpdateOpen(!statusUpdateOpen)}
-                        className="w-full py-2 px-2.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 font-bold text-xs flex items-center justify-center gap-1.5 cursor-pointer truncate"
+                        onClick={() => {
+                          if (!statusUpdateOpen) {
+                            setSelectedStatus(
+                              drawerRecord.schedule.find(installment => installment.status !== 'PAID')?.status || drawerRecord.status
+                            );
+                          }
+                          setStatusUpdateOpen(open => !open);
+                        }}
+                        aria-expanded={statusUpdateOpen}
+                        className="inline-flex w-fit items-center justify-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-[11px] font-bold text-slate-700 hover:bg-slate-50 cursor-pointer"
                       >
                         <span>Update Status</span>
+                        <ChevronDown size={13} className={clsx('transition-transform', statusUpdateOpen && 'rotate-180')} />
                       </button>
-                    </div>
 
-                    {statusUpdateOpen && (
-                      <div className="p-2.5 bg-white border border-slate-200 rounded-lg shadow-md space-y-1.5 text-xs">
-                        <p className="font-bold text-slate-600 text-[10px] uppercase">Select New Status</p>
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-1">
-                          {['DUE', 'PAID', 'OVERDUE', 'MESSAGE SENT', 'CUSTOMER CONTACTED'].map(st => (
+                      {statusUpdateOpen && (
+                        <div className="w-full max-w-sm rounded-lg border border-slate-200 bg-white p-3 shadow-md space-y-2 text-xs">
+                          <p className="font-bold text-slate-600 text-[10px] uppercase">
+                            Select New Status
+                          </p>
+                          <div
+                            role="listbox"
+                            aria-label="New status"
+                            className="max-h-36 overflow-y-auto overscroll-contain rounded-lg border border-slate-200 p-1"
+                          >
+                            {EMI_STATUSES.map(status => (
+                              <button
+                                key={status}
+                                type="button"
+                                role="option"
+                                aria-selected={selectedStatus === status}
+                                onClick={() => setSelectedStatus(status)}
+                                className={clsx(
+                                  'w-full rounded-md px-2.5 py-1.5 text-left text-[11px] font-semibold transition-colors',
+                                  selectedStatus === status
+                                    ? 'bg-blue-600 text-white'
+                                    : 'text-slate-700 hover:bg-blue-50'
+                                )}
+                              >
+                                {status}
+                              </button>
+                            ))}
+                          </div>
+                          <p className="text-[10px] text-slate-500">
+                            Choose a status, then click Save beside Mark as Paid.
+                          </p>
+                          <div className="flex justify-end">
                             <button
-                              key={st}
                               type="button"
-                              onClick={() => handleUpdateStatus(drawerRecord.id, st as any)}
-                              className="px-2 py-1 text-left text-[10px] font-bold rounded border hover:bg-blue-50 text-slate-700"
+                              onClick={() => setStatusUpdateOpen(false)}
+                              className="rounded-lg px-3 py-1.5 text-[10px] font-bold text-slate-600 hover:bg-slate-100"
                             >
-                              {st}
+                              Cancel
                             </button>
-                          ))}
+                          </div>
                         </div>
-                      </div>
-                    )}
+                      )}
+                    </div>
                   </div>
 
                   {/* Communication History Timeline */}
@@ -2065,7 +2172,13 @@ export default function EmiTrackingView({ selectedMonth }: { selectedMonth: stri
               {drawerTab === 'schedule' && (
                 <div className="space-y-2.5 text-xs animate-fadeIn">
                   <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">
-                    Installment Payment Schedule ({drawerRecord.totalEmis} {drawerRecord.installmentFrequency?.toLowerCase().includes('month') ? 'Months' : (drawerRecord.installmentFrequency || 'Months')})
+                    Installment Payment Schedule ({drawerRecord.totalEmis} {
+                      drawerRecord.installmentFrequency === 'Quarterly' ? (drawerRecord.totalEmis === 1 ? 'Quarter' : 'Quarters') :
+                      drawerRecord.installmentFrequency === 'Half-Yearly' ? (drawerRecord.totalEmis === 1 ? 'Half-Year' : 'Half-Years') :
+                      drawerRecord.installmentFrequency?.toLowerCase().includes('month') ? (drawerRecord.totalEmis === 1 ? 'Month' : 'Months') :
+                      drawerRecord.installmentFrequency === 'Single' ? 'One Time' :
+                      'Installments'
+                    })
                   </span>
                   <div className="divide-y divide-slate-100 border border-slate-200 rounded-lg overflow-hidden">
                     {Boolean(drawerRecord.downpaymentAmount && drawerRecord.downpaymentAmount > 0) && (
@@ -2105,7 +2218,7 @@ export default function EmiTrackingView({ selectedMonth }: { selectedMonth: stri
                           <span className={clsx(
                             'px-1.5 py-0.5 rounded text-[9px] font-extrabold uppercase',
                             sc.status === 'PAID' ? 'bg-emerald-100 text-emerald-700' :
-                            sc.status === 'OVERDUE' ? 'bg-rose-100 text-rose-700' :
+                            sc.status === 'OVERDUE' || sc.status === 'PAYMENT FAILED' ? 'bg-rose-100 text-rose-700' :
                             sc.status === 'UPCOMING' ? 'bg-blue-100 text-blue-700' :
                             'bg-amber-100 text-amber-700'
                           )}>
@@ -2114,6 +2227,22 @@ export default function EmiTrackingView({ selectedMonth }: { selectedMonth: stri
                         </div>
                       </div>
                     ))}
+                  </div>
+                  <div className="space-y-2 pt-2">
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">Communication History</span>
+                    <div className="space-y-2 border-l-2 border-slate-200 pl-2.5">
+                      {drawerRecord.history.length === 0 ? (
+                        <p className="text-xs text-slate-400 font-medium">No history logged yet.</p>
+                      ) : drawerRecord.history.map((entry, index) => (
+                        <div key={entry.id || index}>
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="text-[11px] font-bold text-slate-800">{entry.date}</span>
+                            <span className="text-[9px] font-semibold text-slate-400">{entry.author}</span>
+                          </div>
+                          <p className="mt-0.5 text-[11px] text-slate-600">{entry.note}</p>
+                        </div>
+                      ))}
+                    </div>
                   </div>
                 </div>
               )}
@@ -2193,22 +2322,23 @@ export default function EmiTrackingView({ selectedMonth }: { selectedMonth: stri
                 </div>
               )}
 
-              {/* TAB 4: NOTES */}
+              {/* TAB 4: COMMENTS */}
               {drawerTab === 'notes' && (
                 <div className="space-y-2.5 text-xs animate-fadeIn">
-                  <label className="font-bold text-slate-700 block">Policy Notes</label>
+                  <label className="font-bold text-slate-700 block">Policy Comments</label>
                   <textarea
                     rows={6}
-                    defaultValue={drawerRecord.notes || ''}
-                    placeholder="Add internal notes for this policy installment..."
+                    value={notesDraft}
+                    onChange={event => setNotesDraft(event.target.value)}
+                    placeholder="Add internal comments for this policy installment..."
                     className="w-full p-2.5 border border-slate-200 rounded-lg bg-slate-50 focus:bg-white focus:ring-2 focus:ring-blue-500/20 outline-none text-xs"
                   />
                   <button
                     type="button"
-                    onClick={() => toast.success('Notes saved successfully!')}
+                    onClick={handleSaveNotes}
                     className="py-2 px-4 bg-slate-800 text-white font-bold rounded-lg hover:bg-slate-900 cursor-pointer text-xs transition-all hover:scale-[1.01]"
                   >
-                    Save Notes
+                    Save Comments
                   </button>
                 </div>
               )}
@@ -2267,7 +2397,7 @@ export default function EmiTrackingView({ selectedMonth }: { selectedMonth: stri
                   { key: 'overview', label: 'EMI Overview' },
                   { key: 'schedule', label: 'EMI Schedule' },
                   { key: 'communication', label: 'Communication' },
-                  { key: 'notes', label: 'Notes' },
+                  { key: 'notes', label: 'Comments' },
                 ].map(tb => (
                   <button
                     key={tb.key}
@@ -2461,18 +2591,18 @@ export default function EmiTrackingView({ selectedMonth }: { selectedMonth: stri
                 )}
                 {drawerTab === 'notes' && (
                   <div className="space-y-3 text-xs">
-                    <label className="font-bold text-slate-700 block">Policy Notes</label>
+                    <label className="font-bold text-slate-700 block">Policy Comments</label>
                     <textarea
                       rows={6}
                       defaultValue={drawerRecord.notes || ''}
-                      placeholder="Add internal notes for this policy EMI..."
+                      placeholder="Add internal comments for this policy EMI..."
                       className="w-full p-3 border border-slate-200 rounded-xl bg-slate-50 focus:bg-white focus:ring-2 focus:ring-blue-500/20 outline-none"
                     />
                     <button
-                      onClick={() => toast.success('Notes saved successfully!')}
+                      onClick={() => toast.success('Comments saved successfully!')}
                       className="py-2 px-4 bg-slate-800 text-white font-bold rounded-xl hover:bg-slate-900 cursor-pointer"
                     >
-                      Save Notes
+                      Save Comments
                     </button>
                   </div>
                 )}

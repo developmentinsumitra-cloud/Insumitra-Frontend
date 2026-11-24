@@ -11,7 +11,7 @@ import {
   useCreateTask,
   useEmployeeTasks
 } from '@hooks/useWorkspace';
-import { commissionsService, employeesService, workspaceService } from '@api/index';
+import { commissionsService, contactsService, employeesService, workspaceService } from '@api/index';
 import DataTable, { Column } from '@comps/common/DataTable';
 import {
   Clock, CheckCircle, Play, Square,
@@ -52,6 +52,8 @@ const formatPreview = (dateStr?: string) => {
 export default function Workspace() {
   const user = useAuthStore(s => s.user);
   const { data: wsRes, isLoading, refetch } = useWorkspaceData();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const selectedEmployeeUserId = searchParams.get('view_employee');
   const clockInMutation = useClockIn();
   const clockOutMutation = useClockOut();
   const saveLogMutation = useUpsertDailyLog();
@@ -85,15 +87,39 @@ export default function Workspace() {
     staleTime: 5 * 60_000,
   });
 
+  const contactsCountParams = { limit: 2000, search: undefined, sortBy: 'createdAt', sortOrder: 'desc' };
+  const {
+    data: contactsCountRes,
+    isLoading: contactsCountLoading,
+    isError: contactsCountError,
+  } = useQuery({
+    queryKey: ['contacts', contactsCountParams],
+    queryFn: () => contactsService.list(contactsCountParams),
+    enabled: !selectedEmployeeUserId,
+    staleTime: 0,
+  });
+
   // My tasks list query
   const { data: allTasksRes, isLoading: tasksLoading } = useEmployeeTasks(
     taskStatusFilter === 'ALL' ? {} : { status: taskStatusFilter }
   );
 
-  // My commissions — backend filters by beneficiaryId for EMPLOYEE role
-  const { data: commRes, isLoading: commLoading } = useQuery({
-    queryKey: ['my-commissions'],
-    queryFn: () => commissionsService.list({ limit: 1000 }),
+  // Load every backend page so the history totals and pagination include all entries.
+  const { data: commRes, isLoading: commLoading, isError: commError } = useQuery({
+    queryKey: ['my-commissions', selectedEmployeeUserId],
+    queryFn: async () => {
+      const params = selectedEmployeeUserId ? { beneficiaryId: selectedEmployeeUserId } : {};
+      const firstPage = await commissionsService.list({ ...params, page: 1, limit: 100 });
+      const allCommissions = [...(firstPage?.data ?? [])];
+      const totalPages = firstPage?.meta?.totalPages ?? 1;
+
+      for (let page = 2; page <= totalPages; page++) {
+        const response = await commissionsService.list({ ...params, page, limit: 100 });
+        allCommissions.push(...(response?.data ?? []));
+      }
+
+      return { ...firstPage, data: allCommissions };
+    },
     staleTime: 60_000,
   });
 
@@ -104,9 +130,6 @@ export default function Workspace() {
   const [premiumCollected, setPremiumCollected] = useState(0);
   const [nextDayPlan, setNextDayPlan] = useState('');
 
-  // Admin View Employee Workspace state
-  const [searchParams, setSearchParams] = useSearchParams();
-  const selectedEmployeeUserId = searchParams.get('view_employee');
   const [isEmployeeModalOpen, setIsEmployeeModalOpen] = useState(false);
 
   // Query for selected employee workspace data (when admin selects an employee)
@@ -118,6 +141,7 @@ export default function Workspace() {
   });
 
   const workspaceData = wsRes?.data || wsRes; // support both envelope formats
+  const selectedWorkspaceData = selectedEmpWsRes?.data || selectedEmpWsRes;
   const logToday = workspaceData?.dailyLog;
   const isClockedIn = !!logToday?.checkIn && !logToday?.checkOut;
   const isClockedOut = !!logToday?.checkIn && !!logToday?.checkOut;
@@ -132,6 +156,10 @@ export default function Workspace() {
       setNextDayPlan(logToday.nextDayPlan || '');
     }
   }, [logToday]);
+
+  useEffect(() => {
+    setCommissionPage(1);
+  }, [selectedEmployeeUserId]);
 
   const handleClockIn = () => {
     if (isClockedOut) {
@@ -205,11 +233,30 @@ export default function Workspace() {
   const employeesList = (employeesRes?.data?.data || employeesRes?.data || []) as any[];
   const selectedEmployeeObj = employeesList.find((e: any) => (e.user?.id || e.userId || e.id) === selectedEmployeeUserId);
 
-  const activeWorkspaceData = selectedEmployeeUserId ? (selectedEmpWsRes?.data || selectedEmpWsRes) : workspaceData;
-  const activeCounts = activeWorkspaceData?.counts ?? workspaceData?.counts ?? { leads: 0, policies: 0, claims: 0, contacts: 0 };
-  const activeTarget = activeWorkspaceData?.target ?? workspaceData?.target ?? { monthlyTarget: 0, progress: 0, percentage: 0, baseSalary: 0, bonusPlanned: 0, callsTarget: 0, visitsTarget: 0, callsProgress: 0, visitsProgress: 0 };
-  const activeTasks = activeWorkspaceData?.tasks || (workspaceData?.tasks || []);
-  const activeRecentLogs = activeWorkspaceData?.recentLogs || (workspaceData?.recentLogs || []);
+  const activeWorkspaceData = selectedEmployeeUserId ? selectedWorkspaceData : workspaceData;
+  const activeCounts = activeWorkspaceData?.counts ?? { leads: 0, policies: 0, claims: 0, contacts: 0 };
+  const workspaceContactCount = useMemo(() => {
+    const records = Array.isArray(contactsCountRes?.data)
+      ? contactsCountRes.data
+      : Array.isArray(contactsCountRes?.data?.data)
+        ? contactsCountRes.data.data
+        : [];
+    const visibleContactIds = new Set<string>();
+    records.forEach((contact: any) => {
+      if (!contact.id) return;
+      const isInvalidDoctor = String(contact.role || '').trim().toLowerCase() === 'doctor'
+        && String(contact.phone || '').replace(/\D/g, '').length !== 10;
+      if (!isInvalidDoctor) visibleContactIds.add(String(contact.id));
+    });
+    return visibleContactIds.size;
+  }, [contactsCountRes]);
+  const workspaceCardCounts = {
+    ...activeCounts,
+    contacts: selectedEmployeeUserId ? activeCounts.contacts : workspaceContactCount,
+  };
+  const activeTarget = activeWorkspaceData?.target ?? { monthlyTarget: 0, progress: 0, percentage: 0, baseSalary: 0, bonusPlanned: 0, callsTarget: 0, visitsTarget: 0, callsProgress: 0, visitsProgress: 0, monthlyCommission: 0 };
+  const activeTasks = activeWorkspaceData?.tasks || [];
+  const activeRecentLogs = activeWorkspaceData?.recentLogs || [];
   const activeLogToday = activeWorkspaceData?.dailyLog;
   const activeIsClockedIn = !!activeLogToday?.checkIn && !activeLogToday?.checkOut;
   const activeIsClockedOut = !!activeLogToday?.checkIn && !!activeLogToday?.checkOut;
@@ -249,7 +296,7 @@ export default function Workspace() {
     });
   }, [taskListFromApi, taskStatusFilter, taskPriorityFilter, taskFilterDateFrom, taskFilterDateTo]);
 
-  if (isLoading) {
+  if (isLoading || (!selectedEmployeeUserId && contactsCountLoading) || (selectedEmployeeUserId && selectedEmpWsLoading)) {
     return (
       <div className="flex h-64 items-center justify-center">
         <div className="h-8 w-8 animate-spin rounded-full border-4 border-primary-500 border-t-transparent" />
@@ -261,7 +308,8 @@ export default function Workspace() {
     <div className="space-y-6 text-sm sm:text-base">
       {/* 1. TOP KPI METRIC CARDS */}
       <WorkspaceKpiCards
-        activeCounts={activeCounts}
+        activeCounts={workspaceCardCounts}
+        contactsCountError={contactsCountError && !selectedEmployeeUserId}
         taskListFromApi={taskListFromApi}
       />
 
@@ -490,6 +538,8 @@ export default function Workspace() {
                   <div className="flex justify-center py-8">
                     <div className="h-6 w-6 animate-spin rounded-full border-4 border-primary-500 border-t-transparent" />
                   </div>
+                ) : commError ? (
+                  <div className="text-center py-8 text-sm text-red-500">Commission history could not be loaded. Please try again.</div>
                 ) : commList.length === 0 ? (
                   <div className="text-center py-8 text-sm text-gray-400">No commission entries found.</div>
                 ) : (

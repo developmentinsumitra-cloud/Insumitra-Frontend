@@ -5,7 +5,7 @@ import {
   MessageCircle, Calendar, Shield, Heart, MapPin, Briefcase, UserCircle2,
   FileCheck2, ShieldCheck, Clock, ChevronDown, LayoutGrid, List, Eye, History, AlertTriangle, Users, CalendarDays, Settings
 } from 'lucide-react';
-import { useClaims, useCreateClaim, useUpdateClaimStatus, useDeleteClaim } from '@hooks/useClaims';
+import { useCreateClaim, useUpdateClaimStatus, useDeleteClaim } from '@hooks/useClaims';
 import { usePolicies } from '@hooks/usePolicies';
 import { useTableColumnVisibility } from '@hooks/useTableColumnVisibility';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
@@ -182,6 +182,7 @@ export function getClaimUiStatus(c: any): 'Pending' | 'In Progress' | 'Approved'
     if (
       s === 'in progress' ||
       s.includes('progress') ||
+      s.includes('process') ||
       s.includes('query') ||
       s.includes('submitted') ||
       s.includes('discharge') ||
@@ -502,6 +503,17 @@ export interface ConnectedPersonOption {
   source: 'policy_nominee' | 'policy_connected' | 'contact_family';
 }
 
+function getLinkedNomineeShare(person?: ConnectedPersonOption): string {
+  if (
+    person?.percentage === undefined ||
+    person.percentage === null ||
+    person.percentage === ''
+  ) {
+    return '';
+  }
+  return String(person.percentage);
+}
+
 const normalizeNomineeRelationship = (rawRel?: string, name?: string, gender?: string) => {
   if (!rawRel) return '';
   const upper = rawRel.trim().toUpperCase().replace(/\s+/g, '_');
@@ -579,14 +591,7 @@ export function isSamePerson(p1: any, p2: any): boolean {
   // If both have 10-digit phone numbers and they match
   if (phone1 && phone2 && phone1.length >= 10 && phone2.length >= 10 && phone1 === phone2) {
     if (!name1 || !name2) return true;
-    const words1 = name1.split(/\s+/).filter(Boolean);
-    const words2 = name2.split(/\s+/).filter(Boolean);
-    const hasCommonWord = words1.some((w: string) => words2.includes(w));
-    if (hasCommonWord) return true;
-    if (words1[0] && words2[0] && (words1[0].startsWith(words2[0]) || words2[0].startsWith(words1[0]))) {
-      return true;
-    }
-    return true;
+    // A shared household phone alone cannot identify two named family members.
   }
 
   // Exact name match
@@ -1063,7 +1068,7 @@ export function ClaimEditForm({ initial, isPending, onSave, onCancel, employees,
               relationship: matchRel,
               phone: n.phone || match.phone,
               dob: n.dob || match.dob,
-              percentage: n.percentage || match.percentage || '',
+              percentage: getLinkedNomineeShare(match) || n.percentage || match.percentage || '',
               comment: n.comment || match.comment || '',
             };
           }
@@ -3384,10 +3389,23 @@ export default function Claims({ contactId, contact, embedded = false }: ClaimsP
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [importFormatOpen, setImportFormatOpen] = useState(false);
+  const [importSkippedRows, setImportSkippedRows] = useState<string[]>([]);
   const employees = useLookupStore(s => s.employees);
 
-  // Fetch all claims for client side filtering matching reference app
-  const { data: claimsRes, isLoading } = useClaims({ page: 1, limit: 500 });
+  const { data: claimsRes, isLoading } = useQuery({
+    queryKey: ['claims', 'all'],
+    queryFn: async () => {
+      const firstPage = await claimsService.list({ page: 1, limit: 1000 });
+      const allClaims = [...(firstPage?.data ?? [])];
+      const totalPages = Math.max(1, Number(firstPage?.meta?.totalPages) || 1);
+      for (let pageNumber = 2; pageNumber <= totalPages; pageNumber++) {
+        const pageResult = await claimsService.list({ page: pageNumber, limit: 1000 });
+        allClaims.push(...(pageResult?.data ?? []));
+      }
+      return { ...firstPage, data: allClaims };
+    },
+    staleTime: 2 * 60_000,
+  });
   const rawClaims = useMemo(() => {
     const list = claimsRes?.data ?? [];
     if (authUser?.role === 'EMPLOYEE') {
@@ -4111,7 +4129,8 @@ export default function Claims({ contactId, contact, embedded = false }: ClaimsP
               name: (match.name && match.name.length > (n.name || '').length) ? match.name : n.name,
               relationship: matchRel,
               phone: n.phone || match.phone,
-              dob: n.dob || match.dob
+              dob: n.dob || match.dob,
+              percentage: getLinkedNomineeShare(match) || n.percentage || match.percentage || '',
             };
           }
         }
@@ -4638,6 +4657,7 @@ export default function Claims({ contactId, contact, embedded = false }: ClaimsP
     const file = e.target.files?.[0];
     if (!file) return;
     setImportFormatOpen(false);
+    setImportSkippedRows([]);
     const toastId = toast.loading('Importing claims...');
     try {
       let fileToUpload = file;
@@ -4649,13 +4669,14 @@ export default function Claims({ contactId, contact, embedded = false }: ClaimsP
         fileToUpload = new File([`\uFEFF${csvContent}`], file.name.replace(/\.[^/.]+$/, '.csv'), { type: 'text/csv;charset=utf-8' });
       }
       const res = await claimsService.importCsv(fileToUpload);
+      setImportSkippedRows(res.skipped || []);
       if (res.created > 0) {
         toast.success(res.message || `Successfully imported ${res.created} claim(s)!`, { id: toastId });
         if (res.skipped?.length > 0) {
-          toast.error(`Skipped ${res.skipped.length} record(s): ${res.skipped.slice(0, 3).join(', ')}`, { duration: 6000 });
+          toast.error(`Skipped ${res.skipped.length} record(s). Review the import details for each row.`, { duration: 6000 });
         }
       } else if (res.skipped?.length > 0) {
-        toast.error(`Import skipped: ${res.skipped.join(', ')}`, { id: toastId, duration: 8000 });
+        toast.error(`No claims imported. ${res.skipped.length} record(s) need correction.`, { id: toastId, duration: 8000 });
       } else {
         toast.error(res.message || 'No claims were imported from the file', { id: toastId });
       }
@@ -7683,29 +7704,33 @@ export default function Claims({ contactId, contact, embedded = false }: ClaimsP
         onChooseFile={() => fileInputRef.current?.click()}
         title="Import Claims from CSV or Excel"
         description="Download the sample file and keep the column headers unchanged."
-        warning="Claim Intimation Number, Policy Number, and Contact No. are required. Contact No. and Policy Number should match existing records."
+        warning="Claim Intimation Number, Claim Intimation Date, Claim Type, Claimed Amount, and Policy Number are required. A contact is matched by phone or name, or created from the supplied proposer/patient details. To create a missing policy without inventing data, also provide Company Name, Product Name, category, Sum Insured, Premium, Payment Frequency, and Policy Start/End Dates."
         columns={[
           { name: 'Sr. No.', requirement: 'Optional. Serial number (e.g. 1, 2, 3).' },
-          { name: 'Proposer Name', requirement: 'Optional. Name of the policy proposer / primary contact.' },
+          { name: 'Proposer Name', requirement: 'Name of the policy proposer / primary contact. Required when creating a contact without a matching phone number.' },
           { name: 'Patient Name', requirement: 'Optional. Name of the insured patient undergoing treatment.' },
-          { name: 'Contact No.', requirement: 'Required. 10-digit mobile number matching existing contact or client.' },
-          { name: 'Insurance Company Category', requirement: 'Optional. Category (e.g. Health, Life, General).' },
-          { name: 'Company Name', requirement: 'Optional. Name of insurance company (e.g. Star Health, HDFC ERGO).' },
-          { name: 'Product Name', requirement: 'Optional. Insurance product or plan name (e.g. Youngstar, Optima Secure).' },
-          { name: 'Policy Number', requirement: 'Required. Policy number matching existing policy.' },
-          { name: 'Premium', requirement: 'Optional. Policy premium amount (e.g. 17550).' },
-          { name: 'Sum Insured', requirement: 'Optional. Policy sum insured (e.g. 1000000 or 10 L).' },
+          { name: 'Contact No.', requirement: 'Optional if a proposer/patient name is supplied. Use the actual 10-digit mobile number; a new contact can be created from the row.' },
+          { name: 'Insurance Company Category', requirement: 'Required to create a missing policy. Category (Health, Life, Motor, General, or Travel).' },
+          { name: 'Company Name', requirement: 'Required to create a missing policy. Actual insurer name (e.g. Star Health, HDFC ERGO).' },
+          { name: 'Product Name', requirement: 'Required to create a missing policy. Actual insurance product or plan name.' },
+          { name: 'Policy Number', requirement: 'Required. Actual policy number; matching uses the complete number.' },
+          { name: 'Premium', requirement: 'Required to create a missing policy. Actual policy premium amount (e.g. 17550).' },
+          { name: 'Sum Insured', requirement: 'Required to create a missing policy. Actual policy sum insured (e.g. 1000000 or 10 L).' },
+          { name: 'Payment Frequency', requirement: 'Required to create a missing policy (Monthly, Quarterly, Half Yearly, Yearly, or Single).' },
+          { name: 'Policy Start Date', requirement: 'Required to create a missing policy. Use the actual policy inception date.' },
+          { name: 'Policy End Date', requirement: 'Required to create a missing policy. Use the actual policy expiry date.' },
           { name: 'Admitted Date', requirement: 'Optional. Date of hospital admission (YYYY-MM-DD or MM/DD/YYYY).' },
           { name: 'Discharge Date', requirement: 'Optional. Date of hospital discharge (YYYY-MM-DD or MM/DD/YYYY).' },
           { name: 'Hospital Admitted', requirement: 'Optional. Name of the hospital or clinic.' },
           { name: 'Hospital City', requirement: 'Optional. City where the hospital is located.' },
           { name: 'Hospital Type', requirement: 'Optional. Hospital network type (Network, Non Network, NA).' },
           { name: 'Diagnosis', requirement: 'Optional. Medical ailment, diagnosis, or reason for claim.' },
-          { name: 'Claim Intimation Number', requirement: 'Required. Unique claim intimation number / Claim ID.' },
-          { name: 'Claimed Amount', requirement: 'Optional. Total amount claimed in INR (e.g. 35000).' },
+          { name: 'Claim Intimation Number', requirement: 'Required. Actual unique claim intimation number / Claim ID.' },
+          { name: 'Claim Intimation Date', requirement: 'Required. Actual claim intimation date.' },
+          { name: 'Claimed Amount', requirement: 'Required. Total amount claimed in INR (e.g. 35000).' },
           { name: 'Settled Amount', requirement: 'Optional. Approved or settled claim amount in INR (e.g. 30000).' },
           { name: 'Status', requirement: 'Optional. In Process, Close, Settled, Approved, Rejected, or Intimated.' },
-          { name: 'Claim Type', requirement: 'Optional. Reimbursement, Cashless, Accidental, Death, or Health.' },
+          { name: 'Claim Type', requirement: 'Required. Reimbursement, Cashless, Accidental, Death, or Health.' },
         ]}
         sampleRow={[
           '1',
@@ -7718,6 +7743,9 @@ export default function Claims({ contactId, contact, embedded = false }: ClaimsP
           'P/151117/01/2022/025726',
           '17550',
           '1000000',
+          'Yearly',
+          '01/01/2022',
+          '01/01/2023',
           '01/22/2023',
           '01/25/2023',
           "Aditya Rainbow Children's Hospital",
@@ -7725,6 +7753,7 @@ export default function Claims({ contactId, contact, embedded = false }: ClaimsP
           'NA',
           'Viral Fever',
           'CIR/2023/151117/1411568',
+          '01/22/2023',
           '35000',
           '30000',
           'In Process',
@@ -7733,6 +7762,21 @@ export default function Claims({ contactId, contact, embedded = false }: ClaimsP
         fileFormats="CSV, XLS, and XLSX"
         sampleFileName="claims-sample.csv"
       />
+
+      <Modal
+        open={importSkippedRows.length > 0}
+        onClose={() => setImportSkippedRows([])}
+        title="Claims import needs review"
+        subtitle={`${importSkippedRows.length} row(s) were not imported. Correct the listed data and re-import those rows.`}
+        size="lg"
+        icon={<AlertTriangle size={18} />}
+      >
+        <ol className="max-h-[55vh] space-y-2 overflow-y-auto pl-5 text-xs text-slate-700">
+          {importSkippedRows.map((message, index) => (
+            <li key={`${index}-${message}`} className="break-words">{message}</li>
+          ))}
+        </ol>
+      </Modal>
 
     </div>
     </>
