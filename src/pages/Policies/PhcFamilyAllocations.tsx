@@ -5,6 +5,7 @@ import CustomSelect from '@comps/common/CustomSelect';
 
 export interface PhcFamilyAllocation {
   id: string;
+  yearNo?: number;
   personName: string;
   amount: number;
   utilizedAmount: number;
@@ -30,8 +31,9 @@ interface Props {
   familyMemberOptions: { value: string; label: string; sublabel?: string }[];
 }
 
-const createAllocation = (amount: number): PhcFamilyAllocation => ({
+const createAllocation = (amount: number, yearNo?: number): PhcFamilyAllocation => ({
   id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+  ...(yearNo ? { yearNo } : {}),
   personName: '',
   amount,
   utilizedAmount: 0,
@@ -71,9 +73,10 @@ interface AddButtonProps {
   allocations: PhcFamilyAllocation[];
   onChange: (allocations: PhcFamilyAllocation[]) => void;
   availableAmount: number;
+  yearNo?: number;
 }
 
-export function PhcFamilyAllocationButton({ allocations, onChange, availableAmount }: AddButtonProps) {
+export function PhcFamilyAllocationButton({ allocations, onChange, availableAmount, yearNo }: AddButtonProps) {
   const remainingAmount = Math.max(0, availableAmount - sumPhcFamilyAllocations(allocations));
   return (
     <div className="md:col-span-3 rounded-xl border border-dashed border-blue-200 p-3">
@@ -84,7 +87,7 @@ export function PhcFamilyAllocationButton({ allocations, onChange, availableAmou
         <button
           type="button"
           disabled={remainingAmount <= 0}
-          onClick={() => onChange([...allocations, createAllocation(remainingAmount)])}
+          onClick={() => onChange([...allocations, createAllocation(remainingAmount, yearNo)])}
           className="inline-flex items-center gap-1.5 rounded-lg bg-blue-600 px-3 py-2 text-[11px] font-bold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
         >
           <Plus size={14} />
@@ -193,9 +196,10 @@ export default function PhcFamilyAllocations({
                 type="number"
                 min={0}
                 max={maxUtilized}
-                value={allocation.utilizedAmount}
+                value={allocation.utilizedAmount ? allocation.utilizedAmount : ''}
                 onChange={event => {
-                  const entered = Number(event.target.value) || 0;
+                  const raw = event.target.value;
+                  const entered = raw === '' ? 0 : (Number(raw) || 0);
                   const utilizedAmount = Math.max(0, Math.min(maxUtilized, entered));
                   onChange(updateAllocation(allocations, allocation.id, item => ({
                     ...item,

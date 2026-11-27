@@ -938,12 +938,14 @@ export function ClaimEditForm({ initial, isPending, onSave, onCancel, employees,
   const { data: compulsoryRulesRes } = useQuery({
     queryKey: ['compulsory-rules'],
     queryFn: () => insuranceService.getCompulsoryRules(),
+    staleTime: 5 * 60 * 1000,
   });
   const compulsoryRules = useMemo(() => compulsoryRulesRes?.data ?? [], [compulsoryRulesRes]);
 
   const { data: hospitalsRes } = useQuery({
     queryKey: ['hospitals'],
     queryFn: () => insuranceService.listHospitals().catch(() => ({ data: [] })),
+    staleTime: 10 * 60 * 1000,
   });
   const hospitals = hospitalsRes?.data ?? [];
 
@@ -3265,11 +3267,25 @@ export default function Claims({ contactId, contact, embedded = false }: ClaimsP
   const deleteClaim = useDeleteClaim();
   const updateClaimMutation = useMutation({
     mutationFn: ({ id, body }: { id: string; body: any }) => claimsService.update(id, body),
-    onSuccess: (res: any) => {
+    onSuccess: (res: any, variables) => {
+      const targetId = variables.id;
+      const updated = res?.data?.data || res?.data || res;
+      if (targetId) {
+        qc.setQueriesData({ queryKey: ['claims'] }, (old: any) => {
+          if (!old) return old;
+          const updateItem = (item: any) =>
+            (item.id === targetId || item._id === targetId || item.claimNumber === targetId)
+              ? { ...item, ...variables.body, ...(updated && typeof updated === 'object' ? updated : {}) }
+              : item;
+          if (Array.isArray(old)) return old.map(updateItem);
+          if (Array.isArray(old.data)) return { ...old, data: old.data.map(updateItem) };
+          if (Array.isArray(old.data?.data)) return { ...old, data: { ...old.data, data: old.data.data.map(updateItem) } };
+          return old;
+        });
+      }
       qc.invalidateQueries({ queryKey: ['claims'] });
       qc.invalidateQueries({ queryKey: ['policies'] });
       qc.invalidateQueries({ queryKey: ['contact-activity'] });
-      qc.refetchQueries({ queryKey: ['contact-activity'] });
       toast.success('Claim updated successfully');
       if (res?.data) {
         setEditTarget(prev => (prev ? { ...prev, ...res.data } : res.data));
@@ -3277,7 +3293,11 @@ export default function Claims({ contactId, contact, embedded = false }: ClaimsP
     },
     onError: (err: any) => toast.error(err?.response?.data?.message ?? 'Failed to update claim'),
   });
-  const { data: hospitalsRes } = useQuery({ queryKey: ['hospitals'], queryFn: () => insuranceService.listHospitals().catch(() => ({ data: [] })) });
+  const { data: hospitalsRes } = useQuery({
+    queryKey: ['hospitals'],
+    queryFn: () => insuranceService.listHospitals().catch(() => ({ data: [] })),
+    staleTime: 10 * 60 * 1000,
+  });
   const hospitals = hospitalsRes?.data ?? [];
   const { user: authUser } = useAuthStore();
   const [page, setPage] = useState(1);
@@ -4180,11 +4200,12 @@ export default function Claims({ contactId, contact, embedded = false }: ClaimsP
     },
   });
 
-  const { data: allTenantPoliciesRes } = usePolicies({ limit: 1000 });
+  const { data: allTenantPoliciesRes } = usePolicies({ limit: 1000 }, { enabled: modalOpen });
 
   const { data: compulsoryRulesRes } = useQuery({
     queryKey: ['compulsory-rules'],
     queryFn: () => insuranceService.getCompulsoryRules(),
+    staleTime: 5 * 60 * 1000,
   });
   const compulsoryRules = useMemo(() => compulsoryRulesRes?.data ?? [], [compulsoryRulesRes]);
   const isFieldRequired = (key: string, defaultRequired: boolean) => {

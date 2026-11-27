@@ -2176,68 +2176,91 @@ export default function CreatePolicyModal({
 
       const savedPolicy = res?.data ?? res;
 
-      // Upload pending documents
+      // Upload pending documents & sync members/nominees concurrently
       const docsToUpload = pendingDocs.filter(doc => !doc.uploaded);
+      const targetPolicyId = policyToEdit?.id || savedPolicy?.id;
+
+      const postCreateTasks: Promise<any>[] = [];
+
       if (savedPolicy?.id && docsToUpload.length > 0) {
-        for (const doc of docsToUpload) {
-          try {
-            await documentsService.upload(doc.file, {
-              policyId: savedPolicy.id,
-              type: doc.tag,
-              title: doc.title,
-            });
-            setPendingDocs(prev => prev.map(item => item === doc ? { ...item, uploaded: true } : item));
-          } catch (uploadErr) {
-            console.error('Document upload error:', uploadErr);
-          }
+        postCreateTasks.push(
+          Promise.all(
+            docsToUpload.map(async (doc) => {
+              try {
+                await documentsService.upload(doc.file, {
+                  policyId: savedPolicy.id,
+                  type: doc.tag,
+                  title: doc.title,
+                });
+                setPendingDocs(prev => prev.map(item => item === doc ? { ...item, uploaded: true } : item));
+              } catch (uploadErr) {
+                console.error('Document upload error:', uploadErr);
+              }
+            }),
+          ),
+        );
+      }
+
+      if (targetPolicyId && policyToEdit?.members && Array.isArray(policyToEdit.members)) {
+        const membersToRemove = policyToEdit.members.filter((oldM: any) => {
+          const stillExists = validMembers.some(
+            p => p.name.trim().toLowerCase() === (oldM.name || '').trim().toLowerCase(),
+          );
+          return !stillExists && oldM.id;
+        });
+        if (membersToRemove.length > 0) {
+          postCreateTasks.push(
+            Promise.all(
+              membersToRemove.map((oldM: any) =>
+                policiesService.removeMember(targetPolicyId, oldM.id).catch(() => {}),
+              ),
+            ),
+          );
         }
       }
 
-      const targetPolicyId = policyToEdit?.id || savedPolicy?.id;
-      if (targetPolicyId && policyToEdit?.members && Array.isArray(policyToEdit.members)) {
-        for (const oldM of policyToEdit.members) {
-          const stillExists = validMembers.some(
-            p => p.name.trim().toLowerCase() === (oldM.name || '').trim().toLowerCase()
-          );
-          if (!stillExists && oldM.id) {
-            try {
-              await policiesService.removeMember(targetPolicyId, oldM.id);
-            } catch { /* ignore */ }
-          }
-        }
-      }
       if (targetPolicyId && validMembers.length > 0) {
-        for (const person of validMembers) {
-          if (person.name.trim()) {
-            try {
-              await policiesService.addMember(targetPolicyId, {
-                name: person.name.trim(),
-                relationship: person.relationship || 'Spouse',
-                dateOfBirth: person.dob ? new Date(person.dob).toISOString() : undefined,
-                gender: person.gender || 'MALE',
-              });
-            } catch { /* ignore */ }
-            if (person.isNominee) {
-              try {
-                await policiesService.addNominee(targetPolicyId, {
-                  name: person.nomineeName?.trim() || person.name.trim(),
-                  relationship: person.nomineeRelation || person.relationship || 'Other',
-                  sharePercent: Number(person.nomineePercentage) || 100,
-                  dateOfBirth: (person.nomineeDob || person.dob) ? new Date(person.nomineeDob || person.dob).toISOString() : undefined,
-                  phone: (() => {
-                    const digits = (cleanConnectedPhone(person.nomineeContact) || (
-                      (!person.nomineeName || person.nomineeName.trim().toLowerCase() === person.name.trim().toLowerCase()) ? cleanConnectedPhone(person.contactNo) : ''
-                    )).replace(/\D/g, '');
-                    return digits.length === 10 ? digits : undefined;
-                  })(),
-                });
-              } catch { /* ignore */ }
-            }
-          }
-        }
+        postCreateTasks.push(
+          Promise.all(
+            validMembers
+              .filter(person => person.name.trim())
+              .map(async (person) => {
+                const tasks: Promise<any>[] = [
+                  policiesService.addMember(targetPolicyId, {
+                    name: person.name.trim(),
+                    relationship: person.relationship || 'Spouse',
+                    dateOfBirth: person.dob ? new Date(person.dob).toISOString() : undefined,
+                    gender: person.gender || 'MALE',
+                  }).catch(() => {}),
+                ];
+                if (person.isNominee) {
+                  tasks.push(
+                    policiesService.addNominee(targetPolicyId, {
+                      name: person.nomineeName?.trim() || person.name.trim(),
+                      relationship: person.nomineeRelation || person.relationship || 'Other',
+                      sharePercent: Number(person.nomineePercentage) || 100,
+                      dateOfBirth: (person.nomineeDob || person.dob) ? new Date(person.nomineeDob || person.dob).toISOString() : undefined,
+                      phone: (() => {
+                        const digits = (cleanConnectedPhone(person.nomineeContact) || (
+                          (!person.nomineeName || person.nomineeName.trim().toLowerCase() === person.name.trim().toLowerCase()) ? cleanConnectedPhone(person.contactNo) : ''
+                        )).replace(/\D/g, '');
+                        return digits.length === 10 ? digits : undefined;
+                      })(),
+                    }).catch(() => {}),
+                  );
+                }
+                await Promise.all(tasks);
+              }),
+          ),
+        );
+      }
+
+      if (postCreateTasks.length > 0) {
+        await Promise.all(postCreateTasks);
       }
 
       qc.invalidateQueries({ queryKey: ['policies'] });
+      qc.invalidateQueries({ queryKey: ['contacts-policies-list'] });
       qc.invalidateQueries({ queryKey: ['policies', 'phc-tracking'] });
       qc.invalidateQueries({ queryKey: ['phc-tracking'] });
       qc.invalidateQueries({ queryKey: ['leads'] });
@@ -2246,10 +2269,8 @@ export default function CreatePolicyModal({
       qc.invalidateQueries({ queryKey: ['contacts'] });
       if (contactId) qc.invalidateQueries({ queryKey: ['contact', contactId] });
       qc.invalidateQueries({ queryKey: ['contact-activity'] });
-      qc.refetchQueries({ queryKey: ['contact-activity'] });
       if (policyHistoryContactId) {
         qc.invalidateQueries({ queryKey: ['contact-activity', policyHistoryContactId] });
-        qc.refetchQueries({ queryKey: ['contact-activity', policyHistoryContactId] });
       }
       toast.success(policyToEdit ? 'Policy updated successfully' : 'Policy created successfully');
       onSuccess?.();

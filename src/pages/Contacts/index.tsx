@@ -5,6 +5,7 @@ import {
   Calendar, Award, TrendingUp, Filter, Settings, UserPlus, UserCircle2, ChevronDown, ChevronUp, Send, Save, FileText, History, UserCheck, Eye, Download, ExternalLink, X, Clock, ArrowLeft
 } from 'lucide-react';
 import { useContacts, useCreateContact, useUpdateContact, useDeleteContact, useUpcomingBirthdays } from '@hooks/useContacts';
+import { useDebounce } from '../../hooks/useDebounce';
 import { useClaims } from '@hooks/useClaims';
 import { deletionRequestsService } from '@api/deletionRequestsService';
 import { useLookupStore } from '@store/lookup.store';
@@ -593,6 +594,7 @@ export default function Contacts() {
   const [activeTab, setActiveTab] = useState<'contacts' | 'customers' | 'birthdays'>('contacts');
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState(() => searchParams.get('search') || searchParams.get('q') || '');
+  const debouncedSearch = useDebounce(search, 300);
   const [selectedFilters, setSelectedFilters] = useState<string[]>([]);
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
@@ -605,6 +607,7 @@ export default function Contacts() {
   const { data: compulsoryRulesRes } = useQuery({
     queryKey: ['compulsory-rules'],
     queryFn: () => insuranceService.getCompulsoryRules(),
+    staleTime: 5 * 60 * 1000,
   });
   const compulsoryRules = useMemo(() => compulsoryRulesRes?.data ?? [], [compulsoryRulesRes]);
 
@@ -1259,7 +1262,12 @@ export default function Contacts() {
     setFamilyMemberModalOpen(true);
   };
 
+  const savingFamilyMemberRef = useRef(false);
+
   const handleSaveFamilyMemberFromModal = async (savedMember: Record<string, any>) => {
+    if (savingFamilyMemberRef.current) return;
+    savingFamilyMemberRef.current = true;
+    try {
     const targetIdx = editingFamilyMemberIdx;
     if (targetIdx !== null && targetIdx >= 0) {
       setFamilyMembers(prev => prev.map((m, i) => i === targetIdx ? { ...m, ...savedMember } : m));
@@ -1503,6 +1511,9 @@ export default function Contacts() {
     } else {
       toast.success(targetIdx !== null && targetIdx >= 0 ? 'Family member details updated' : 'Family member added');
     }
+    } finally {
+      savingFamilyMemberRef.current = false;
+    }
   };
 
   const handleDeleteFamilyMember = async (idx: number) => {
@@ -1656,7 +1667,7 @@ export default function Contacts() {
 
   const { data: contactsRes, isLoading: contactsLoading, refetch: refetchContacts } = useContacts({
     limit: 2000,
-    search: search || undefined,
+    search: debouncedSearch || undefined,
     sortBy: 'createdAt',
     sortOrder: 'desc',
   });
@@ -3211,6 +3222,7 @@ export default function Contacts() {
       const cleanAltPhone = rawAltDigits.length > 10 ? rawAltDigits.slice(-10) : rawAltDigits;
 
       let contactId = editContactId;
+      let savedContactPayload: any = null;
       const validEmpId = (id?: string) => (id && typeof id === 'string' && id.trim()) ? id.trim() : undefined;
       const interestEmpId = productInterests.find(c => validEmpId(c.assignedEmployeeId))?.assignedEmployeeId;
       const selectedEmpIds = Array.isArray(personalFields.assignedEmployeeIds)
@@ -3276,7 +3288,11 @@ export default function Contacts() {
         if (personalFields.bankIfsc !== undefined) updateBody.bankIfsc = personalFields.bankIfsc?.trim()?.toUpperCase() || null;
         if (personalFields.bankBranch !== undefined) updateBody.bankBranch = personalFields.bankBranch?.trim() || null;
 
-        await contactsService.update(editContactId, updateBody);
+        const updateRes = await contactsService.update(editContactId, updateBody);
+        const updatedContactObj = updateRes?.data?.data || updateRes?.data || updateRes;
+        if (updatedContactObj && typeof updatedContactObj === 'object') {
+          savedContactPayload = updatedContactObj;
+        }
 
         // Update Address only if changed
         if (loadedContact) {
@@ -3405,12 +3421,28 @@ export default function Contacts() {
             isPrimary: true,
           } : undefined,
         });
+        const createdAddressObj = contactRes?.data?.address;
+        const createdOccupationObj = contactRes?.data?.occupation;
         const createdContactObj = contactRes?.data?.contact || contactRes?.data?.data || contactRes?.data || contactRes;
         contactId = createdContactObj?.id || createdContactObj?._id;
+        if (createdContactObj && typeof createdContactObj === 'object') {
+          savedContactPayload = {
+            ...createdContactObj,
+            addresses: createdContactObj.addresses?.length
+              ? createdContactObj.addresses
+              : (createdAddressObj ? [createdAddressObj] : []),
+            occupations: createdContactObj.occupations?.length
+              ? createdContactObj.occupations
+              : (createdOccupationObj ? [createdOccupationObj] : []),
+            assignedEmployeeId: chosenEmpId || createdContactObj.assignedEmployeeId || null,
+            assignedEmployeeIds: chosenEmpIds.length > 0 ? chosenEmpIds : (createdContactObj.assignedEmployeeIds || []),
+            createdAt: createdContactObj.createdAt || new Date().toISOString(),
+          };
+        }
         if (contactId) {
           setEditContactId(contactId);
-          if (createdContactObj && typeof createdContactObj === 'object') {
-            setLoadedContact(createdContactObj);
+          if (savedContactPayload || (createdContactObj && typeof createdContactObj === 'object')) {
+            setLoadedContact(savedContactPayload || createdContactObj);
           }
         }
       }
@@ -3665,8 +3697,12 @@ export default function Contacts() {
               item.id === editContactId || item._id === editContactId || item.contactId === editContactId
                 ? {
                     ...item,
+                    ...(savedContactPayload || {}),
                     assignedEmployeeId: chosenEmpId || null,
                     assignedEmployeeIds: chosenEmpIds,
+                    policies: createdPolicies.length > 0
+                      ? [...(item.policies || []), ...createdPolicies]
+                      : item.policies,
                   }
                 : item
             );
@@ -3675,15 +3711,52 @@ export default function Contacts() {
           if (Array.isArray(old.data?.data)) return { ...old, data: { ...old.data, data: updateList(old.data.data) } };
           return old;
         });
+      } else if (savedContactPayload && contactId) {
+        const newRow = {
+          ...savedContactPayload,
+          policies: createdPolicies.length > 0 ? createdPolicies : (savedContactPayload.policies || []),
+        };
+        qc.setQueriesData({ queryKey: ['contacts'] }, (old: any) => {
+          if (!old) return old;
+          const prependRow = (list: any[]) => {
+            const exists = list.some(
+              item => item.id === contactId || item._id === contactId || (savedContactPayload.contactId && item.contactId === savedContactPayload.contactId)
+            );
+            return exists ? list : [newRow, ...list];
+          };
+          if (Array.isArray(old)) return prependRow(old);
+          if (Array.isArray(old.data)) {
+            const nextData = prependRow(old.data);
+            return {
+              ...old,
+              data: nextData,
+              meta: old.meta ? { ...old.meta, total: (old.meta.total ?? old.data.length) + (nextData.length > old.data.length ? 1 : 0) } : old.meta,
+            };
+          }
+          if (Array.isArray(old.data?.data)) {
+            const nextData = prependRow(old.data.data);
+            return {
+              ...old,
+              data: {
+                ...old.data,
+                data: nextData,
+                meta: old.data.meta ? { ...old.data.meta, total: (old.data.meta.total ?? old.data.data.length) + (nextData.length > old.data.data.length ? 1 : 0) } : old.data.meta,
+              },
+            };
+          }
+          return old;
+        });
       }
       qc.invalidateQueries({ queryKey: ['contacts'] });
       setPage(1);
-      qc.invalidateQueries({ queryKey: ['leads'] });
-      qc.invalidateQueries({ queryKey: ['policies'] });
-      qc.invalidateQueries({ queryKey: ['contacts-policies-list'] });
-      qc.invalidateQueries({ queryKey: ['leads-policies-list'] });
-      qc.invalidateQueries({ queryKey: ['claims'] });
-      qc.invalidateQueries({ queryKey: ['contact-activity'] });
+      if (leadInfoFields.interestedIn.length > 0 || editContactId) {
+        qc.invalidateQueries({ queryKey: ['leads'] });
+        qc.invalidateQueries({ queryKey: ['leads-policies-list'] });
+      }
+      if (createdPolicies.length > 0) {
+        qc.invalidateQueries({ queryKey: ['policies'] });
+        qc.invalidateQueries({ queryKey: ['contacts-policies-list'] });
+      }
       if (editContactId) {
         qc.invalidateQueries({ queryKey: ['contact-activity', editContactId] });
         qc.refetchQueries({ queryKey: ['contact-activity', editContactId] });
@@ -7421,7 +7494,7 @@ export default function Contacts() {
                         placeholder="Select or search State"
                         value={personalFields.state || ''}
                         options={INDIAN_STATES_AND_UTS}
-                        onChange={val => setPersonalFields(p => ({ ...p, state: val, district: '' }))}
+                        onChange={val => setPersonalFields(p => ({ ...p, state: val, ...(p.state !== val ? { district: '' } : {}) }))}
                       />
                     </div>
                     <div>
@@ -7438,6 +7511,7 @@ export default function Contacts() {
                       <label className="label text-[10px] font-extrabold text-slate-500 uppercase tracking-wider block mb-1">City / Town {isFieldRequired('city', false) && <span className="text-red-500">*</span>}</label>
                       <input
                         type="text"
+                        autoComplete="off"
                         className="input w-full focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 rounded-xl transition-all"
                         placeholder="e.g. Pune"
                         value={personalFields.city}
@@ -7448,6 +7522,7 @@ export default function Contacts() {
                       <label className="label text-[10px] font-extrabold text-slate-500 uppercase tracking-wider block mb-1">Pincode {isFieldRequired('pincode', false) && <span className="text-red-500">*</span>}</label>
                       <input
                         type="text"
+                        autoComplete="off"
                         className="input w-full focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 rounded-xl transition-all"
                         placeholder="000000"
                         value={personalFields.pincode}
@@ -7457,6 +7532,7 @@ export default function Contacts() {
                     <div className="col-span-3">
                       <label className="label text-[10px] font-extrabold text-slate-500 uppercase tracking-wider block mb-1">Street Address / House No {isFieldRequired('address', false) && <span className="text-red-500">*</span>}</label>
                       <textarea
+                        autoComplete="off"
                         className="input w-full text-xs focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 rounded-xl transition-all"
                         rows={2}
                         placeholder="Flat No, Street, Landmark..."

@@ -90,25 +90,14 @@ interface PhcPolicyRecord {
 
 // ── Helpers ──────────────────────────────────────────────────────────────────────
 const fmtCurr = (n: number) => `₹${Number(n).toLocaleString('en-IN')}`;
-const isFamilyPhcInProgress = (entry: any) =>
-  String(entry?.id || '').startsWith('family-phc-') &&
-  !/completed|settled/i.test(String(entry?.status || '')) &&
-  !Boolean(entry?.claimSettled);
-
-const isFamilyPhcCompleted = (entry: any) =>
-  String(entry?.id || '').startsWith('family-phc-') &&
-  (/completed|settled/i.test(String(entry?.status || '')) || Boolean(entry?.claimSettled));
-
-const isPrimaryPhcCompleted = (record: PhcPolicyRecord) => {
-  const baseCheckups = (record.allCheckups || []).filter(
-    (e: any) => !String(e.id || '').startsWith('family-phc-')
-  );
-  if (baseCheckups.length > 0) {
-    return baseCheckups.some((e: any) => /completed|settled/i.test(String(e.status || '')));
-  }
-  return record.phcStatus === 'Completed' || record.phcStatus === 'Fully Utilized';
-};
-
+const isPhcEntryCompleted = (entry: any) =>
+  /completed|settled|fully[\s_-]*utili[sz]ed/i.test(String(entry?.status || '')) || Boolean(entry?.claimSettled);
+const isPhcEntryCancelled = (entry: any) =>
+  /cancel|reject/i.test(String(entry?.status || ''));
+const isPhcEntryInProgress = (entry: any) =>
+  !isPhcEntryCompleted(entry) && !isPhcEntryCancelled(entry);
+const isPhcYearCompleted = (year?: PhcYearRecord | null) =>
+  year?.status === 'Completed' || year?.status === 'Fully Utilized';
 const STATUS_CFG: Record<PhcStatus, { bg: string; text: string; border: string; dot: string }> = {
   'Interested':       { bg: 'bg-amber-50',   text: 'text-amber-700',   border: 'border-amber-200',   dot: 'bg-amber-500' },
   'Partial Utilized': { bg: 'bg-blue-50',    text: 'text-blue-700',    border: 'border-blue-200',    dot: 'bg-blue-500' },
@@ -576,6 +565,7 @@ function enrichPhcRecord(r: PhcPolicyRecord, polNotes?: string): PhcPolicyRecord
         : stage;
     return {
       id: `family-phc-${r.id}-${allocation.id || index}`,
+      yearNo: allocation.yearNo || null,
       status: isCompleted
         ? 'Test Completed'
         : (displayStage || (allocation.appointmentDate ? 'Appointment Scheduled' : (allocation.bookingDate ? 'Test Booked' : 'Allocated'))),
@@ -668,6 +658,19 @@ function enrichPhcRecord(r: PhcPolicyRecord, polNotes?: string): PhcPolicyRecord
       : 'Annual';
   const years: PhcYearRecord[] = rawYears.map((yr, idx) => {
     const isCurrentYear = idx === (currentYearIndex >= 0 ? currentYearIndex : 0);
+    let yrEndDate = yr.endDate;
+    if (yr.startDate && yr.endDate) {
+      const sParts = yr.startDate.trim().split(' ');
+      const eParts = yr.endDate.trim().split(' ');
+      if (sParts.length === 3 && eParts.length === 3 && sParts[0] === eParts[0] && sParts[1].toLowerCase() === eParts[1].toLowerCase() && sParts[2] !== eParts[2]) {
+        const m: Record<string, number> = { Jan: 0, Feb: 1, Mar: 2, Apr: 3, May: 4, Jun: 5, Jul: 6, Aug: 7, Sep: 8, Oct: 9, Nov: 10, Dec: 11 };
+        const endD = new Date(parseInt(eParts[2], 10), m[eParts[1]], parseInt(eParts[0], 10));
+        if (!isNaN(endD.getTime())) {
+          endD.setDate(endD.getDate() - 1);
+          yrEndDate = endD.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+        }
+      }
+    }
     const yrEligible = Number.isFinite(yr.eligibleAmount) ? yr.eligibleAmount : eligibleAmount;
     const yrUtilized = Number.isFinite(yr.utilizedAmount)
       ? yr.utilizedAmount
@@ -690,14 +693,31 @@ function enrichPhcRecord(r: PhcPolicyRecord, polNotes?: string): PhcPolicyRecord
     const yrPersons = yr.insuredPersons && yr.insuredPersons.length > 0
       ? yr.insuredPersons
       : (idx === 0 || yr.isCurrent ? defaultInsuredPersons : []);
-    const currentYearPersons = [...yrPersons];
     const yearStartKey = normalizePhcDate(yr.startDate);
     const yearEndKey = normalizePhcDate(yr.endDate);
     const yearFamilyCheckups = familyCheckups.filter((entry: any) => {
+      if (entry.yearNo) return Number(entry.yearNo) === idx + 1;
       const eventDateKey = normalizePhcDate(entry.completedAt || entry.scheduledAt || entry.bookingDate);
       if (!eventDateKey) return idx === familyYearIndex;
       return eventDateKey >= yearStartKey && eventDateKey <= yearEndKey;
     });
+
+    const yearSpecificPrimary = idx > 0 ? extra?.phcYearDetails?.[idx + 1] : null;
+    const yearSpecificPrimaryUtilized = Math.max(0, Number(yearSpecificPrimary?.utilizedAmount) || 0);
+    const hasYearSpecificPrimary = Boolean(
+      yearSpecificPrimary && (
+        yearSpecificPrimaryUtilized > 0 ||
+        yearSpecificPrimary.bookingDate ||
+        yearSpecificPrimary.appointmentDate ||
+        yearSpecificPrimary.centreName ||
+        yearSpecificPrimary.reportReceivedDate ||
+        yearSpecificPrimary.settlementDate ||
+        (yearSpecificPrimary.phcStage && yearSpecificPrimary.phcStage !== 'TO_CONTACT')
+      ),
+    );
+    const hasYearSpecificNotesData = idx > 0 && (hasYearSpecificPrimary || yearFamilyCheckups.length > 0);
+    const currentYearPersons = hasYearSpecificNotesData ? [] : [...yrPersons];
+
     const familyPersonsByName = new Map<string, InsuredPerson>();
     yearFamilyCheckups.forEach((entry: any) => {
       const nameKey = normalizePersonName(String(entry.member?.name || ''));
@@ -730,9 +750,49 @@ function enrichPhcRecord(r: PhcPolicyRecord, polNotes?: string): PhcPolicyRecord
       }
     });
 
-    const baseCheckups = (yr.allCheckups && yr.allCheckups.length > 0)
-      ? yr.allCheckups
-      : ((idx === 0 || yr.isCurrent) && (yrUtilized > 0 || extra?.phcBookingDate || extra?.phcAppointmentDate || extra?.phcCentreName)
+    const yearSpecificPrimaryPersonName = yearSpecificPrimary?.insuredPersonName || r.customerName || 'Self';
+    if (hasYearSpecificPrimary) {
+      const pNameKey = normalizePersonName(yearSpecificPrimaryPersonName);
+      const existingPersonIdx = currentYearPersons.findIndex(p => normalizePersonName(p.name) === pNameKey);
+      if (existingPersonIdx >= 0) {
+        currentYearPersons[existingPersonIdx] = {
+          ...currentYearPersons[existingPersonIdx],
+          utilizedAmount: Math.max(currentYearPersons[existingPersonIdx].utilizedAmount, yearSpecificPrimaryUtilized),
+          phcCount: Math.max(currentYearPersons[existingPersonIdx].phcCount, 1),
+        };
+      } else {
+        currentYearPersons.push({
+          name: yearSpecificPrimaryPersonName,
+          relationship: 'Self',
+          utilizedAmount: yearSpecificPrimaryUtilized,
+          phcCount: 1,
+        });
+      }
+    }
+
+    const baseCheckups = hasYearSpecificNotesData
+      ? (hasYearSpecificPrimary && yearSpecificPrimary
+        ? [{
+            id: `checkup-${r.id}-y${idx + 1}`,
+            status: String(yearSpecificPrimary.phcStage || '').toUpperCase().includes('COMPLET')
+              ? 'Test Completed'
+              : (yearSpecificPrimary.appointmentDate ? 'Appointment Scheduled' : (yearSpecificPrimary.bookingDate ? 'Test Booked' : (yearSpecificPrimary.phcStage || 'To Contact'))),
+            bookingDate: yearSpecificPrimary.bookingDate || null,
+            scheduledAt: yearSpecificPrimary.appointmentDate || null,
+            completedAt: yearSpecificPrimary.reportReceivedDate || yearSpecificPrimary.settlementDate || null,
+            centreName: yearSpecificPrimary.centreName || 'N/A',
+            centreCity: yearSpecificPrimary.centreCity || 'N/A',
+            utilizedAmount: yearSpecificPrimaryUtilized,
+            reimbursementType: yearSpecificPrimary.reimbursementCashless || 'Cashless',
+            member: {
+              name: yearSpecificPrimaryPersonName,
+              relationship: 'Self'
+            }
+          }]
+        : [])
+      : ((yr.allCheckups && yr.allCheckups.length > 0)
+        ? yr.allCheckups
+        : ((idx === 0 || yr.isCurrent) && (yrUtilized > 0 || extra?.phcBookingDate || extra?.phcAppointmentDate || extra?.phcCentreName)
         ? [{
             id: `checkup-${r.id}`,
             status: extra?.phcStatus?.includes('COMPLET') ? 'Test Completed' : (extra?.phcAppointmentDate ? 'Appointment Scheduled' : (extra?.phcBookingDate ? 'Test Booked' : 'Completed')),
@@ -748,7 +808,7 @@ function enrichPhcRecord(r: PhcPolicyRecord, polNotes?: string): PhcPolicyRecord
               relationship: 'Self'
             }
           }]
-        : []);
+        : []));
     const checkupsWithoutFamilyDuplicates = baseCheckups.filter((entry: any) => !yearFamilyCheckups.some((allocation: any) => {
       const sameMember = normalizePersonName(String(entry.member?.name || '')) ===
         normalizePersonName(String(allocation.member?.name || ''));
@@ -765,7 +825,10 @@ function enrichPhcRecord(r: PhcPolicyRecord, polNotes?: string): PhcPolicyRecord
     const yrCheckups = [
       ...checkupsWithoutFamilyDuplicates,
       ...yearFamilyCheckups.filter((entry: any) => !checkupsWithoutFamilyDuplicates.some((existing: any) => existing.id === entry.id)),
-    ];
+    ].map((entry: any) => ({
+      ...entry,
+      yearNo: Number(entry.yearNo) || yr.yearNo || idx + 1,
+    }));
     const countedCheckups = yrCheckups.filter((entry: any) =>
       !String(entry.id || '').startsWith('family-phc-') || entry.countsAsPhc,
     );
@@ -773,24 +836,71 @@ function enrichPhcRecord(r: PhcPolicyRecord, polNotes?: string): PhcPolicyRecord
       (sum: number, entry: any) => sum + Math.max(0, Number(entry.utilizedAmount) || 0),
       0,
     );
-    const yearUtilizedAmount = Math.max(yrUtilized, checkupsUtilizedAmount);
+    const yearUtilizedAmount = hasYearSpecificNotesData
+      ? checkupsUtilizedAmount
+      : Math.max(yrUtilized, checkupsUtilizedAmount);
     const updatedBenefitPeriods = yr.benefitPeriods?.map(period => {
+      let periodEndDate = period.endDate;
+      if (period.startDate && period.endDate) {
+        const sParts = period.startDate.trim().split(' ');
+        const eParts = period.endDate.trim().split(' ');
+        if (sParts.length === 3 && eParts.length === 3 && sParts[0] === eParts[0] && sParts[1].toLowerCase() === eParts[1].toLowerCase() && sParts[2] !== eParts[2]) {
+          const m: Record<string, number> = { Jan: 0, Feb: 1, Mar: 2, Apr: 3, May: 4, Jun: 5, Jul: 6, Aug: 7, Sep: 8, Oct: 9, Nov: 10, Dec: 11 };
+          const endD = new Date(parseInt(eParts[2], 10), m[eParts[1]], parseInt(eParts[0], 10));
+          if (!isNaN(endD.getTime())) {
+            endD.setDate(endD.getDate() - 1);
+            periodEndDate = endD.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+          }
+        }
+      }
       const periodStartKey = normalizePhcDate(period.startDate);
-      const periodEndKey = normalizePhcDate(period.endDate);
+      const periodEndKey = normalizePhcDate(periodEndDate);
       const periodCheckups = countedCheckups.filter((entry: any) => {
+        if ((yr.benefitPeriods?.length || 0) === 1) return true;
         const eventDateKey = normalizePhcDate(entry.completedAt || entry.scheduledAt || entry.bookingDate || entry.createdAt);
-        return eventDateKey && eventDateKey >= periodStartKey && eventDateKey <= periodEndKey;
+        if (!eventDateKey) return false;
+        return eventDateKey >= periodStartKey && eventDateKey <= periodEndKey;
       });
-      return { ...period, phcCount: periodCheckups.length };
+      const periodUtilized = periodCheckups.reduce(
+        (sum: number, entry: any) => sum + Math.max(0, Number(entry.utilizedAmount) || 0),
+        0,
+      );
+      const finalPeriodUtilized = hasYearSpecificNotesData
+        ? periodUtilized
+        : Math.max(Number(period.utilizedAmount) || 0, periodUtilized);
+      const finalPeriodBalance = Math.max(0, (Number(period.eligibleAmount) || 0) - finalPeriodUtilized);
+      return {
+        ...period,
+        endDate: periodEndDate,
+        utilizedAmount: finalPeriodUtilized,
+        balanceAmount: finalPeriodBalance,
+        phcCount: periodCheckups.length,
+      };
     });
+
+    const computedYearBalance = Math.max(0, yrEligible - yearUtilizedAmount);
+    const finalYrStatus = hasYearSpecificNotesData
+      ? (yearSpecificPrimary?.claimSettled === 'yes' || String(yearSpecificPrimary?.phcStage || '').toUpperCase().includes('COMPLET')
+          ? 'Completed'
+          : (yearUtilizedAmount >= yrEligible && yrEligible > 0
+              ? 'Fully Utilized'
+              : (yearUtilizedAmount > 0 ? 'Partial Utilized' : 'Upcoming')))
+      : ((idx > 0 && (yearUtilizedAmount > 0 || countedCheckups.length > 0) && (!yrStatus || yrStatus === 'Upcoming'))
+          ? (yearUtilizedAmount >= yrEligible && yrEligible > 0
+              ? 'Fully Utilized'
+              : (yearUtilizedAmount > 0 ? 'Partial Utilized' : yrStatus))
+          : yrStatus);
 
     return {
       ...yr,
-      status: yrStatus,
+      endDate: yrEndDate,
+      status: finalYrStatus,
       eligibleAmount: yrEligible,
       utilizedAmount: yearUtilizedAmount,
-      balanceAmount: yrBalance,
-      phcCount: countedCheckups.length || (yrUtilized > 0 ? 1 : 0),
+      balanceAmount: computedYearBalance,
+      phcCount: hasYearSpecificNotesData
+        ? countedCheckups.length
+        : (countedCheckups.length || (yrUtilized > 0 ? 1 : 0)),
       insuredPersons: currentYearPersons,
       allCheckups: yrCheckups,
       benefitPeriods: updatedBenefitPeriods,
@@ -987,8 +1097,8 @@ export default function PhcTrackingView() {
   } = useQuery({
     queryKey: ['policies', 'phc-tracking'],
     queryFn: policiesService.getPhcTracking,
-    staleTime: 0,
-    refetchOnMount: 'always',
+    staleTime: 60 * 1000,
+    gcTime: 10 * 60 * 1000,
   });
   const phcData: PhcPolicyRecord[] = phcResponse?.data ?? [];
 
@@ -1110,20 +1220,35 @@ export default function PhcTrackingView() {
 
     if (activeTab === 'due-this-month') list = list.filter(p => p.phcStatus !== 'Completed' && p.phcStatus !== 'Fully Utilized' && (p.phcStatus === 'Due This Month' || (p.daysRemaining <= 30 && p.daysRemaining > 0)));
     else if (activeTab === 'upcoming') list = list.filter(p => {
-      const hasFamilyPhcEntry = (p.allCheckups || []).some(isFamilyPhcInProgress);
-      return hasFamilyPhcEntry ||
-        (p.phcStatus !== 'Completed' && p.phcStatus !== 'Fully Utilized' && (p.phcStatus === 'Upcoming' || p.daysRemaining > 30));
+      const selectedYear = phcYearFilter === 'All'
+        ? null
+        : p.years.find(year => year.label.startsWith(phcYearFilter));
+      const entries = (p.allCheckups || []).filter((entry: any) =>
+        !selectedYear || Number(entry.yearNo) === selectedYear.yearNo,
+      );
+      if (selectedYear) return entries.some(isPhcEntryInProgress) || (!entries.length && !isPhcYearCompleted(selectedYear));
+      return entries.length
+        ? entries.some(isPhcEntryInProgress)
+        : p.phcStatus !== 'Completed' && p.phcStatus !== 'Fully Utilized' && (p.phcStatus === 'Upcoming' || p.daysRemaining > 30);
     });
     else if (activeTab === 'completed') list = list.filter(p => {
-      const hasCompletedFamily = (p.allCheckups || []).some(isFamilyPhcCompleted);
-      return hasCompletedFamily || p.phcStatus === 'Completed' || p.phcStatus === 'Fully Utilized';
+      const selectedYear = phcYearFilter === 'All'
+        ? null
+        : p.years.find(year => year.label.startsWith(phcYearFilter));
+      const entries = (p.allCheckups || []).filter((entry: any) =>
+        !selectedYear || Number(entry.yearNo) === selectedYear.yearNo,
+      );
+      if (selectedYear) return entries.some(isPhcEntryCompleted) || (!entries.length && isPhcYearCompleted(selectedYear));
+      return entries.length
+        ? entries.some(isPhcEntryCompleted)
+        : p.phcStatus === 'Completed' || p.phcStatus === 'Fully Utilized';
     });
     
     if (policyTypeFilter !== 'All') {
       list = list.filter(p => p.companyType.toUpperCase() === policyTypeFilter.toUpperCase());
     }
     if (phcYearFilter !== 'All') {
-      list = list.filter(p => p.currentPhcYear.startsWith(phcYearFilter));
+      list = list.filter(p => p.years.some(year => year.label.startsWith(phcYearFilter)));
     }
     if (phcStatusFilter !== 'All') list = list.filter(p => p.phcStatus === phcStatusFilter);
     if (companyFilter !== 'All') list = list.filter(p => p.companyName === companyFilter || p.companyInitials === companyFilter);
@@ -1132,7 +1257,7 @@ export default function PhcTrackingView() {
       const q = searchQuery.toLowerCase();
       list = list.filter(p => p.policyNo.toLowerCase().includes(q) || p.customerName.toLowerCase().includes(q) || p.planName.toLowerCase().includes(q) || p.customerPhone.includes(q) ||
         ((activeTab === 'upcoming' || activeTab === 'completed') && (p.allCheckups || []).some((entry: any) =>
-          (activeTab === 'completed' ? isFamilyPhcCompleted(entry) : isFamilyPhcInProgress(entry)) &&
+          (activeTab === 'completed' ? isPhcEntryCompleted(entry) : isPhcEntryInProgress(entry)) &&
           String(entry.member?.name || '').toLowerCase().includes(q),
         )));
     }
@@ -1317,13 +1442,26 @@ export default function PhcTrackingView() {
   };
 
   const tableRows = useMemo(() => sortedFilteredData.flatMap(record => {
+    const matchesYear = (entry: any) => phcYearFilter === 'All' ||
+      Number(entry.yearNo) === Number(phcYearFilter.replace('Year ', ''));
+    const yearEntries = (record.allCheckups || []).filter(matchesYear);
+    const hasEntriesForYear = yearEntries.length > 0;
+    const selectedYear = phcYearFilter === 'All'
+      ? null
+      : record.years.find(year => year.label.startsWith(phcYearFilter));
+
     if (activeTab === 'completed') {
-      const completedFamilyEntries = (record.allCheckups || []).filter(isFamilyPhcCompleted);
+      const completedEntries = yearEntries.filter(isPhcEntryCompleted);
       const rows: { record: PhcPolicyRecord; id: string; familyEntry: any }[] = [];
-      if (isPrimaryPhcCompleted(record) || completedFamilyEntries.length === 0) {
+      const hasAnyCheckups = (record.allCheckups || []).length > 0;
+      if (completedEntries.length === 0 && (
+        selectedYear
+          ? !hasEntriesForYear && isPhcYearCompleted(selectedYear)
+          : !hasAnyCheckups && (record.phcStatus === 'Completed' || record.phcStatus === 'Fully Utilized')
+      )) {
         rows.push({ record, id: record.id, familyEntry: null as any });
       }
-      completedFamilyEntries.forEach((familyEntry: any) => {
+      completedEntries.forEach((familyEntry: any) => {
         rows.push({
           record,
           id: `${record.id}-${familyEntry.id}`,
@@ -1334,12 +1472,17 @@ export default function PhcTrackingView() {
     }
 
     if (activeTab === 'upcoming') {
-      const inProgressFamilyEntries = (record.allCheckups || []).filter(isFamilyPhcInProgress);
+      const inProgressEntries = yearEntries.filter(isPhcEntryInProgress);
       const rows: { record: PhcPolicyRecord; id: string; familyEntry: any }[] = [];
-      if (!isPrimaryPhcCompleted(record) || inProgressFamilyEntries.length === 0) {
+      const hasAnyCheckups = (record.allCheckups || []).length > 0;
+      if (inProgressEntries.length === 0 && (
+        selectedYear
+          ? !hasEntriesForYear && !isPhcYearCompleted(selectedYear)
+          : !hasAnyCheckups && record.phcStatus !== 'Completed' && record.phcStatus !== 'Fully Utilized'
+      )) {
         rows.push({ record, id: record.id, familyEntry: null as any });
       }
-      inProgressFamilyEntries.forEach((familyEntry: any) => {
+      inProgressEntries.forEach((familyEntry: any) => {
         rows.push({
           record,
           id: `${record.id}-${familyEntry.id}`,
@@ -1350,7 +1493,7 @@ export default function PhcTrackingView() {
     }
 
     return [{ record, id: record.id, familyEntry: null as any }];
-  }), [activeTab, sortedFilteredData]);
+  }), [activeTab, phcYearFilter, sortedFilteredData]);
 
   const paginatedData = useMemo(() => {
     const start = (currentPage - 1) * rowsPerPage;
@@ -1813,6 +1956,11 @@ export default function PhcTrackingView() {
               ) : paginatedData.length === 0 ? (
                 <tr><td colSpan={17} className="px-5 py-12 text-center text-slate-400 font-semibold">No PHC policies match the selected filters.</td></tr>
               ) : paginatedData.map(({ record: r, id: rowId, familyEntry }, idx) => {
+                const rowYear = familyEntry?.yearNo
+                  ? r.years.find(year => year.yearNo === Number(familyEntry.yearNo))
+                  : phcYearFilter === 'All'
+                    ? null
+                    : r.years.find(year => year.label.startsWith(phcYearFilter));
                 const resolvedCompanyType = (
                   r.companyType ||
                   (r.planName?.toLowerCase().includes('life') || r.planName?.toLowerCase().includes('jeevan') ? 'LIFE' : 'HEALTH')
@@ -1831,9 +1979,18 @@ export default function PhcTrackingView() {
                 let effBalance: number;
 
                 if (familyEntry) {
-                  effEligible = Number(familyEntry.allocatedAmount) || 0;
                   effUtilized = Number(familyEntry.utilizedAmount) || 0;
+                  if (String(familyEntry.id || '').startsWith('family-phc-')) {
+                    const allocatedAmount = Number(familyEntry.allocatedAmount) || 0;
+                    effEligible = allocatedAmount > 0 ? Math.max(allocatedAmount, effUtilized) : effUtilized;
+                  } else {
+                    effEligible = rowYear?.eligibleAmount || r.eligibleAmount || 0;
+                  }
                   effBalance = Math.max(0, effEligible - effUtilized);
+                } else if (rowYear) {
+                  effEligible = rowYear.eligibleAmount;
+                  effUtilized = rowYear.utilizedAmount;
+                  effBalance = rowYear.balanceAmount;
                 } else if (hasFamilyCheckups && totalFamilyAllocated > 0) {
                   const totalEligible = r.eligibleAmount > 0 ? r.eligibleAmount : (r.years?.[0]?.eligibleAmount || 5000);
                   effEligible = Math.max(0, totalEligible - totalFamilyAllocated);
@@ -1867,9 +2024,6 @@ export default function PhcTrackingView() {
                   <td className="px-3 py-3 border border-slate-200">
                     <span className="font-extrabold text-slate-900 text-xs transition-colors whitespace-nowrap">
                       {familyEntry?.member?.name || r.customerName}
-                      {familyEntry?.member?.relationship && familyEntry.member.relationship !== 'Self' && (
-                        <span className="ml-1.5 text-[10px] font-semibold text-slate-400">({familyEntry.member.relationship})</span>
-                      )}
                     </span>
                   </td>
                   <td className="px-3 py-3 border border-slate-200 whitespace-nowrap font-bold text-slate-800 text-xs">
@@ -1897,20 +2051,21 @@ export default function PhcTrackingView() {
                   <td className="px-3 py-3 border border-slate-200 whitespace-nowrap font-bold text-slate-800 text-xs">{r.policyEndDate || 'N/A'}</td>
                   <td className="px-3 py-3 border border-slate-200 whitespace-nowrap">
                     <span className={clsx('inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-extrabold border',
-                      r.currentPhcYear.includes('1') ? 'bg-amber-50 text-amber-700 border-amber-200' :
-                      r.currentPhcYear.includes('2') ? 'bg-blue-50 text-blue-700 border-blue-200' :
+                      (rowYear?.yearNo || Number(r.currentPhcYear.match(/\d+/)?.[0]) || 1) === 1 ? 'bg-amber-50 text-amber-700 border-amber-200' :
+                      (rowYear?.yearNo || Number(r.currentPhcYear.match(/\d+/)?.[0]) || 1) === 2 ? 'bg-blue-50 text-blue-700 border-blue-200' :
                       'bg-violet-50 text-violet-700 border-violet-200')}>
-                      {r.currentPhcYear.replace(' (Current)', '')} <span className="ml-1 text-[9px] opacity-70">(Current)</span>
+                      {rowYear?.label || r.currentPhcYear.replace(' (Current)', '')}
+                      {(rowYear?.isCurrent || (!rowYear && r.currentPhcYear.includes('(Current)'))) && <span className="ml-1 text-[9px] opacity-70">(Current)</span>}
                     </span>
                   </td>
-                  <td className="px-3 py-3 border border-slate-200 whitespace-nowrap font-bold text-slate-800 text-xs">{r.phcYearStartDate || 'N/A'}</td>
+                  <td className="px-3 py-3 border border-slate-200 whitespace-nowrap font-bold text-slate-800 text-xs">{rowYear?.startDate || r.phcYearStartDate || 'N/A'}</td>
                   <td className="px-3 py-3 border border-slate-200 whitespace-nowrap">
-                    <p className="text-slate-800 font-bold text-xs">{r.phcYearEndDate || 'N/A'}</p>
-                    {r.daysRemaining > 0 && <p className={clsx('text-[10px] font-bold', r.daysRemaining <= 30 ? 'text-rose-500' : 'text-slate-400')}>{r.daysRemaining} Days Remaining</p>}
+                    <p className="text-slate-800 font-bold text-xs">{rowYear?.endDate || r.phcYearEndDate || 'N/A'}</p>
+                    {(rowYear?.daysRemaining || (!rowYear && r.daysRemaining)) ? <p className={clsx('text-[10px] font-bold', (rowYear?.daysRemaining || r.daysRemaining) <= 30 ? 'text-rose-500' : 'text-slate-400')}>{rowYear?.daysRemaining || r.daysRemaining} Days Remaining</p> : null}
                   </td>
                   <td className="px-3 py-3 border border-slate-200 whitespace-nowrap">
                     {familyEntry
-                      ? (isFamilyPhcCompleted(familyEntry)
+                      ? (isPhcEntryCompleted(familyEntry)
                           ? <StatusBadge status="Completed" />
                           : <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-black border bg-amber-50 text-amber-700 border-amber-200">{familyEntry.status || 'Under Process'}</span>
                         )
@@ -1921,7 +2076,7 @@ export default function PhcTrackingView() {
                     {effUtilized > 0 ? (
                       <span className={clsx(
                         "inline-flex items-center px-1.5 py-0.5 rounded font-black border",
-                        (familyEntry ? isFamilyPhcCompleted(familyEntry) : (r.phcStatus === 'Completed' || r.phcStatus === 'Fully Utilized'))
+                        (familyEntry ? isPhcEntryCompleted(familyEntry) : (r.phcStatus === 'Completed' || r.phcStatus === 'Fully Utilized'))
                           ? "bg-emerald-50 text-emerald-700 border-emerald-200"
                           : "bg-amber-50 text-amber-700 border-amber-200"
                       )}>

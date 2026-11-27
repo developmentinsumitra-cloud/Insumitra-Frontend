@@ -535,6 +535,7 @@ export function parseExtraNotes(notesText?: string | null): Record<string, any> 
     phcFollowUpDate: '',
     phcComment: '',
     phcFamilyAllocations: [] as PhcFamilyAllocation[],
+    phcYearDetails: {} as Record<number, any>,
     nominees: [] as { name: string; relationship: string; contact: string; dob: string; sharePercent: number }[],
     connectedPersons: [] as { name: string; relationship: string; contact: string; dob: string; gender: string }[],
     policyStatus: '',
@@ -702,6 +703,28 @@ export function parseExtraNotes(notesText?: string | null): Record<string, any> 
       }
       if (Array.isArray(allocations)) res.phcFamilyAllocations = allocations;
       else cleanLines.push(line);
+    } else if (line.startsWith('PHC Year Details: ')) {
+      let yearDetailsText = line.replace(/^PHC Year Details:\s*/i, '').trim();
+      let parsedYearDetails: any = null;
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        try {
+          parsedYearDetails = JSON.parse(yearDetailsText);
+          if (typeof parsedYearDetails === 'string') {
+            yearDetailsText = parsedYearDetails;
+            continue;
+          }
+          break;
+        } catch {
+          const unescapedText = yearDetailsText.replace(/\\"/g, '"');
+          if (unescapedText === yearDetailsText) break;
+          yearDetailsText = unescapedText;
+        }
+      }
+      if (parsedYearDetails && typeof parsedYearDetails === 'object' && !Array.isArray(parsedYearDetails)) {
+        res.phcYearDetails = parsedYearDetails;
+      } else {
+        cleanLines.push(line);
+      }
     } else if (line.startsWith('PHC Insured Person: ')) {
       res.phcInsuredPerson = line.replace('PHC Insured Person: ', '').trim();
     } else if (line.startsWith('Insured Person for PHC: ')) {
@@ -916,7 +939,7 @@ const ExpandableComment = ({ text }: { text: string }) => {
       </span>
       
       {/* Custom Hover Tooltip */}
-      <div className="absolute z-[100] left-0 top-full mt-2 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 w-[300px] bg-slate-900 text-white text-xs rounded-xl p-3.5 shadow-2xl break-words whitespace-normal pointer-events-none border border-slate-700">
+      <div className="hidden group-hover:block absolute z-[100] left-0 top-full mt-2 w-[300px] bg-slate-900 text-white text-xs rounded-xl p-3.5 shadow-2xl break-words whitespace-normal pointer-events-none border border-slate-700">
         <div className="absolute -top-1.5 left-4 w-3 h-3 bg-slate-900 rotate-45 border-l border-t border-slate-700" />
         <span className="relative z-10 leading-relaxed block">{clean}</span>
       </div>
@@ -1096,7 +1119,10 @@ export default function Policies() {
   });
 
   const createClaimMutation = useCreateClaim();
-  const { data: allClaimsData } = useClaims({ page: 1, limit: 500 });
+  const { data: allClaimsData } = useClaims(
+    { page: 1, limit: 500 },
+    { enabled: Boolean(modalOpen && (activePolicyTab as string) === 'policyClaims') }
+  );
   const allClaimsList = allClaimsData?.data ?? [];
   const [selectedClaimDetail, setSelectedClaimDetail] = useState<any | null>(null);
   const [isManualSumAssured, setIsManualSumAssured] = useState(false);
@@ -1120,8 +1146,83 @@ export default function Policies() {
     phcStage: 'TO_CONTACT',
   });
   const [phcFamilyAllocations, setPhcFamilyAllocations] = useState<PhcFamilyAllocation[]>([]);
+  const [phcYearDetails, setPhcYearDetails] = useState<Record<number, Record<string, string>>>({});
+  const [phcYearCustomAllocations, setPhcYearCustomAllocations] = useState<Record<number, boolean>>({});
+  const [insuredPerson, setInsuredPerson] = useState<string>('');
   const [isCustomPhcPersonManual, setIsCustomPhcPersonManual] = useState(false);
   const [selectedPhcPolicyYear, setSelectedPhcPolicyYear] = useState(1);
+
+  const activePhcYearNo = selectedPhcPolicyYear || 1;
+  const activePhcDetails = activePhcYearNo === 1
+    ? phcExtraDetails
+    : {
+        ...phcExtraDetails,
+        utilizedAmount: '',
+        ...(phcYearDetails[activePhcYearNo] || {}),
+      };
+  const updateActivePhcDetails = (updater: (prev: typeof phcExtraDetails & { claimSettled?: string }) => typeof phcExtraDetails & { claimSettled?: string }) => {
+    if (activePhcYearNo === 1) {
+      setPhcExtraDetails(updater);
+    } else {
+      setPhcYearDetails(prev => {
+        const current = {
+          ...phcExtraDetails,
+          utilizedAmount: '',
+          ...(prev[activePhcYearNo] || {}),
+        };
+        const updated = updater(current);
+        return {
+          ...prev,
+          [activePhcYearNo]: {
+            insuredPersonName: updated.insuredPersonName || '',
+            bookingDate: updated.bookingDate || '',
+            appointmentDate: updated.appointmentDate || '',
+            centreName: updated.centreName || '',
+            centreCity: updated.centreCity || '',
+            utilizedAmount: updated.utilizedAmount || '',
+            reimbursementCashless: updated.reimbursementCashless || 'CASHLESS',
+            reportReceivedDate: updated.reportReceivedDate || '',
+            reportBillReceivedDate: updated.reportBillReceivedDate || '',
+            reportBillSubmittedDate: updated.reportBillSubmittedDate || '',
+            settlementDate: updated.settlementDate || '',
+            phcStage: updated.phcStage || 'TO_CONTACT',
+            ...(updated.claimSettled !== undefined ? { claimSettled: updated.claimSettled } : {}),
+          },
+        };
+      });
+    }
+  };
+  const cloneAllocationsForYear = useCallback((items: PhcFamilyAllocation[], targetYearNo: number): PhcFamilyAllocation[] => {
+    return items.map(item => ({
+      ...item,
+      id: `year-${targetYearNo}-${item.id}`,
+      yearNo: targetYearNo,
+      amount: 0,
+      utilizedAmount: 0,
+      children: Array.isArray(item.children) ? cloneAllocationsForYear(item.children, targetYearNo) : [],
+    }));
+  }, []);
+  const activeYearFamilyAllocations = useMemo(() => {
+    if (activePhcYearNo === 1) {
+      return phcFamilyAllocations.filter(a => !a.yearNo || a.yearNo === 1);
+    }
+    const savedForYear = phcFamilyAllocations.filter(a => a.yearNo === activePhcYearNo);
+    if (savedForYear.length > 0 || phcYearCustomAllocations[activePhcYearNo]) {
+      return savedForYear;
+    }
+    const baseYearAllocations = phcFamilyAllocations.filter(a => !a.yearNo || a.yearNo === 1);
+    return cloneAllocationsForYear(baseYearAllocations, activePhcYearNo);
+  }, [phcFamilyAllocations, activePhcYearNo, phcYearCustomAllocations, cloneAllocationsForYear]);
+  const setActiveYearFamilyAllocations = (nextForYear: PhcFamilyAllocation[]) => {
+    if (activePhcYearNo > 1) {
+      setPhcYearCustomAllocations(prev => ({ ...prev, [activePhcYearNo]: true }));
+    }
+    const tagged = nextForYear.map(a => ({ ...a, yearNo: activePhcYearNo }));
+    setPhcFamilyAllocations(prev => [
+      ...prev.filter(a => (a.yearNo ? a.yearNo !== activePhcYearNo : activePhcYearNo !== 1)),
+      ...tagged,
+    ]);
+  };
 
   const [isDocUploadModalOpen, setIsDocUploadModalOpen] = useState(false);
   const [pendingDocs, setPendingDocs] = useState<{ type: string; title: string; description: string; file: File }[]>([]);
@@ -1279,6 +1380,17 @@ export default function Policies() {
   const [editTarget, setEditTarget] = useState<Policy | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<Policy | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const {
+    data: phcPolicyDetailsResponse,
+    isError: isPhcPolicyDetailsError,
+    isLoading: isPhcPolicyDetailsLoading,
+    refetch: refetchPhcPolicyDetails,
+  } = useQuery({
+    queryKey: ['policy-phc-card-details', editTarget?.id],
+    queryFn: () => policiesService.get(editTarget!.id),
+    enabled: Boolean(modalOpen && editTarget?.id && activePolicyTab === 'phcDetails'),
+  });
+  const phcPolicyDetails = phcPolicyDetailsResponse?.data || phcPolicyDetailsResponse;
 
   // Search & Filter States
   const [search, setSearch] = useState(() => searchParams.get('search') || searchParams.get('q') || '');
@@ -1369,12 +1481,14 @@ export default function Policies() {
     queryKey: ['employees-list'],
     queryFn: () => employeesService.list({ limit: 100 }),
     enabled: !!user,
+    staleTime: 5 * 60 * 1000,
   });
 
   const { data: agencyRes } = useQuery({
     queryKey: ['agency-details'],
     queryFn: () => agencyDetailsService.findAll(),
     enabled: !!user,
+    staleTime: 5 * 60 * 1000,
   });
 
   const exportPoliciesToExcel = () => {
@@ -1575,6 +1689,7 @@ export default function Policies() {
   const { data: allPlansRes } = useQuery({
     queryKey: ['all-plans-list-picker'],
     queryFn: () => policiesService.plans(),
+    staleTime: 5 * 60 * 1000,
   });
   const plansList = allPlansRes?.data ?? [];
 
@@ -1653,12 +1768,6 @@ export default function Policies() {
     const fromPlans = plansList.map((p: any) => p.company?.name).filter(Boolean);
     return Array.from(new Set([...PRIMARY_DEFAULT_COMPANIES, ...fromPlans])).filter(Boolean) as string[];
   }, [plansList]);
-
-  const { data: claimsResults } = useQuery({
-    queryKey: ['claims', 'all-for-policies-list'],
-    queryFn: () => claimsService.list({ limit: 1000 }),
-  });
-  const allClaims = claimsResults?.data ?? [];
 
   // Fetch policies: get all in 1 query for client-side filtering (0 ops)
   const { data, isLoading } = usePolicies({ limit: 2000 });
@@ -2228,6 +2337,7 @@ export default function Policies() {
   const { data: compulsoryRulesRes, isLoading: isLoadingRules } = useQuery({
     queryKey: ['compulsory-rules'],
     queryFn: () => insuranceService.getCompulsoryRules(),
+    staleTime: 5 * 60 * 1000,
   });
   const compulsoryRules = useMemo(() => compulsoryRulesRes?.data ?? [], [compulsoryRulesRes]);
 
@@ -2527,6 +2637,9 @@ export default function Policies() {
     const policyStart = parseDate(watchStartDate);
     const policyEnd = parseDate(watchEndDate);
     if (!policyStart || !policyEnd || policyEnd < policyStart) return [];
+    const policyHealthCheckups = phcPolicyDetails && phcPolicyDetails.id === editTarget?.id && Array.isArray(phcPolicyDetails.healthCheckups)
+      ? phcPolicyDetails.healthCheckups
+      : [];
 
     const eligibilityStart = parseDate(phcExtraDetails.eligibilityStartDate);
     const effectiveEligibilityStart = eligibilityStart && eligibilityStart > policyStart ? eligibilityStart : policyStart;
@@ -2563,11 +2676,12 @@ export default function Policies() {
       const nextYearStart = new Date(policyStart.getFullYear() + yearNo, policyStart.getMonth(), policyStart.getDate());
       const yearEnd = new Date(nextYearStart);
       yearEnd.setDate(yearEnd.getDate() - 1);
-      const actualEnd = yearNo === totalYears ? policyEnd : yearEnd;
+      const actualEnd = (yearNo === totalYears && policyEnd < yearEnd) ? policyEnd : yearEnd;
       const eligibleStartForYear = effectiveEligibilityStart > yearStart ? effectiveEligibilityStart : yearStart;
       const isEligible = eligibleStartForYear <= actualEnd;
       const familyAllocationsForYear = allocations.filter(allocation => {
         if (!allocation.personName?.trim() || !isEligible) return false;
+        if (allocation.yearNo) return allocation.yearNo === yearNo;
         const eventDate = parseDate(
           allocation.appointmentDate ||
           allocation.bookingDate ||
@@ -2577,59 +2691,124 @@ export default function Policies() {
         if (eventDate) return eventDate >= eligibleStartForYear && eventDate <= actualEnd;
         return effectiveEligibilityStart >= yearStart && effectiveEligibilityStart <= actualEnd;
       });
-      const familyUtilizedAmount = familyAllocationsForYear.reduce(
-        (sum, allocation) => sum + Math.max(0, Number(allocation.utilizedAmount) || 0),
-        0,
-      );
+      const checkupsForYear = policyHealthCheckups.filter((checkup: any) => {
+        const eventDate = parseDate(checkup.completedAt || checkup.scheduledAt || checkup.bookingDate || checkup.createdAt);
+        return Boolean(eventDate && eventDate >= eligibleStartForYear && eventDate <= actualEnd);
+      });
+      const normalizePersonName = (name: string) =>
+        name.replace(/\s*\([^)]*\)\s*$/, '').replace(/\s+/g, ' ').trim().toLowerCase();
+      const normalizeEventDate = (value?: string | Date | null) => {
+        const parsed = parseDate(value);
+        return parsed ? dateKey(parsed) : '';
+      };
+      const contactFullName = selectedContact
+        ? [selectedContact.firstName, (selectedContact as any).middleName, selectedContact.lastName].filter(Boolean).join(' ').trim()
+        : '';
       const isCurrentYear = currentDate >= yearStart && currentDate <= actualEnd;
-      const includePrimaryUtilized = isEligible && (
-        phcActivityDate
-          ? phcActivityDate >= eligibleStartForYear && phcActivityDate <= actualEnd
-          : isCurrentYear || (!hasCurrentPolicyYear && yearNo === 1)
-      );
+      const yearSpecificDetails = yearNo === 1 ? phcExtraDetails : phcYearDetails[yearNo];
+      const includePrimaryUtilized = yearNo === 1
+        ? isEligible && (
+            phcActivityDate
+              ? phcActivityDate >= eligibleStartForYear && phcActivityDate <= actualEnd
+              : isCurrentYear || !hasCurrentPolicyYear
+          )
+        : isEligible && Boolean(yearSpecificDetails);
       const primaryPersonName = (
-        phcExtraDetails.insuredPersonName ||
-        insuredPerson ||
-        (selectedContact ? `${selectedContact.firstName || ''} ${selectedContact.lastName || ''}`.trim() : '')
+        yearSpecificDetails?.insuredPersonName ||
+        (yearNo === 1 ? insuredPerson : '') ||
+        contactFullName
       ).trim();
-      const primaryUtilizedAmount = Math.max(0, Number(phcExtraDetails.utilizedAmount) || 0);
+      const primaryUtilizedAmount = Math.max(0, Number(yearSpecificDetails?.utilizedAmount) || 0);
       const hasPrimaryPhcActivity = Boolean(
-        primaryUtilizedAmount > 0 ||
-        phcExtraDetails.bookingDate ||
-        phcExtraDetails.appointmentDate ||
-        phcExtraDetails.reportReceivedDate ||
-        phcExtraDetails.settlementDate ||
-        (phcExtraDetails.phcStage && phcExtraDetails.phcStage !== 'TO_CONTACT'),
+        yearSpecificDetails && (
+          primaryUtilizedAmount > 0 ||
+          yearSpecificDetails.bookingDate ||
+          yearSpecificDetails.appointmentDate ||
+          yearSpecificDetails.reportReceivedDate ||
+          yearSpecificDetails.settlementDate ||
+          (yearSpecificDetails.phcStage && yearSpecificDetails.phcStage !== 'TO_CONTACT')
+        ),
       );
-      const familyMembers = [...familyAllocationsForYear];
-      if (primaryPersonName && hasPrimaryPhcActivity && includePrimaryUtilized) {
+      const checkupEntries = checkupsForYear
+        .filter((checkup: any) => !(hasPrimaryPhcActivity && includePrimaryUtilized && !checkup.memberId && !checkup.member?.name))
+        .map((checkup: any): PhcFamilyAllocation => {
+          const memberName = checkup.member?.name ||
+            primaryPersonName ||
+            contactFullName ||
+            insuredPerson ||
+            'Self';
+          const utilizedAmount = Math.max(0, Number(checkup.utilizedAmount) || 0);
+          const formatEventDate = (value?: string | Date | null) => {
+            const parsed = parseDate(value);
+            return parsed ? format(parsed, 'yyyy-MM-dd') : '';
+          };
+          return {
+            id: `health-checkup-${checkup.id}`,
+            yearNo,
+            personName: memberName,
+            amount: utilizedAmount,
+            utilizedAmount,
+            bookingDate: formatEventDate(checkup.bookingDate),
+            appointmentDate: formatEventDate(checkup.scheduledAt),
+            centreName: checkup.centreName || '',
+            centreCity: checkup.centreCity || '',
+            reimbursementCashless: checkup.reimbursementType || 'CASHLESS',
+            reportReceivedDate: formatEventDate(checkup.completedAt),
+            reportBillReceivedDate: '',
+            reportBillSubmittedDate: '',
+            settlementDate: '',
+            phcStage: checkup.status || 'TO_CONTACT',
+            claimSettled: /settled/i.test(String(checkup.status || '')),
+            children: [],
+          };
+        })
+        .filter((checkupEntry: PhcFamilyAllocation) => !familyAllocationsForYear.some(allocation => {
+          if (normalizePersonName(allocation.personName) !== normalizePersonName(checkupEntry.personName)) return false;
+          return Boolean(
+            (normalizeEventDate(allocation.bookingDate) && normalizeEventDate(allocation.bookingDate) === normalizeEventDate(checkupEntry.bookingDate)) ||
+            (normalizeEventDate(allocation.appointmentDate) && normalizeEventDate(allocation.appointmentDate) === normalizeEventDate(checkupEntry.appointmentDate)),
+          );
+        }));
+      const hasYearSpecificNotesData = yearNo > 1 && (hasPrimaryPhcActivity || familyAllocationsForYear.length > 0);
+      const familyMembers = hasYearSpecificNotesData
+        ? [...familyAllocationsForYear]
+        : [...familyAllocationsForYear, ...checkupEntries];
+      const normalizedPrimaryName = normalizePersonName(primaryPersonName);
+      const hasPrimaryCheckup = hasYearSpecificNotesData
+        ? false
+        : Boolean(normalizedPrimaryName && checkupEntries.some((checkupEntry: PhcFamilyAllocation) =>
+            normalizePersonName(checkupEntry.personName) === normalizedPrimaryName
+          ));
+      if (primaryPersonName && hasPrimaryPhcActivity && includePrimaryUtilized && !hasPrimaryCheckup && yearSpecificDetails) {
         const primaryEntry: PhcFamilyAllocation = {
           id: `primary-phc-${yearNo}`,
+          yearNo,
           personName: primaryPersonName,
           amount: primaryUtilizedAmount,
           utilizedAmount: primaryUtilizedAmount,
-          bookingDate: phcExtraDetails.bookingDate,
-          appointmentDate: phcExtraDetails.appointmentDate,
-          centreName: phcExtraDetails.centreName,
-          centreCity: phcExtraDetails.centreCity,
-          reimbursementCashless: phcExtraDetails.reimbursementCashless,
-          reportReceivedDate: phcExtraDetails.reportReceivedDate,
-          reportBillReceivedDate: phcExtraDetails.reportBillReceivedDate,
-          reportBillSubmittedDate: phcExtraDetails.reportBillSubmittedDate,
-          settlementDate: phcExtraDetails.settlementDate,
-          phcStage: phcExtraDetails.phcStage,
+          bookingDate: yearSpecificDetails.bookingDate || '',
+          appointmentDate: yearSpecificDetails.appointmentDate || '',
+          centreName: yearSpecificDetails.centreName || '',
+          centreCity: yearSpecificDetails.centreCity || '',
+          reimbursementCashless: yearSpecificDetails.reimbursementCashless || 'CASHLESS',
+          reportReceivedDate: yearSpecificDetails.reportReceivedDate || '',
+          reportBillReceivedDate: yearSpecificDetails.reportBillReceivedDate || '',
+          reportBillSubmittedDate: yearSpecificDetails.reportBillSubmittedDate || '',
+          settlementDate: yearSpecificDetails.settlementDate || '',
+          phcStage: yearSpecificDetails.phcStage || 'TO_CONTACT',
           claimSettled: false,
           children: [],
         };
-        const normalizedPrimaryName = primaryPersonName.trim().replace(/\s+/g, ' ').toLowerCase();
         const existingIndex = familyMembers.findIndex(
-          member => member.personName.trim().replace(/\s+/g, ' ').toLowerCase() === normalizedPrimaryName,
+          member => normalizePersonName(member.personName) === normalizedPrimaryName,
         );
         if (existingIndex >= 0) {
           const existing = familyMembers[existingIndex];
           familyMembers[existingIndex] = {
             ...existing,
-            utilizedAmount: (Number(existing.utilizedAmount) || 0) + primaryUtilizedAmount,
+            utilizedAmount: String(existing.id || '').startsWith('health-checkup-')
+              ? Math.max(Number(existing.utilizedAmount) || 0, primaryUtilizedAmount)
+              : (Number(existing.utilizedAmount) || 0) + primaryUtilizedAmount,
             bookingDate: existing.bookingDate || primaryEntry.bookingDate,
             appointmentDate: existing.appointmentDate || primaryEntry.appointmentDate,
             phcStage: existing.phcStage === 'TO_CONTACT' ? primaryEntry.phcStage : existing.phcStage,
@@ -2638,8 +2817,9 @@ export default function Policies() {
           familyMembers.unshift(primaryEntry);
         }
       }
-      const utilizedAmount = familyUtilizedAmount + (
-        includePrimaryUtilized ? primaryUtilizedAmount : 0
+      const utilizedAmount = familyMembers.reduce(
+        (sum, member) => sum + Math.max(0, Number(member.utilizedAmount) || 0),
+        0,
       );
       years.push({ yearNo, startDate: yearStart, endDate: actualEnd, isEligible, familyMembers, utilizedAmount });
     }
@@ -2659,7 +2839,13 @@ export default function Policies() {
     phcExtraDetails.appointmentDate,
     phcExtraDetails.bookingDate,
     phcExtraDetails.utilizedAmount,
+    phcExtraDetails.insuredPersonName,
+    insuredPerson,
+    selectedContact,
     phcFamilyAllocations,
+    phcYearDetails,
+    phcPolicyDetails,
+    editTarget?.id,
   ]);
 
   useEffect(() => {
@@ -2669,7 +2855,6 @@ export default function Policies() {
   }, [activePolicyTab, isHealthPolicy]);
   const [durationYears, setDurationYears] = useState<number>(1);
   const [policyTerm, setPolicyTerm] = useState<string>('1 Year');
-  const [insuredPerson, setInsuredPerson] = useState<string>('');
   const [ageAtEntry, setAgeAtEntry] = useState<string>('');
   const [ageAtLastPremium, setAgeAtLastPremium] = useState<string>('');
   const [ageAtMaturity, setAgeAtMaturity] = useState<string>('');
@@ -2831,7 +3016,28 @@ export default function Policies() {
       }
     });
 
-    const current = (phcExtraDetails.insuredPersonName || '').trim();
+    const appendContactRel = (rel: any, isDirect: boolean) => {
+      const member = isDirect ? (rel?.relatedContact || rel?.contact || rel) : (rel?.primaryContact || rel?.contact || rel);
+      if (!member) return;
+      const name = [member.firstName, member.middleName, member.lastName]
+        .filter(Boolean)
+        .join(' ')
+        .trim() || (member.name || '').trim();
+      if (!name || seen.has(name.toLowerCase())) return;
+      seen.add(name.toLowerCase());
+      const rawRelType = String(rel?.relationshipType || rel?.relation || rel?.relType || rel?.relationship || member.relationshipType || member.relation || '');
+      const relLabel = formatPolicyRelationship(rawRelType, member.gender, isDirect);
+      list.push({
+        value: name,
+        label: `${name} (${relLabel || 'Member'})`,
+        sublabel: relLabel ? `Relationship: ${relLabel}` : 'Family Member',
+      });
+    };
+    ((selectedContact as any)?.relationships || []).forEach((rel: any) => appendContactRel(rel, true));
+    ((selectedContact as any)?.relatedTo || []).forEach((rel: any) => appendContactRel(rel, false));
+    ((selectedContact as any)?.familyMembers || []).forEach((rel: any) => appendContactRel(rel, true));
+
+    const current = (activePhcDetails.insuredPersonName || phcExtraDetails.insuredPersonName || '').trim();
     if (current && !seen.has(current.toLowerCase())) {
       list.push({
         value: current,
@@ -2841,23 +3047,57 @@ export default function Policies() {
     }
 
     return list;
-  }, [insuredPerson, selectedContact, connectedPersons, phcExtraDetails.insuredPersonName]);
+  }, [insuredPerson, selectedContact, connectedPersons, phcExtraDetails.insuredPersonName, activePhcDetails.insuredPersonName]);
 
   const phcFamilyMemberOptions = useMemo(() => {
+    const list: { value: string; label: string; sublabel?: string }[] = [];
     const seen = new Set<string>();
-    return connectedPersons.reduce<{ value: string; label: string; sublabel?: string }[]>((options, person) => {
+
+    const primary = (insuredPerson || (selectedContact ? `${selectedContact.firstName || ''} ${selectedContact.lastName || ''}`.trim() : '')).trim();
+    if (primary) {
+      list.push({
+        value: primary,
+        label: `${primary} (Self / Primary)`,
+        sublabel: 'Primary Insured Person',
+      });
+      seen.add(primary.toLowerCase());
+    }
+
+    connectedPersons.forEach((person) => {
       const name = (person.name || '').trim();
       const key = name.toLowerCase();
-      if (!name || seen.has(key)) return options;
+      if (!name || seen.has(key)) return;
       seen.add(key);
-      options.push({
+      list.push({
         value: name,
         label: `${name} (${person.relationship || 'Member'})`,
         sublabel: person.relationship ? `Relationship: ${person.relationship}` : 'Family Member',
       });
-      return options;
-    }, []);
-  }, [connectedPersons]);
+    });
+
+    const appendContactRel = (rel: any, isDirect: boolean) => {
+      const member = isDirect ? (rel?.relatedContact || rel?.contact || rel) : (rel?.primaryContact || rel?.contact || rel);
+      if (!member) return;
+      const name = [member.firstName, member.middleName, member.lastName]
+        .filter(Boolean)
+        .join(' ')
+        .trim() || (member.name || '').trim();
+      if (!name || seen.has(name.toLowerCase())) return;
+      seen.add(name.toLowerCase());
+      const rawRelType = String(rel?.relationshipType || rel?.relation || rel?.relType || rel?.relationship || member.relationshipType || member.relation || '');
+      const relLabel = formatPolicyRelationship(rawRelType, member.gender, isDirect);
+      list.push({
+        value: name,
+        label: `${name} (${relLabel || 'Member'})`,
+        sublabel: relLabel ? `Relationship: ${relLabel}` : 'Family Member',
+      });
+    };
+    ((selectedContact as any)?.relationships || []).forEach((rel: any) => appendContactRel(rel, true));
+    ((selectedContact as any)?.relatedTo || []).forEach((rel: any) => appendContactRel(rel, false));
+    ((selectedContact as any)?.familyMembers || []).forEach((rel: any) => appendContactRel(rel, true));
+
+    return list;
+  }, [insuredPerson, selectedContact, connectedPersons]);
 
   const syncContactFamilyMembers = useCallback((contact: any) => {
     if (!contact) return;
@@ -3082,6 +3322,8 @@ export default function Policies() {
       phcStage: 'TO_CONTACT',
     });
     setPhcFamilyAllocations([]);
+    setPhcYearDetails({});
+    setPhcYearCustomAllocations({});
     setIsCustomPhcPersonManual(false);
     setKeepCreateOpen(false);
     setEmiComment('');
@@ -3293,6 +3535,8 @@ export default function Policies() {
       }));
     }
     setPhcFamilyAllocations(Array.isArray(extra.phcFamilyAllocations) ? extra.phcFamilyAllocations : []);
+    setPhcYearDetails(extra.phcYearDetails && typeof extra.phcYearDetails === 'object' ? extra.phcYearDetails : {});
+    setPhcYearCustomAllocations({});
 
     const dateBasedTenure = getPolicyDurationYears(p.startDate, p.endDate);
     const parsedTenureNum = parseInt((extra.policyTenure || '').replace(/\D/g, ''), 10);
@@ -4128,7 +4372,7 @@ export default function Policies() {
     });
 
     return cols;
-  }, [user?.role, data, allClaims, isColVisibleInSettings, allPolicyColumnsConfig]);
+  }, [user?.role, data, isColVisibleInSettings, allPolicyColumnsConfig]);
 
   const submitEdit = async (body: EditForm) => {
     if (!editTarget) return;
@@ -4187,6 +4431,7 @@ export default function Policies() {
       }
       extraNotes += `\nPHC Balance Amount: ₹${balanceNum}`;
       if (phcFamilyAllocations.length > 0) extraNotes += `\nPHC Family Allocations: ${JSON.stringify(phcFamilyAllocations)}`;
+      if (Object.keys(phcYearDetails).length > 0) extraNotes += `\nPHC Year Details: ${JSON.stringify(phcYearDetails)}`;
       if (phcExtraDetails.bookingDate) extraNotes += `\nPHC Booking Date: ${phcExtraDetails.bookingDate}`;
       if (phcExtraDetails.appointmentDate) extraNotes += `\nPHC Appointment Date: ${phcExtraDetails.appointmentDate}`;
       if (phcExtraDetails.centreName) extraNotes += `\nPHC Centre / Lab Name: ${phcExtraDetails.centreName}`;
@@ -4488,6 +4733,7 @@ export default function Policies() {
         }
         extraNotes += `\nPHC Balance Amount: ₹${balanceNum}`;
         if (phcFamilyAllocations.length > 0) extraNotes += `\nPHC Family Allocations: ${JSON.stringify(phcFamilyAllocations)}`;
+      if (Object.keys(phcYearDetails).length > 0) extraNotes += `\nPHC Year Details: ${JSON.stringify(phcYearDetails)}`;
         if (phcExtraDetails.bookingDate) extraNotes += `\nPHC Booking Date: ${phcExtraDetails.bookingDate}`;
         if (phcExtraDetails.appointmentDate) extraNotes += `\nPHC Appointment Date: ${phcExtraDetails.appointmentDate}`;
         if (phcExtraDetails.centreName) extraNotes += `\nPHC Centre / Lab Name: ${phcExtraDetails.centreName}`;
@@ -4550,7 +4796,7 @@ export default function Policies() {
       if (editTarget?.id) {
         await updatePolicy.mutateAsync({ id: editTarget.id, body: cleanedBody as any });
         const failedDocumentUploads: string[] = [];
-        for (const doc of pendingDocs) {
+        const docUploadPromises = pendingDocs.map(async doc => {
           try {
             await documentsService.upload(doc.file, {
               policyId: editTarget.id,
@@ -4562,47 +4808,44 @@ export default function Policies() {
             console.error(`[Document Upload Error] ${doc.title}`, uploadErr);
             failedDocumentUploads.push(doc.title);
           }
-        }
-        if (Array.isArray((editTarget as any).members)) {
-          for (const oldM of (editTarget as any).members) {
-            const stillExists = uniqueConnectedPersons.some(
-              p => p.name.trim().toLowerCase() === (oldM.name || '').trim().toLowerCase()
-            );
-            if (!stillExists && oldM.id) {
-              try {
-                await policiesService.removeMember(editTarget.id, oldM.id);
-              } catch { /* ignore */ }
-            }
-          }
-        }
-        for (const person of uniqueConnectedPersons) {
-          if (person.name.trim()) {
+        });
+
+        const removeMemberPromises = Array.isArray((editTarget as any).members)
+          ? (editTarget as any).members
+              .filter((oldM: any) => !uniqueConnectedPersons.some(p => p.name.trim().toLowerCase() === (oldM.name || '').trim().toLowerCase()) && oldM.id)
+              .map((oldM: any) => policiesService.removeMember(editTarget.id, oldM.id).catch(() => {}))
+          : [];
+
+        const memberPromises = uniqueConnectedPersons.map(async person => {
+          if (!person.name.trim()) return;
+          try {
+            await policiesService.addMember(editTarget.id, {
+              name: person.name.trim(),
+              relationship: person.relationship || 'Spouse',
+              dateOfBirth: person.dob ? new Date(person.dob).toISOString() : undefined,
+              gender: person.gender || 'MALE',
+            });
+          } catch { /* ignore */ }
+          if (person.isNominee) {
             try {
-              await policiesService.addMember(editTarget.id, {
-                name: person.name.trim(),
-                relationship: person.relationship || 'Spouse',
-                dateOfBirth: person.dob ? new Date(person.dob).toISOString() : undefined,
-                gender: person.gender || 'MALE',
+              await policiesService.addNominee(editTarget.id, {
+                name: person.nomineeName?.trim() || person.name.trim(),
+                relationship: person.nomineeRelation || person.relationship || 'Other',
+                sharePercent: Number(person.nomineePercentage) || 100,
+                dateOfBirth: (person.nomineeDob || person.dob) ? new Date(person.nomineeDob || person.dob).toISOString() : undefined,
+                phone: (() => {
+                  const digits = (cleanConnectedPhone(person.nomineeContact) || (
+                    (!person.nomineeName || person.nomineeName.trim().toLowerCase() === person.name.trim().toLowerCase()) ? cleanConnectedPhone(person.contactNo) : ''
+                  )).replace(/\D/g, '');
+                  return digits.length === 10 ? digits : undefined;
+                })(),
               });
             } catch { /* ignore */ }
-            if (person.isNominee) {
-              try {
-                await policiesService.addNominee(editTarget.id, {
-                  name: person.nomineeName?.trim() || person.name.trim(),
-                  relationship: person.nomineeRelation || person.relationship || 'Other',
-                  sharePercent: Number(person.nomineePercentage) || 100,
-                  dateOfBirth: (person.nomineeDob || person.dob) ? new Date(person.nomineeDob || person.dob).toISOString() : undefined,
-                  phone: (() => {
-                    const digits = (cleanConnectedPhone(person.nomineeContact) || (
-                      (!person.nomineeName || person.nomineeName.trim().toLowerCase() === person.name.trim().toLowerCase()) ? cleanConnectedPhone(person.contactNo) : ''
-                    )).replace(/\D/g, '');
-                    return digits.length === 10 ? digits : undefined;
-                  })(),
-                });
-              } catch { /* ignore */ }
-            }
           }
-        }
+        });
+
+        await Promise.all([...docUploadPromises, ...removeMemberPromises, ...memberPromises]);
+
         qc.invalidateQueries({ queryKey: ['contacts'] });
         qc.invalidateQueries({ queryKey: ['policies'] });
         qc.invalidateQueries({ queryKey: ['policy', editTarget.id] });
@@ -4618,8 +4861,9 @@ export default function Policies() {
       const res = await createPolicy.mutateAsync(cleanedBody as any);
       const createdPolicy = res?.data ?? res;
       const failedDocumentUploads: string[] = [];
-      for (const doc of pendingDocs) {
-        if (createdPolicy?.id) {
+
+      if (createdPolicy?.id) {
+        const createDocPromises = pendingDocs.map(async doc => {
           try {
             await documentsService.upload(doc.file, {
               policyId: createdPolicy.id,
@@ -4631,40 +4875,40 @@ export default function Policies() {
             console.error(`[Document Upload Error] ${doc.title}`, uploadErr);
             failedDocumentUploads.push(doc.title);
           }
-        }
-      }
-      if (createdPolicy?.id) {
-        for (const person of uniqueConnectedPersons) {
-          if (person.name.trim()) {
+        });
+
+        const createMemberPromises = uniqueConnectedPersons.map(async person => {
+          if (!person.name.trim()) return;
+          try {
+            await policiesService.addMember(createdPolicy.id, {
+              name: person.name.trim(),
+              relationship: person.relationship || 'Spouse',
+              dateOfBirth: person.dob ? new Date(person.dob).toISOString() : undefined,
+              gender: person.gender || 'MALE',
+            });
+          } catch { /* ignore */ }
+          if (person.isNominee) {
             try {
-              await policiesService.addMember(createdPolicy.id, {
-                name: person.name.trim(),
-                relationship: person.relationship || 'Spouse',
-                dateOfBirth: person.dob ? new Date(person.dob).toISOString() : undefined,
-                gender: person.gender || 'MALE',
+              await policiesService.addNominee(createdPolicy.id, {
+                name: person.nomineeName?.trim() || person.name.trim(),
+                relationship: person.nomineeRelation || person.relationship || 'Other',
+                sharePercent: Number(person.nomineePercentage) || 100,
+                dateOfBirth: (person.nomineeDob || person.dob) ? new Date(person.nomineeDob || person.dob).toISOString() : undefined,
+                phone: (() => {
+                  const digits = (cleanConnectedPhone(person.nomineeContact) || (
+                    (!person.nomineeName || person.nomineeName.trim().toLowerCase() === person.name.trim().toLowerCase()) ? cleanConnectedPhone(person.contactNo) : ''
+                  )).replace(/\D/g, '');
+                  return digits.length === 10 ? digits : undefined;
+                })(),
               });
             } catch { /* ignore */ }
-            if (person.isNominee) {
-              try {
-                await policiesService.addNominee(createdPolicy.id, {
-                  name: person.nomineeName?.trim() || person.name.trim(),
-                  relationship: person.nomineeRelation || person.relationship || 'Other',
-                  sharePercent: Number(person.nomineePercentage) || 100,
-                  dateOfBirth: (person.nomineeDob || person.dob) ? new Date(person.nomineeDob || person.dob).toISOString() : undefined,
-                  phone: (() => {
-                    const digits = (cleanConnectedPhone(person.nomineeContact) || (
-                      (!person.nomineeName || person.nomineeName.trim().toLowerCase() === person.name.trim().toLowerCase()) ? cleanConnectedPhone(person.contactNo) : ''
-                    )).replace(/\D/g, '');
-                    return digits.length === 10 ? digits : undefined;
-                  })(),
-                });
-              } catch { /* ignore */ }
-            }
           }
-        }
+        });
+
+        await Promise.all([...createDocPromises, ...createMemberPromises]);
       }
-      await qc.invalidateQueries({ queryKey: ['policies'] });
-      await qc.refetchQueries({ queryKey: ['policies'] });
+
+      qc.invalidateQueries({ queryKey: ['policies'] });
       qc.invalidateQueries({ queryKey: ['contacts'] });
       setSelectedQuickFilter('ALL');
       setSearch('');
@@ -7463,12 +7707,23 @@ export default function Policies() {
                     </div>
                   </div>
 
-                  {isViewMode && showPhcFields && phcPolicyYears.length > 0 && (() => {
+                  {showPhcFields && phcPolicyYears.length > 0 && (() => {
                     const selectedYear = phcPolicyYears.find(year => year.yearNo === selectedPhcPolicyYear)
                       || phcPolicyYears.find(year => new Date() >= year.startDate && new Date() <= year.endDate)
                       || phcPolicyYears[0];
                     return (
                       <div className="space-y-3 rounded-2xl border border-teal-100 bg-white p-3 sm:p-4 shadow-2xs">
+                        {isPhcPolicyDetailsLoading && (
+                          <p className="text-[11px] font-semibold text-slate-500">Loading PHC entries...</p>
+                        )}
+                        {isPhcPolicyDetailsError && (
+                          <p role="alert" className="text-[11px] font-semibold text-rose-600">
+                            Unable to load PHC checkup entries.
+                            <button type="button" onClick={() => refetchPhcPolicyDetails()} className="ml-1 underline">
+                              Retry
+                            </button>
+                          </p>
+                        )}
                         <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                           {phcPolicyYears.map(year => {
                             const isCurrentYear = new Date() >= year.startDate && new Date() <= year.endDate;
@@ -7499,7 +7754,7 @@ export default function Policies() {
                                 </span>
                                 <span className="mt-1 block text-[9px] font-semibold">{year.startDateLabel} – {year.endDateLabel}</span>
                                 <span className="mt-1 block text-[9px] font-bold">
-                                  {year.isEligible ? `${year.familyMembers.length} family PHC entr${year.familyMembers.length === 1 ? 'y' : 'ies'}` : 'Not eligible yet'}
+                                  {year.isEligible ? `${year.familyMembers.length} PHC entr${year.familyMembers.length === 1 ? 'y' : 'ies'}` : 'Not eligible yet'}
                                 </span>
                                 {year.isEligible && (
                                   <span className="mt-1 block text-[9px] font-extrabold text-blue-700">
@@ -7514,7 +7769,7 @@ export default function Policies() {
                         <div className="rounded-xl border border-slate-200">
                           <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 bg-slate-50 px-3 py-2">
                             <div>
-                              <p className="text-xs font-extrabold text-slate-800">Year {selectedYear.yearNo} Family PHC</p>
+                              <p className="text-xs font-extrabold text-slate-800">Year {selectedYear.yearNo} PHC</p>
                               <p className="text-[10px] font-semibold text-slate-500">{selectedYear.startDateLabel} – {selectedYear.endDateLabel}</p>
                             </div>
                             <div className="flex items-center gap-2">
@@ -7544,7 +7799,7 @@ export default function Policies() {
                           ) : (
                             <p className="px-3 py-4 text-center text-[11px] font-semibold text-slate-500">
                               {selectedYear.isEligible
-                                ? 'No family PHC entries are recorded for this policy year.'
+                                ? 'No PHC entries are recorded for this policy year.'
                                 : `PHC eligibility starts ${format(selectedYear.eligibilityStartDate, 'dd MMM yyyy')}.`}
                             </p>
                           )}
@@ -7600,8 +7855,8 @@ export default function Policies() {
                                   <input
                                     type="number"
                                     {...register('phcAmount')}
-                                    min={phcFamilyAllocations.length > 0
-                                      ? (Number(phcExtraDetails.utilizedAmount) || 0) + sumPhcFamilyAllocations(phcFamilyAllocations)
+                                    min={activeYearFamilyAllocations.length > 0
+                                      ? (Number(activePhcDetails.utilizedAmount) || 0) + sumPhcFamilyAllocations(activeYearFamilyAllocations)
                                       : undefined}
                                     className="input w-full h-10 text-xs rounded-xl bg-white border border-slate-200 focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
                                     placeholder="e.g. 5000"
@@ -7612,7 +7867,7 @@ export default function Policies() {
                                   <label className="label text-[10px] font-extrabold text-slate-900 uppercase tracking-wider block mb-1">PHC Balance Amount (₹)</label>
                                   <input
                                     type="text"
-                                    value={`₹${Math.max(0, (Number(watch('phcAmount')) || 0) - (Number(phcExtraDetails.utilizedAmount) || 0) - sumPhcFamilyAllocations(phcFamilyAllocations))}`}
+                                    value={`₹${Math.max(0, (Number(watch('phcAmount')) || 0) - (Number(activePhcDetails.utilizedAmount) || 0) - sumPhcFamilyAllocations(activeYearFamilyAllocations))}`}
                                     readOnly
                                     className="input w-full h-10 text-xs rounded-xl bg-white border border-slate-200 focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 font-bold text-slate-800"
                                   />
@@ -7684,9 +7939,10 @@ export default function Policies() {
 
                     {showPhcFields && (
                       <PhcFamilyAllocationButton
-                        allocations={phcFamilyAllocations}
-                        onChange={setPhcFamilyAllocations}
-                        availableAmount={Math.max(0, (Number(watch('phcAmount')) || 0) - (Number(phcExtraDetails.utilizedAmount) || 0))}
+                        allocations={activeYearFamilyAllocations}
+                        onChange={setActiveYearFamilyAllocations}
+                        availableAmount={Math.max(0, (Number(watch('phcAmount')) || 0) - (Number(activePhcDetails.utilizedAmount) || 0))}
+                        yearNo={activePhcYearNo}
                       />
                     )}
 
@@ -7728,15 +7984,15 @@ export default function Policies() {
                               {isCustomPhcPersonManual ? (
                                 <input
                                   type="text"
-                                  value={phcExtraDetails.insuredPersonName}
-                                  onChange={e => setPhcExtraDetails(p => ({ ...p, insuredPersonName: e.target.value }))}
+                                  value={activePhcDetails.insuredPersonName}
+                                  onChange={e => updateActivePhcDetails(p => ({ ...p, insuredPersonName: e.target.value }))}
                                   className="input w-full h-10 text-xs rounded-xl bg-white border border-slate-200"
                                   placeholder="Type insured person name"
                                 />
                               ) : (
                                 <CustomSelect
-                                  value={phcExtraDetails.insuredPersonName}
-                                  onChange={val => setPhcExtraDetails(p => ({ ...p, insuredPersonName: val }))}
+                                  value={activePhcDetails.insuredPersonName}
+                                  onChange={val => updateActivePhcDetails(p => ({ ...p, insuredPersonName: val }))}
                                   placeholder="Select Insured Person..."
                                   options={phcInsuredPersonOptions.length > 0 ? phcInsuredPersonOptions : [{ value: '', label: 'No persons added yet' }]}
                                   searchable
@@ -7747,8 +8003,8 @@ export default function Policies() {
                             <div>
                               <label className="label text-[10px] font-extrabold text-slate-900 uppercase tracking-wider block mb-1">PHC Booking Date</label>
                               <DatePicker
-                                value={phcExtraDetails.bookingDate}
-                                onDateChange={(val: string) => setPhcExtraDetails(p => ({ ...p, bookingDate: val }))}
+                                value={activePhcDetails.bookingDate}
+                                onDateChange={(val: string) => updateActivePhcDetails(p => ({ ...p, bookingDate: val }))}
                                 className="input w-full h-10 text-xs rounded-xl bg-white border border-slate-200"
                               />
                             </div>
@@ -7756,8 +8012,8 @@ export default function Policies() {
                             <div>
                               <label className="label text-[10px] font-extrabold text-slate-900 uppercase tracking-wider block mb-1">PHC Appointment Date</label>
                               <DatePicker
-                                value={phcExtraDetails.appointmentDate}
-                                onDateChange={(val: string) => setPhcExtraDetails(p => ({ ...p, appointmentDate: val }))}
+                                value={activePhcDetails.appointmentDate}
+                                onDateChange={(val: string) => updateActivePhcDetails(p => ({ ...p, appointmentDate: val }))}
                                 className="input w-full h-10 text-xs rounded-xl bg-white border border-slate-200"
                               />
                             </div>
@@ -7766,8 +8022,8 @@ export default function Policies() {
                               <label className="label text-[10px] font-extrabold text-slate-900 uppercase tracking-wider block mb-1">PHC Centre / Lab Name</label>
                               <input
                                 type="text"
-                                value={phcExtraDetails.centreName}
-                                onChange={e => setPhcExtraDetails(p => ({ ...p, centreName: e.target.value }))}
+                                value={activePhcDetails.centreName}
+                                onChange={e => updateActivePhcDetails(p => ({ ...p, centreName: e.target.value }))}
                                 className="input w-full h-10 text-xs rounded-xl bg-white border border-slate-200"
                                 placeholder="e.g. Dr. Lal PathLabs / SRL Diagnostic"
                               />
@@ -7777,8 +8033,8 @@ export default function Policies() {
                               <label className="label text-[10px] font-extrabold text-slate-900 uppercase tracking-wider block mb-1">PHC Centre / Lab City</label>
                               <input
                                 type="text"
-                                value={phcExtraDetails.centreCity}
-                                onChange={e => setPhcExtraDetails(p => ({ ...p, centreCity: e.target.value }))}
+                                value={activePhcDetails.centreCity}
+                                onChange={e => updateActivePhcDetails(p => ({ ...p, centreCity: e.target.value }))}
                                 className="input w-full h-10 text-xs rounded-xl bg-white border border-slate-200"
                                 placeholder="e.g. Mumbai / Delhi"
                               />
@@ -7814,12 +8070,12 @@ export default function Policies() {
                               <label className="label text-[10px] font-extrabold text-slate-900 uppercase tracking-wider block mb-1">PHC Utilized Amount (₹)</label>
                               <input
                                 type="number"
-                                value={phcExtraDetails.utilizedAmount}
+                                value={activePhcDetails.utilizedAmount}
                                 onChange={e => {
                                   const entered = Number(e.target.value) || 0;
-                                  const hasAllocations = phcFamilyAllocations.length > 0;
-                                  const maxUtilized = Math.max(0, (Number(watch('phcAmount')) || 0) - sumPhcFamilyAllocations(phcFamilyAllocations));
-                                  setPhcExtraDetails(p => ({
+                                  const hasAllocations = activeYearFamilyAllocations.length > 0;
+                                  const maxUtilized = Math.max(0, (Number(watch('phcAmount')) || 0) - sumPhcFamilyAllocations(activeYearFamilyAllocations));
+                                  updateActivePhcDetails(p => ({
                                     ...p,
                                     utilizedAmount: String(hasAllocations ? Math.min(entered, maxUtilized) : entered),
                                   }));
@@ -7832,8 +8088,8 @@ export default function Policies() {
                             <div>
                               <label className="label text-[10px] font-extrabold text-slate-900 uppercase tracking-wider block mb-1">Reimbursement / Cashless</label>
                               <CustomSelect
-                                value={phcExtraDetails.reimbursementCashless || 'CASHLESS'}
-                                onChange={val => setPhcExtraDetails(p => ({ ...p, reimbursementCashless: val }))}
+                                value={activePhcDetails.reimbursementCashless || 'CASHLESS'}
+                                onChange={val => updateActivePhcDetails(p => ({ ...p, reimbursementCashless: val }))}
                                 placeholder="Select Reimbursement / Cashless"
                                 options={[
                                   { value: 'CASHLESS', label: 'Cashless Checkup' },
@@ -7845,8 +8101,8 @@ export default function Policies() {
                             <div>
                               <label className="label text-[10px] font-extrabold text-slate-900 uppercase tracking-wider block mb-1">Report Received Date</label>
                               <DatePicker
-                                value={phcExtraDetails.reportReceivedDate}
-                                onDateChange={(val: string) => setPhcExtraDetails(p => ({ ...p, reportReceivedDate: val }))}
+                                value={activePhcDetails.reportReceivedDate}
+                                onDateChange={(val: string) => updateActivePhcDetails(p => ({ ...p, reportReceivedDate: val }))}
                                 className="input w-full h-10 text-xs rounded-xl bg-white border border-slate-200"
                               />
                             </div>
@@ -7854,8 +8110,8 @@ export default function Policies() {
                             <div>
                               <label className="label text-[10px] font-extrabold text-slate-900 uppercase tracking-wider block mb-1">Report & Bill Received Date</label>
                               <DatePicker
-                                value={phcExtraDetails.reportBillReceivedDate}
-                                onDateChange={(val: string) => setPhcExtraDetails(p => ({ ...p, reportBillReceivedDate: val }))}
+                                value={activePhcDetails.reportBillReceivedDate}
+                                onDateChange={(val: string) => updateActivePhcDetails(p => ({ ...p, reportBillReceivedDate: val }))}
                                 className="input w-full h-10 text-xs rounded-xl bg-white border border-slate-200"
                               />
                             </div>
@@ -7863,8 +8119,8 @@ export default function Policies() {
                             <div>
                               <label className="label text-[10px] font-extrabold text-slate-900 uppercase tracking-wider block mb-1">Report & Bill Submitted Date</label>
                               <DatePicker
-                                value={phcExtraDetails.reportBillSubmittedDate}
-                                onDateChange={(val: string) => setPhcExtraDetails(p => ({ ...p, reportBillSubmittedDate: val }))}
+                                value={activePhcDetails.reportBillSubmittedDate}
+                                onDateChange={(val: string) => updateActivePhcDetails(p => ({ ...p, reportBillSubmittedDate: val }))}
                                 className="input w-full h-10 text-xs rounded-xl bg-white border border-slate-200"
                               />
                             </div>
@@ -7872,8 +8128,8 @@ export default function Policies() {
                             <div>
                               <label className="label text-[10px] font-extrabold text-slate-900 uppercase tracking-wider block mb-1">Settlement Date</label>
                               <DatePicker
-                                value={phcExtraDetails.settlementDate}
-                                onDateChange={(val: string) => setPhcExtraDetails(p => ({ ...p, settlementDate: val }))}
+                                value={activePhcDetails.settlementDate}
+                                onDateChange={(val: string) => updateActivePhcDetails(p => ({ ...p, settlementDate: val }))}
                                 className="input w-full h-10 text-xs rounded-xl bg-white border border-slate-200"
                               />
                             </div>
@@ -7881,8 +8137,8 @@ export default function Policies() {
                             <div>
                               <label className="label text-[10px] font-extrabold text-slate-900 uppercase tracking-wider block mb-1">PHC Stage</label>
                               <CustomSelect
-                                value={phcExtraDetails.phcStage || 'TO_CONTACT'}
-                                onChange={val => setPhcExtraDetails(p => ({ ...p, phcStage: val }))}
+                                value={activePhcDetails.phcStage || 'TO_CONTACT'}
+                                onChange={val => updateActivePhcDetails(p => ({ ...p, phcStage: val }))}
                                 placeholder="Select Stage"
                                 options={PHC_STAGE_OPTIONS}
                               />
@@ -7891,8 +8147,16 @@ export default function Policies() {
                             <div>
                               <label className="label text-[10px] font-extrabold text-slate-900 uppercase tracking-wider block mb-1">PHC Claim Settled?</label>
                               <CustomSelect
-                                value={watch('phcClaimSettled') ? 'yes' : 'no'}
-                                onChange={val => setValue('phcClaimSettled', val === 'yes')}
+                                value={activePhcYearNo === 1
+                                  ? (watch('phcClaimSettled') ? 'yes' : 'no')
+                                  : ((activePhcDetails as any).claimSettled ?? (watch('phcClaimSettled') ? 'yes' : 'no'))}
+                                onChange={val => {
+                                  if (activePhcYearNo === 1) {
+                                    setValue('phcClaimSettled', val === 'yes');
+                                  } else {
+                                    updateActivePhcDetails(p => ({ ...p, claimSettled: val }));
+                                  }
+                                }}
                                 placeholder="Select Option"
                                 options={[
                                   { value: 'no', label: 'No' },
@@ -7906,9 +8170,9 @@ export default function Policies() {
                     )}
                     {showPhcFields && (
                       <PhcFamilyAllocations
-                        allocations={phcFamilyAllocations}
-                        onChange={setPhcFamilyAllocations}
-                        availableAmount={Math.max(0, (Number(watch('phcAmount')) || 0) - (Number(phcExtraDetails.utilizedAmount) || 0))}
+                        allocations={activeYearFamilyAllocations}
+                        onChange={setActiveYearFamilyAllocations}
+                        availableAmount={Math.max(0, (Number(watch('phcAmount')) || 0) - (Number(activePhcDetails.utilizedAmount) || 0))}
                         stageOptions={PHC_STAGE_OPTIONS}
                         familyMemberOptions={phcFamilyMemberOptions}
                       />

@@ -501,7 +501,9 @@ export default function EmiTrackingView({ selectedMonth }: { selectedMonth: stri
   const qc = useQueryClient();
   const { data: policiesRes, isLoading } = useQuery({
     queryKey: ['policies-emi-tracking'],
-    queryFn: () => policiesService.list({ limit: 2000 })
+    queryFn: () => policiesService.list({ limit: 2000 }),
+    staleTime: 60 * 1000,
+    gcTime: 10 * 60 * 1000,
   });
 
   useEffect(() => {

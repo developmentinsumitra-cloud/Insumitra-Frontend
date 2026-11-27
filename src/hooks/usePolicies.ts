@@ -4,19 +4,46 @@ import toast from 'react-hot-toast';
 import { useAuthStore } from '@store/auth.store';
 import { deleteOrRequestEntity } from '@utils/deleteAction';
 
-export function usePolicies(params?: Record<string, any>) {
-  return useQuery({ queryKey: ['policies', params], queryFn: () => policiesService.list(params), staleTime: 0 });
+export function usePolicies(params?: Record<string, any>, options?: { enabled?: boolean }) {
+  return useQuery({
+    queryKey: ['policies', params],
+    queryFn: () => policiesService.list(params),
+    staleTime: 60 * 1000,
+    gcTime: 10 * 60 * 1000,
+    enabled: options?.enabled ?? true,
+  });
 }
 
 export function usePolicy(id: string) {
-  return useQuery({ queryKey: ['policies', id], queryFn: () => policiesService.get(id), enabled: !!id });
+  return useQuery({
+    queryKey: ['policies', id],
+    queryFn: () => policiesService.get(id),
+    enabled: !!id,
+    staleTime: 60 * 1000,
+    gcTime: 10 * 60 * 1000,
+  });
 }
 
 export function useCreatePolicy() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: policiesService.create,
-    onSuccess: () => {
+    onSuccess: (res: any) => {
+      const created = res?.data?.data || res?.data || res;
+      if (created && (created.id || created._id)) {
+        qc.setQueriesData({ queryKey: ['policies'] }, (old: any) => {
+          if (!old) return old;
+          const pid = created.id || created._id;
+          const prependRow = (list: any[]) => {
+            const exists = list.some(item => item.id === pid || item._id === pid);
+            return exists ? list : [created, ...list];
+          };
+          if (Array.isArray(old)) return prependRow(old);
+          if (Array.isArray(old.data)) return { ...old, data: prependRow(old.data) };
+          if (Array.isArray(old.data?.data)) return { ...old, data: { ...old.data, data: prependRow(old.data.data) } };
+          return old;
+        });
+      }
       qc.invalidateQueries({ queryKey: ['policies'] });
       qc.invalidateQueries({ queryKey: ['policies-emi-tracking'] });
       qc.invalidateQueries({ queryKey: ['policies', 'phc-tracking'] });
@@ -40,7 +67,22 @@ export function useUpdatePolicy() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: ({ id, body }: { id: string; body: any }) => policiesService.update(id, body),
-    onSuccess: () => {
+    onSuccess: (res: any, variables) => {
+      const updated = res?.data?.data || res?.data || res;
+      const targetId = variables.id;
+      if (targetId) {
+        qc.setQueriesData({ queryKey: ['policies'] }, (old: any) => {
+          if (!old) return old;
+          const updateItem = (item: any) =>
+            (item.id === targetId || item._id === targetId)
+              ? { ...item, ...variables.body, ...(updated && typeof updated === 'object' ? updated : {}) }
+              : item;
+          if (Array.isArray(old)) return old.map(updateItem);
+          if (Array.isArray(old.data)) return { ...old, data: old.data.map(updateItem) };
+          if (Array.isArray(old.data?.data)) return { ...old, data: { ...old.data, data: old.data.data.map(updateItem) } };
+          return old;
+        });
+      }
       qc.invalidateQueries({ queryKey: ['policies'] });
       qc.invalidateQueries({ queryKey: ['policies-emi-tracking'] });
       qc.invalidateQueries({ queryKey: ['policies', 'phc-tracking'] });
@@ -102,4 +144,3 @@ export function useBulkAssignPolicies() {
     onError: (e: any) => toast.error(e?.response?.data?.message ?? 'Failed to reassign policies'),
   });
 }
-

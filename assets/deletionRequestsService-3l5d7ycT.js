@@ -1,0 +1,1 @@
+import{au as t}from"./index-DzQmh908.js";const o={requestDeletion:async(e,s,r)=>(await t.post("/deletion-requests",{entityType:e,entityId:s,reason:r})).data,getRequests:async e=>(await t.get("/deletion-requests",{params:e})).data,resolveRequest:async(e,s)=>(await t.put(`/deletion-requests/${e}/resolve`,s)).data};export{o as d};

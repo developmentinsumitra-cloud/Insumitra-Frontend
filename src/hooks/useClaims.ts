@@ -4,23 +4,55 @@ import toast from 'react-hot-toast';
 import { useAuthStore } from '@store/auth.store';
 import { deleteOrRequestEntity } from '@utils/deleteAction';
 
-export function useClaims(params?: Record<string, any>) {
-  return useQuery({ queryKey: ['claims', params], queryFn: () => claimsService.list(params), staleTime: 2 * 60_000 });
+export function useClaims(params?: Record<string, any>, options?: { enabled?: boolean }) {
+  return useQuery({
+    queryKey: ['claims', params],
+    queryFn: () => claimsService.list(params),
+    staleTime: 60 * 1000,
+    gcTime: 10 * 60 * 1000,
+    enabled: options?.enabled ?? true,
+  });
 }
 
 export function useClaim(id: string) {
-  return useQuery({ queryKey: ['claims', id], queryFn: () => claimsService.get(id), enabled: !!id });
+  return useQuery({
+    queryKey: ['claims', id],
+    queryFn: () => claimsService.get(id),
+    enabled: !!id,
+    staleTime: 60 * 1000,
+    gcTime: 10 * 60 * 1000,
+  });
 }
 
 export function useClaimSummary() {
-  return useQuery({ queryKey: ['claims', 'summary'], queryFn: () => claimsService.summary() });
+  return useQuery({
+    queryKey: ['claims', 'summary'],
+    queryFn: () => claimsService.summary(),
+    staleTime: 60 * 1000,
+    gcTime: 10 * 60 * 1000,
+  });
 }
 
 export function useCreateClaim() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: claimsService.create,
-    onSuccess: () => {
+    onSuccess: (res: any) => {
+      const created = res?.data?.data || res?.data || res;
+      if (created && (created.id || created._id)) {
+        qc.setQueriesData({ queryKey: ['claims'] }, (old: any) => {
+          if (!old) return old;
+          const cid = created.id || created._id;
+          const prependRow = (list: any[]) => {
+            const exists = list.some(item => item.id === cid || item._id === cid);
+            return exists ? list : [created, ...list];
+          };
+          if (Array.isArray(old)) return prependRow(old);
+          if (Array.isArray(old.data)) return { ...old, data: prependRow(old.data) };
+          if (Array.isArray(old.data?.data)) return { ...old, data: { ...old.data, data: prependRow(old.data.data) } };
+          return old;
+        });
+      }
       qc.invalidateQueries({ queryKey: ['claims'] });
       qc.invalidateQueries({ queryKey: ['contact-activity'] });
       toast.success('Claim created');
@@ -33,7 +65,18 @@ export function useUpdateClaimStatus() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: ({ id, status }: { id: string; status: string }) => claimsService.updateStatus(id, status),
-    onSuccess: () => {
+    onSuccess: (res: any, variables) => {
+      const targetId = variables.id;
+      if (targetId) {
+        qc.setQueriesData({ queryKey: ['claims'] }, (old: any) => {
+          if (!old) return old;
+          const updateItem = (item: any) => (item.id === targetId || item._id === targetId) ? { ...item, status: variables.status } : item;
+          if (Array.isArray(old)) return old.map(updateItem);
+          if (Array.isArray(old.data)) return { ...old, data: old.data.map(updateItem) };
+          if (Array.isArray(old.data?.data)) return { ...old, data: { ...old.data, data: old.data.data.map(updateItem) } };
+          return old;
+        });
+      }
       qc.invalidateQueries({ queryKey: ['claims'] });
       qc.invalidateQueries({ queryKey: ['contact-activity'] });
       toast.success('Status updated');

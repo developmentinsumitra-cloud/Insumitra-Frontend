@@ -269,7 +269,7 @@ export interface FamilyMemberModalProps {
     fullName?: string;
   };
   employeesList: any[];
-  onSave: (member: Record<string, any>) => void;
+  onSave: (member: Record<string, any>) => void | Promise<void>;
 }
 
 const sanitizeLocalPhone = (p: string) => {
@@ -427,6 +427,8 @@ export default function FamilyMemberModal({
   onSave,
 }: FamilyMemberModalProps) {
   const firstNameInputRef = useRef<HTMLInputElement | null>(null);
+  const savingRef = useRef(false);
+  const [isSaving, setIsSaving] = useState(false);
   const [formData, setFormData] = useState<Record<string, any>>(() => buildInitialFormData(initialData, primaryContact));
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
   const [isViewMode, setIsViewMode] = useState<boolean>(Boolean(isEditing));
@@ -441,6 +443,8 @@ export default function FamilyMemberModal({
   if (open !== prevOpenRef.current) {
     prevOpenRef.current = open;
     if (open) {
+      savingRef.current = false;
+      setIsSaving(false);
       setFormData(buildInitialFormData(initialData, primaryContact));
       setCollapsed({});
       setIsViewMode(Boolean(isEditing));
@@ -449,6 +453,8 @@ export default function FamilyMemberModal({
 
   useEffect(() => {
     if (open) {
+      savingRef.current = false;
+      setIsSaving(false);
       setFormData(buildInitialFormData(isEditing ? initialData : null, primaryContact));
       setCollapsed({});
       setIsViewMode(Boolean(isEditing));
@@ -512,7 +518,8 @@ export default function FamilyMemberModal({
     toast.success('Copied address from Primary Contact');
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
+    if (savingRef.current || isSaving) return;
     if (!formData.relation || !formData.relation.trim()) {
       toast.error('Please select a relationship with primary contact.');
       return;
@@ -558,8 +565,15 @@ export default function FamilyMemberModal({
       occupationType: formData.occupationType || formData.occupation || '',
     };
 
-    onSave(finalData);
-    onClose();
+    savingRef.current = true;
+    setIsSaving(true);
+    try {
+      await Promise.resolve(onSave(finalData));
+      onClose();
+    } catch {
+      savingRef.current = false;
+      setIsSaving(false);
+    }
   };
 
   return (
@@ -601,10 +615,11 @@ export default function FamilyMemberModal({
               </button>
               <button
                 type="button"
+                disabled={isSaving}
                 onClick={handleSave}
-                className="px-5 py-2 text-xs font-bold text-white bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 shadow-md shadow-blue-500/25 rounded-xl transition-all cursor-pointer"
+                className="px-5 py-2 text-xs font-bold text-white bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 shadow-md shadow-blue-500/25 rounded-xl transition-all cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
               >
-                {isEditing ? 'Update Family Member' : 'Save Family Member'}
+                {isSaving ? 'Saving...' : (isEditing ? 'Update Family Member' : 'Save Family Member')}
               </button>
             </>
           )}
@@ -1179,7 +1194,7 @@ export default function FamilyMemberModal({
                       value={formData.state || ''}
                       disabled={isViewMode}
                       options={INDIAN_STATES_AND_UTS}
-                      onChange={val => setFormData(p => ({ ...p, state: val, district: '' }))}
+                      onChange={val => setFormData(p => ({ ...p, state: val, ...(p.state !== val ? { district: '' } : {}) }))}
                     />
                   </div>
                   <div>
@@ -1201,6 +1216,7 @@ export default function FamilyMemberModal({
                     </label>
                     <input
                       type="text"
+                      autoComplete="off"
                       className="input w-full focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 rounded-xl transition-all"
                       placeholder="e.g. Pune"
                       value={formData.city || ''}
@@ -1213,6 +1229,7 @@ export default function FamilyMemberModal({
                     </label>
                     <input
                       type="text"
+                      autoComplete="off"
                       className="input w-full focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 rounded-xl transition-all"
                       placeholder="000000"
                       value={formData.pincode || ''}
@@ -1224,6 +1241,7 @@ export default function FamilyMemberModal({
                       Street Address / House No
                     </label>
                     <textarea
+                      autoComplete="off"
                       className="input w-full text-xs focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 rounded-xl transition-all"
                       rows={2}
                       placeholder="Flat No, Street, Landmark..."
